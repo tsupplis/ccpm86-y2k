@@ -8,6 +8,7 @@ Currently the supported OSes are
 - Concurrent DOS 4.1
 - DOS Plus 1.2
 
+Only the PC/XT/AT targets have been tested. I suspect they should work with compupro or others too. I plan to simulators for compupro and rc759 but any help would be welcome.
 
 | Utility      | CCP/M 3.1 | CDOS 3.2  | CDOS 4.1  | DOS Plus 1.2|
 |--------------|-----------|-----------|-----------|-------------| 
