@@ -1,4 +1,4 @@
-# Concurrent CP/M-86/Concurrent DOS Y2K Patches
+# Concurrent CP/M-86 & Concurrent DOS Y2K Patches
 
 This projects regroups patch versions of Concurrent Y2K OS utilties.
 
