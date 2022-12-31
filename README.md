@@ -8,11 +8,13 @@ Currently the supported OSes are
 - Concurrent DOS 4.1
 - DOS Plus 1.2
 
+
 | Utility      | CCP/M 3.1 | CDOS 3.2  | CDOS 4.1  | DOS Plus 1.2|
 |--------------|-----------|-----------|-----------|-------------| 
 | SDIR         | Fixed     | Fixed     | Fixed     | Fixed       |
 | DATE         | Fixed     | Compliant | Compliant | Compliant   |
 | SHOW         | Fixed     | Fixed     | Compliant | Compliant   |
+* Fixed indicates that one of the tools need to be updated on the OS distribution.
 
 - Concurrent DOS XM 6.21 seems fully ocmpliant
 
