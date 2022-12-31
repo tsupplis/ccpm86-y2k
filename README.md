@@ -28,7 +28,7 @@ A cleaned-up distribution and kernel is available at https://github.com/tsupplis
 
 ## Sources and Build
 
-To come .... the sources are in PLM on http://www.cpm.z80.de. I may be complicated to standardize a toolset.
+To come .... the sources are in PL/M on http://www.cpm.z80.de. It may be complicated to standardize a toolset.
 
 In the meantime, the code pattern corrected on all those tools is the same:
 
@@ -56,4 +56,4 @@ emit$date$time: procedure;
 
 The fix is on date display > 99
 
-date is just a bit more involved.
+The date command code is just a bit more involved. The fixes mimic the Y2K fixes of CP/M 3.0 for 8080.
