@@ -27,3 +27,31 @@ A cleaned-up distribution and kernel is available at https://github.com/tsupplis
 ## Sources and Build
 
 To come .... the sources are in PLM on http://www.cpm.z80.de. I may be complicated to standardize a toolset.
+
+In the meantime, the code pattern corrected on all those tools is the same:
+
+```
+emit$date$time: procedure;
+    if tod.opcode = 0 then
+      do;
+      call emitn(.day$list(shl(week$day,2)));
+      call emitchar(' ');
+      end;
+    call emit$slant(month);
+    call emit$slant(day);
+    if year>99 then
+    do;
+        year=year-100;
+    end;
+    call emit$bin$pair(year);
+    call emitchar(' ');
+    call emit$colon(hrs);
+    call emit$colon(min);
+    if tod.opcode = 0 then
+      call emit$bcd$pair(sec);
+    end emit$date$time;
+``
+
+The fix is on date display > 99
+
+date is just a bit more involved.

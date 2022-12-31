@@ -1,0 +1,17 @@
+**/*.lock
+**/*.lha
+**/*.zip
+**/.D*
+**/*.log
+**/*.sys
+**/*.lib
+**/.*.swp
+**/*.obj
+**/*.o
+**/*.h86
+**/*.sym
+**/*.lst
+**/*.map
+**/.vscode
+private/**
+**/*.img
