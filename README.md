@@ -16,7 +16,7 @@ Currently the supported OSes are
 
 - Concurrent DOS XM 6.21 seems fully ocmpliant
 
-You can go to github.com/tsupplis/cpm86-kernel and github.com/tsupplis/cpm86-hacking for CP/M-86 1.1 Y2K compliance.
+You can go to https://github.com/tsupplis/cpm86-kernel and https://github.com/tsupplis/cpm86-hacking for CP/M-86 1.1 Y2K compliance.
 
 ## Where to find CP/M-86 and Concurrent CP/M-86?
 
