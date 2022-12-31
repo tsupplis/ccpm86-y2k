@@ -22,7 +22,7 @@ You can go to https://github.com/tsupplis/cpm86-kernel and https://github.com/ts
 
 ## Where to find CP/M-86 and Concurrent CP/M-86?
 
-The source for CP/M-86 dnd Concurrent CP/M-86 oc, sources and binaries is http://www.cpm.z80.de.
+The source for CP/M-86 and Concurrent CP/M-86 oc, sources and binaries is http://www.cpm.z80.de.
 
 A cleaned-up distribution and kernel is available at https://github.com/tsupplis/cpm86-kernel. This distribution is working well in virtual environments, patched with all known patches, 'y2k' friendly (it contains the version of tod which sources are in this project) and AT friendly.
 
