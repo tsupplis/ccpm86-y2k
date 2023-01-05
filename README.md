@@ -53,7 +53,7 @@ emit$date$time: procedure;
     if tod.opcode = 0 then
       call emit$bcd$pair(sec);
     end emit$date$time;
-``
+```
 
 The fix is on date display > 99
 
