@@ -57,13 +57,13 @@ The `binaries/` directory contains all the compiled CP/M-86 `.cmd` executables. 
 
 The sources are written in Intel PL/M-86 and ASM-86, located in the `src/` directory. A `Makefile` is provided to rebuild all tools.
 
-> **Caveat:** Intel PL/M is not yet integrated into the build toolchain. The `PLM86` variable in the Makefile references `intel_plm86` which must be provided separately.
-
 ### Dependencies
 
 The build relies on the cross-development toolchain from:
 
 - **[cpm86-crossdev](https://github.com/tsupplis/cpm86-crossdev)** — provides the assemblers, linker, and CP/M-86 build utilities used by the Makefile (`cpm_asm86`, `cpm_gencmd`, `pcdev_rasm86`, `pcdev_linkcmd`)
+
+> **Caveat:** Intel PL/M is not yet integrated into the build toolchain. The `PLM86` variable in the Makefile references `intel_plm86` which must be provided separately. (in plan for incorporation in cpm86-crossdev)
 
 ### Building
 
