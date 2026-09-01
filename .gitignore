@@ -2,6 +2,7 @@
 **/*.lha
 **/*.zip
 **/.D*
+**/*.lin
 **/*.log
 **/*.sys
 **/*.lib
@@ -15,3 +16,8 @@
 **/.vscode
 private/**
 **/*.img
+
+src/*.cmd
+
+**/.*.swp
+**/.DS_Store
