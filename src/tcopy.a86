@@ -1,0 +1,239 @@
+;****************************************************************
+;*								*
+;*	TCOPY - Example program to write the system track	*
+;*		for a Concurrent CP/M-86 Boot Disk on the	*
+;*		IBM Personel Computer				*
+;*								*
+;****************************************************************
+
+;	This program is used to read a binary image file of
+;	track 0.  This track is used to bootstrap Concurrent
+;	CP/M-86.  The file TCOPY reads has no CMD header and
+;	must be the same size as the track we are going
+;	to write.
+
+;	This program is intended to serve as an example
+;	to be modified by the OEM for differently sized loaders,
+;	and differently sized system track(s).
+
+;	Note: TCOPY must be run under CP/M-86 and not Concurrent
+;	CP/M-86 since TCOPY performs direct BIOS calls.
+
+;	The command
+;	GENCMD TCOPY
+;	is used to generate the CMD form of this program. 
+
+title 'TCOPY - Copy Track 0'
+
+;CP/M-86, CCP/M-86 function names
+
+;console functions
+c_read		equ	1
+c_writebuf	equ	9
+
+;file functions
+f_open		equ	15
+f_readrand	equ	33
+f_setdma	equ	26
+f_setdmaseg	equ	51
+
+;drive functions
+drv_get		equ	25
+
+;system functions
+s_termcpm	equ	0
+s_dirbios	equ	50
+
+;direct Bios Parameter Block
+bpb_func	equ	byte ptr 0
+bpb_cx		equ	word ptr 1
+bpb_dx		equ	word ptr 3
+
+
+;ASCII linefeed and carriage return
+lf	equ	10
+cr	equ	13
+
+;how many 128 byte records to read for a loader image
+records_to_read		equ	8 * 4
+				;8 = number of physical sectors per track
+				;4 = number of 128 sectors per
+				;physical sector
+
+cseg				;use CCP stack
+	mov cl,c_writebuf	;display sign on message
+	mov dx,offset sign_on_msg
+	int 224 
+	mov cl,drv_get		;get default drive number
+	int 224
+	test al,al		;must run on drive A:
+	jz drive_ok
+	  mov dx,offset drive_msg
+
+	  jmp error
+
+drive_ok:
+	mov cl,f_open		;open the file given as
+	mov dx,offset fcb	;the 1st command parameter,
+	int 224			;it is put at 05CH by
+	cmp al,0ffh		;the program load
+	jne file_ok
+	  mov dx,offset open_msg
+	  jmp error
+
+file_ok:
+	mov current_dma,offset track0_buffer
+	mov r0,0		;start with sector 0, assume
+	mov cx,records_to_read	;no CMD header in the file
+
+
+file_read:
+	push cx			;keep the record count
+	mov cl,f_setdma
+	mov dx,current_dma
+	int 224
+	mov cl,f_readrand	;user r0,r1,r2 for random
+	mov dx,offset fcb	;reads
+	int 224
+	pop cx			;restore the record count
+	test al,al
+	jz read_ok
+	  mov dx,offset read_msg
+	  jmp error
+read_ok:
+	add current_dma,128	;set the DMA for the next sector 
+	inc r0			;add one to the random record field
+	loop file_read
+
+;	We have the Track 0 image in RAM
+;	Ask for destination diskette
+
+next_diskette:
+
+	mov cl,c_writebuf
+	mov dx,offset new_disk_msg
+	int 224
+
+	mov cl,c_read		;wait for a keystroke
+	int 224
+
+;	Using CP/M-86 function 50, Direct bios call,
+;	write the track image in TRACK0_BUFFER to
+;	track 0, on drive A:.
+
+	call select_disk	;select A:
+	call set_track		;set track to 0
+	call set_dmaseg		;set DMA segment = DS
+	
+	mov current_sector,0	;sectors are relative to 0 in BIOS
+	mov current_dma,offset track0_buffer
+	mov cx,32		;number of 128 byte sectors to write
+next_sector:
+	push cx			;save sector count
+	call set_dmaoff
+	call set_sector
+	call write_sector
+	add current_dma,128	;next area of memory to write
+	inc current_sector	;next sector number
+	pop cx			;restore sector count
+	loop next_sector 
+	  jmp track_ok
+
+select_disk:
+	mov al,9		;BIOS function number of seldsk
+	xor cx,cx		;always drive A:
+	mov dx,cx
+	jmps bios
+set_track:
+	mov al,10		;BIOS function number of settrk
+	xor cx,cx		;go to track 0
+	jmps bios
+set_dmaseg:
+	mov al,17		;BIOS function number of setdmab
+	mov cx,ds		;dma segment we want to use
+	jmps bios
+set_dmaoff:
+	mov al,12		;BIOS function number of setdma
+	mov cx,current_dma
+	jmps bios
+set_sector:
+	mov al,11		;BIOS function number of setsec
+	mov cx,current_sector
+	jmps bios
+write_sector:
+	mov al,14		;BIOS function number of write sector
+	jmps bios		;error checking can be added here
+bios:
+	mov bx,offset bpb	;fill in BIOS Paramenter Block
+	mov bpb_func[bx],al
+	mov bpb_cx[bx],cx
+	mov bpb_dx[bx],dx
+	mov cl,s_dirbios
+	mov dx,bx
+	int 224
+	ret
+
+
+track_ok:
+	mov cl,c_writebuf	;does the user want to write
+	mov dx,offset continue_msg	;to another diskette ?
+	int 224
+	mov cl,c_read		;get response
+	int 224
+	and al,05FH		;make upper case
+	cmp al,'Y'
+	jne done
+	  jmp next_diskette
+
+error:
+	push dx
+	call crlf
+	pop dx
+	mov cl,c_writebuf
+	int 224
+
+done:
+	mov cx,s_termcpm
+	mov dx,cx
+	int 224
+
+crlf:
+	mov dx,offset crlf_msg
+	mov cl,c_writebuf
+	int 224
+	ret
+
+	
+
+dseg
+
+org	5ch
+fcb	rb	33
+r0	dw	0
+r3	db	0
+	
+org	100h
+sign_on_msg	db	'Example TCOPY for IBM PC', cr, lf
+		db	'Reads track image file and writes '
+		db	'it on track 0$'
+new_disk_msg	db	cr,lf,'Put destination diskette in A:'
+		db	cr,lf
+		db	'Strike any key when ready $'
+continue_msg	db	cr,lf,'Write another Track 0 (Y/N) ? $'
+
+crlf_msg	db	cr,lf,'$'
+
+
+drive_msg	db	'TCOPY runs only on drive A:$'
+open_msg	db	'Give file name containing track 0 '
+		db	'image, after TCOPY command$'
+read_msg	db	'File is not long enough$'
+write_msg	db	'Error writing on track 0$'
+
+track0_buffer	rb	1000H		;4K tracks
+
+bpb		rb	5		;direct Bios Parameter Block
+
+current_dma	dw	0
+current_sector	dw	0
+

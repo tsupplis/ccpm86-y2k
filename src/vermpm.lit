@@ -1,0 +1,16 @@
+
+/*   This utility requires MP/M or Concurrent function calls */
+
+/******	commented out for CCP/M-86 :
+declare	Ver$OS literally '11h',
+	Ver$Needs$OS literally '''Requires MP/M-86''';
+ ******/
+
+declare Ver$OS literally '14h',
+	Ver$Needs$OS literally '''Requires Concurrent CP/M-86''';
+
+
+declare	Ver$Mask literally '0fdh';	/* mask out Is_network bit */
+
+declare Ver$BDOS literally '30h';	/* minimal BDOS version rqd */
+

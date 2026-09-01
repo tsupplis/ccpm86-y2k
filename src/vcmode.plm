@@ -1,0 +1,295 @@
+$title('VCMODE.CMD - Set Virtual Console Background Mode')
+$compact
+vcmode:
+do;
+
+$include (:f2:copyrt.lit)
+$include (:f2:vaxcmd.lit)
+$include (:f2:comlit.lit)
+$include (:f2:mfunc.lit)
+$include (:f2:fcb.lit)
+
+dcl fcb (1) byte external;
+dcl buff (1) byte external;
+
+$include (:f2:sd.lit)
+
+dcl ccb$pointer pointer;
+dcl ccb$ptr structure ( offset address, segment address) at
+  (@ccb$pointer);
+$include (:f2:vccb.lit)
+dcl ccb based ccb$pointer ccb$structure;
+
+dcl ccpmproduct lit '14h';
+dcl bdosversion lit '31h';
+
+mon1: procedure (func,info) external;
+  declare func byte;
+  declare info address;
+end mon1;
+
+mon2: procedure (func,info) byte external;
+  declare func byte;
+  declare info address;
+end mon2;
+
+mon3: procedure (func,info) address external;
+  dcl func byte, info address;
+end mon3;
+
+mon4: procedure (func,info) pointer external;
+  dcl func byte, info address;
+end mon4;
+
+
+
+  /**************************************
+   *                                    *
+   *       B D O S   Externals          *
+   *                                    *
+   **************************************/
+
+print$char: procedure(char);
+  declare char byte;
+  call mon1(2,char);
+end print$char;
+
+print$console$buffer: procedure (buffer$address);
+  declare buffer$address address;
+  call mon1 (9,buffer$address);
+end print$console$buffer;
+
+version: procedure address;
+  return mon3(12,0);
+end version;
+
+  /**************************************
+   *                                    *
+   *       X D O S   Externals          *
+   *                                    *
+   **************************************/
+
+terminate: procedure;
+  call mon1 (143,0);
+end terminate;
+
+get$console$number: procedure byte;
+  return mon2 (153,0);
+end get$console$number;
+
+printb: procedure public;
+  call print$char(' ');
+end printb;
+
+pdecimal: procedure(v,prec,zerosup) public;
+                         /* print value v, field size = (log10 prec) + 1  */
+                         /* with leading zero suppression if zerosup = true */
+  declare v address,     /* value to print           */
+       prec address,     /* precision                */
+    zerosup boolean,     /* zero suppression flag    */
+          d byte;        /* current decimal digit    */
+
+  do while prec <> 0;
+    d = v / prec;                           /* get next digit           */
+    v = v mod prec;                         /* get remainder back to v  */
+    prec = prec / 10;                       /* ready for next digit     */
+    if prec <> 0 and zerosup and d = 0 then
+      call printb;
+    else
+    do;
+      zerosup = false;
+      call printchar('0'+d);
+    end;
+  end;
+end pdecimal;
+
+/*lbracket: procedure byte;  /* find left bracket in command tail return */
+/*  dcl i byte;              /* its index. if not found ret 0            */
+/*  i = 1;
+  do while i <= buff(0) and (buff(i) = ' ' or buff(i) = tab);
+    i = i + 1;
+  end;
+  if buff(i) = '[' then
+    return(i);
+  return(0);
+end lbracket;
+*/
+
+help: procedure;
+    call mon1(m$prt$buf, .(cr, lf, tab, tab, tab ,'VCMODE EXAMPLES$'));
+    call mon1(m$prt$buf, .(cr, lf, lf, 'vcmode', tab, tab, tab, tab, tab,
+      '(show background mode)$'));
+    call mon1(m$prt$buf, .(cr, lf, 'vcmode dynamic', tab, tab, tab, tab,
+      '(sets background mode)$'));
+    call mon1(m$prt$buf, .(cr, lf, 'vcmode buffered', tab, tab, tab, tab,
+      tab, '"$'));
+/*    call mon1(m$prt$buf, .(cr, lf, 'vcmode suspend', tab, tab, tab, tab,
+      tab, '"$'));*/
+    call mon1(m$prt$buf, .(cr, lf, 'vcmode size = 5', tab, tab, tab, tab,
+      '(sets buffered mode max file size in)$'));
+    call mon1(m$prt$buf, .(cr, lf, tab, tab, tab, tab, tab,
+      '(kilobytes, legal range is 1 to 8191)$'));
+    call mon1(m$prt$buf, .(cr, lf, tab, tab, tab, tab, tab,
+      '(also sets background mode to buffered)$'));
+/*    call mon1(m$prt$buf, .(cr, lf, 'vcmode size = 100H', tab, tab, tab,
+      '(legal range in HEX is 1H to 1FFFFH)$'));*/
+    call mon1(m$prt$buf, .(cr, lf, 'vcmode help', tab, tab, tab, tab,
+      '(prints this message)$'));
+    call mon1(m$prt$buf, .(cr, lf, '$'));
+    call terminate;
+end help;
+
+showstate: procedure (verb);
+  dcl (verb,state) address;
+    call mon1(m$prt$buf, .(cr,lf,'Background Mode For Virtual Console$'));
+    call pdecimal (console, 100, true);
+    call printb;
+    call mon1(m$prt$buf, verb);
+    state = ccb.state and csm$buffered;
+    if state = 0 then
+      call mon1(m$prt$buf, .(' Dynamic$'));
+    else
+    do;
+      call mon1(m$prt$buf, .(' Buffered', cr, lf, 'Maximum file size = $'));
+      call pdecimal(ccb.maxbufsiz, 10000, true);
+      call mon1(m$prt$buf, .('K$'));
+    end;
+    call mon1(m$prt$buf, .(cr, lf, '$'));
+    
+end show$state;
+
+$include (:f2:qd.lit)
+
+dcl qpb qpb$structure;
+
+read$change$mxq: procedure;
+  qpb.qaddr = ccb.vcmxq;
+  call mon1 (m$readq, .qpb);
+end read$change$mxq;
+
+write$change$mxq: procedure;
+  qpb.qaddr = ccb.vcmxq;
+  call mon1 (m$writeq, .qpb);
+end write$change$mxq;
+
+atohb: procedure (char) byte public;    /* convert ascii hex to nibble value */
+  declare char byte;
+  if char >= '0' and char <= '9' then
+    char = char - '0';
+  else if char >= 'A' and char <= 'F' then
+   char = char - 'A' + 10;
+  else
+    char = 255;	
+  return(char);
+end atohb;
+
+atodb: procedure (char) byte public;/* convert ascii decimal to nibble value */
+  declare char byte;
+  if char >= '0' and char <= '9' then
+    char = char - '0';
+  else
+    char = 255;	
+  return(char);
+end atodb;
+
+atoi: procedure(str) word;    /* convert ascii to 16 bit unsigned value */
+  dcl str pointer;
+  dcl (accum, temp) word;
+  dcl (val, i, len) byte;
+  dcl string based str (1) byte;
+  i, accum = 0;
+  if (len := findb(str, 'H', 5)) <> 0ffffh then        /* hex conversion */
+  do while (val := atohb(string(i))) <> 0ffh and i < len;
+    accum = shl(accum, 4) + val;
+    i = i + 1;
+  end;
+  else                       /* decimal is default base */
+  do while (val := atodb(string(i))) <> 0ffh and i < 5;
+    accum = 10 * accum + val;
+    if i = 4 then
+      temp = accum;
+    i = i + 1;
+  end;
+  if temp > accum then                 /* overflow */
+    accum = 0ffffh;
+  return(accum);
+end atoi;
+
+compare: procedure(ustr, ostr, minlen, maxlen) boolean;
+  dcl (ustr, ostr) pointer;            /* user string, option string */
+  dcl user$string based ustr (1) byte;
+  dcl (minlen, maxlen) byte;
+  dcl cmplen word;
+  cmplen = cmpb(ustr, ostr, maxlen);
+  if cmplen = 0ffffh or (user$string(cmplen) = ' ' and cmplen >= minlen) then
+    return(true);
+  if user$string(cmplen) = ' ' then
+  do;
+     call mon1(m$prt$buf, .(cr,lf,'Invalid Command Option.', cr ,lf, '$'));
+     call help;
+  end;
+  return(false);
+end compare;
+
+dcl vers address initial (0);
+dcl no$state lit '0ffh';
+dcl console byte;
+
+  /*
+    Main Program
+  */
+
+plmstart: procedure public;
+  dcl option$ptr byte;
+  dcl num word;
+  vers = version;
+  if (high(vers) <> ccpmproduct) then
+  do;
+    call print$console$buffer(.(cr,lf,'Requires Concurrent CP/M-86', cr, lf,
+      '$'));
+    call mon1(0,0);
+  end;
+
+  sysdat$pointer, ccb$pointer = mon4(m$sysdat, 0);  /* system data segment */
+  ccb$ptr.offset = sd.ccb + (console := mon2(m$getcns, 0)) * size(ccb);
+
+  call read$change$mxq;         /* MXQ is written in kernel terminate code */
+  if (ccb.state and csm$background) <> 0 then
+    call mon1(m$prt$buf, .(cr,lf,'Virtual Console not in foreground', cr, lf,
+      '$'));
+  else if buff(0) = 0 then
+    call show$state(.('is$'));  /* show current state */
+  else                          /* try to set state or show help message */
+  do;
+    fcb(f$type) = ' ';
+    if      compare(@fcb(f$name), @('BUFFERED'), 1, 8) then
+      ccb.state = ccb.state or csm$buffered;
+    else if compare(@fcb(f$name), @('DYNAMIC'), 1, 7) then
+      ccb.state = ccb.state and not double(csm$buffered);
+    else if compare(@fcb(f$name), @('HELP'), 1, 4) then
+      call help;
+    else if compare(@fcb(f$name), @('SIZE'), 1, 4) then  /* change to 2,4    */
+    do;                                    /* when suspend is put back in    */
+      num = atoi(@fcb(f$name2));
+      if num > 0 and num < 2000H then
+        ccb.maxbufsiz = num;     /* limit size to 16 bit record count */
+      else
+      do;
+        call mon1(m$prt$buf, .(cr,lf,'File size out of range', cr ,lf, '$'));
+        call help;
+      end;
+      ccb.state = ccb.state or csm$buffered;
+                                /* automatically sets to buffered */
+    end;
+    else
+    do;
+      call mon1(m$prt$buf, .(cr,lf,'Invalid Command Option.', cr ,lf, '$'));
+      call help;
+    end;
+    call show$state(.('set to$'));
+  end;
+  call terminate;
+    
+end plmstart;
+end vcmode;
+

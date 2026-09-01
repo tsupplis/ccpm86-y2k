@@ -1,0 +1,1686 @@
+        title   'CCP/M-86 Bdos Loader'
+;*****************************************************************
+;*****************************************************************
+;**                                                             **
+;**   B a s i c    D i s k   O p e r a t i n g   S y s t e m    **
+;**              I n t e r f a c e   M o d u l e                **
+;**                                                             **
+;*****************************************************************
+;*****************************************************************
+;
+;       Copyright (c) 1983
+;       Digital Research
+;       Box 579, Pacific Grove
+;       California
+;
+;       January 1983
+;
+;*****************************************************
+;
+bdosoffset      equ     0000h   ; offset of BDOS-86
+ldroffset 	equ	0906h	; offset of CLDCCPM
+biosoffset      equ     0900h   ; offset of BIOS-86
+;
+;******************* BDOS symbols: *******************
+;
+;
+true	equ	0ffffh
+false	equ	not true
+;
+;       Special 8086 symbols:
+;
+b       equ     byte ptr 0
+w       equ     word ptr 0
+;
+;*****************************************************
+;
+;       BIOS Function numbers
+;
+;io_const	equ	0	;console status function
+;io_conin	equ	1	;console input function
+;io_conout	equ	2	;console output function
+;io_listst	equ	3	;list status function
+;io_list	equ	4	;list output function
+;io_auxin	equ	5	;aux input function
+;io_auxout	equ	6	;aux output function
+;io_		equ	7
+;io_		equ	8
+io_seldsk	equ	9	;select disk function
+io_read		equ	10	;read disk function
+;io_write	equ	11	;write disk function
+;io_flush	equ	12	;flush buffers function
+;io_		equ	13
+
+;
+;	literal constants
+;
+enddir	EQU	0ffffh		;end of directory
+;
+;	file control block (fcb) constants
+;
+fcblen	EQU	32		;fcb length
+;empty	EQU	0e5h		;empty directory entry
+recsiz	EQU	128		;record size
+dirrec	EQU	recsiz/fcblen	;directory elts / record
+dskshf	EQU	2		;log2(dirrec)
+dskmsk	EQU	dirrec-1
+fcbshf	EQU	5		;log2(fcblen)
+maxext	EQU	31		;largest extent number
+maxmod	EQU	63		;largest module number
+namlen	EQU	15		;name length
+;lstfcb EQU	fcblen-1
+
+;drv	EQU	0		;drive field
+;f1	EQU	1		;file name byte 1 to 8
+;f2	EQU	2
+;f3	EQU	3
+;f4	EQU	4
+;f5	EQU	5
+;f6	EQU	6
+f7	EQU	7
+;f8	EQU	8
+;
+;	reserved file indicators
+;
+;rofile	EQU	9		;t1' -> read/only file
+;sysfil	EQU	10		;t2' -> system file
+;ARCHIV	EQU	11		;t3' -> FILE HAS BEEN ARCHIVED
+extnum	EQU	12		;extent number field
+chksum	EQU	13		;unfilled bytes field
+modnum	EQU	14		;data module number
+reccnt	EQU	15		;record count field
+dskmap	EQU	16		;disk map field
+nxtrec	EQU	fcblen
+;ranrec	EQU	nxtrec+1	;random record field (3 bytes)
+;
+;
+;       interrupt control indicators
+;
+interruptbit    equ     200h	; bit 9 of flag word
+;
+;
+;**************** end of BDOS symbols ****************
+
+;***************** BDOS entry module *****************
+;
+;       Perform branching, error handling and special
+;       8086 handling.
+;
+;
+	cseg
+	org	ldroffset
+ldr_entry:
+;
+	org     bdosoffset
+os_init:
+	jmp user_init
+os_entry:
+	jmp user_entry
+
+	sysdat	dw	0		;system data segment
+
+;=========
+user_init:
+;=========
+	mov ax,cs
+	mov ds,ax
+	mov es,ax
+	mov ss,ax
+	mov sp,offset bdosstack
+	mov bioscs,cs
+	callf dword ptr iosentry
+	mov biosco,bios_offset+3	;set io call to entry
+	xor ax,ax
+	push ds! mov ds,ax
+	mov word ptr .0380h,offset os_entry
+	mov .0382h,cs
+	pop ds
+	jmp ldr_entry
+
+;
+;-----------------------------------------------------
+;==========
+user_entry:
+;==========
+;	User Entry Point - enter here from a INT 224
+;
+;		REGISTER USAGE
+;	ENTRY			EXIT
+;	-----			----
+;  CL - Function Code	  AX - Copy of BX
+;  DX - Param     	  BX - Return
+;  DS - Seg Addr  	  CX - Error Code	
+;			  ES - Segment Return
+;
+;		DS,SI,DI,BP preserved through call
+;
+;	contents of users stack
+;		Flags
+;		CS
+;		IP		<- u_stack_ss,_sp
+;	DS =  Sysdat Segment
+;	u_wrkseg = user's DS
+;	u_retseg = user's ES
+
+	cld ! mov ax,ds			;AX = user's DS
+	push cs ! pop ds
+	mov u_retseg,es			;save user's ES
+	
+	mov u_wrkseg,ax			;wipe out earlier work seg
+
+        mov bx,sp			;enable interrupt if it was on
+	test ss:word ptr 4[bx],interruptbit
+        jz bdose1
+          sti
+bdose1:
+	push ds! pop es
+	push si! push di! push bp
+
+	call func			;chk netwrk, returns BX, ES, CX
+
+	pop bp! pop di! pop si		;setup user's environment and return
+	mov es,u_retseg			;restore user's ES
+	mov ds,u_wrkseg			;DS = user's entry DS
+	mov ax,bx			;parameter return BX = AX
+	iret				;back to user ...
+
+
+func:
+;----
+	cmp cl,14! jne fn1
+	  mov si,offset bdofunc+0
+	  jmp bdo_entry
+fn1:	cmp cl,15! jne fn2
+	  mov si,offset bdofunc+3
+	  jmp bdo_entry
+fn2:	cmp cl,20! jne fn3
+	  mov si,offset bdofunc+6
+	  jmp bdo_entry
+fn3:	cmp cl,26! je func26
+	cmp cl,32! je func32
+	cmp cl,44! je func44
+	cmp cl,51! je func51
+badfunc:
+	  mov bx,0ffffh			;return ffff for illegal function
+          ret
+;
+func26:		;set the subsequent dma address to info
+;======
+	mov dmaad,dx			;dmaad = info
+	ret
+
+func32:		;set user code
+;======
+
+	mov al,dl
+	cmp al,0ffh
+	jnz setusrcode
+	  mov bl,p_user			;interrogate user code instead
+	  ret
+setusrcode:
+	and al,0fh
+	mov p_user,al
+	ret				;jmp goback
+
+func44:		;set multi-sector count
+;======
+	mov al,dl
+	xor bx,bx
+	or al,al
+	jz return_not_ok
+	cmp al,129
+	jnb return_not_ok
+	  mov u_mult_cnt,al
+	  ret
+return_not_ok:
+	dec bx			;BX = 0ffffh
+	ret
+
+func51:		;set segment base for disk I/O
+;======
+        mov     dmabase,dx
+        ret
+
+;
+;*************** end BDOS entry module ***************
+
+;**************** BDOS Disk Functions ****************
+
+;*****************************************************
+;*
+;* bdos function table
+;*
+;*****************************************************
+
+	; structure of entry in functab
+
+btab_addr	equ	word ptr 0
+btab_flag	equ	byte ptr (btab_addr + word)
+bf_getmx	equ	001h		;get mxdisk queue
+bf_cshell	equ	002h		;conditional shell function
+
+	; bdos function table
+
+bdofunc	equ	offset $
+	dw func14   ! db 0001b  ; fxi14  equ 01h  ;select disk
+	dw func15   ! db 0001b  ; fxi15  equ 02h  ;open file
+	dw func20   ! db 0011b  ; fxi20  equ 07h  ;read sequential
+
+;========
+bdoentry:		; bdos module entry point
+;========
+;	entry:	SI = offset of bdos functab entry
+;		DX = argument
+;		DS = ES = system data area
+;	exit:	BX = return code
+
+	mov ax,word ptr p_dsk
+	mov word ptr seldsk,ax		;set default disk and user code
+
+	mov cx,zerolength ! xor ax,ax	;zero local variables
+	mov di,offset fcbdsk
+	rep stosb
+
+	mov info,dx			;info=dx
+
+	cmp mult_cnt,1 ! je noshell	;if mult_cnt <> 1 and
+	test cs:btabflag[si],bf_cshell	; func uses mult_cnt then
+	jnz shell			; use bdos multi sector shell
+noshell:
+	call call_bdos
+retmon:
+	mov bx,aret
+	ret
+;
+shell:
+;-----
+;	entry:	SI = offset of functab entry
+
+	mov shell_si,si
+	mov ax,dmaad! mov shell_dma,ax
+	mov ah,cs:btabflag[si]
+	call parsave33
+	mov shell_flag,true
+
+	mov al,mult_cnt
+mult_io1:
+	MOV MULT_NUM,AL
+	push ax
+	mov si,shell_si
+	mov dx,info
+	call call_bdos
+	mov bl,byte ptr aret
+	or bl,bl
+	jz no_shell_err
+	  mov bh,mult_cnt
+	  pop ax
+	  sub bh,al			;BH = # of successfull records 
+	  jmps shell03
+no_shell_err:
+	add dmaad,80h
+	pop ax! dec al
+	jnz mult_io1
+	xor bx,bx
+
+shell03:
+	mov aret,bx
+	mov ax,shell_dma! mov dmaad,ax
+	mov shell_flag,false
+	call parunsave
+	jmp retmon
+;
+call_bdos:
+;---------
+;	entry:	DX = argument
+;		SI = offset of bdos functab entry
+
+	call setdata			;ready to go to the function
+	mov savesp,sp
+	call cs:btab_addr[si]
+bdos_return:
+	cmp resel,0
+	je retmon5
+	  mov al,fcbdsk
+	  mov info_fcb,al
+retmon5:
+	cmp parcopfl,true
+	jne retmon6
+	  call parunsave		;copy local vars to uda
+retmon6:
+	ret
+;
+parsave33:	;copy 33 byte length FCB
+;---------
+	mov cl,33
+	;jmps parsave
+;
+parsave: 	;copy FCB from user segment to bdos segment
+;-------
+;	entry:	CL = length of FCB to save
+
+	test shell_flag,true
+	jnz parret
+	  mov parcopfl,true
+	  mov parlg,cl
+	  xor ch,ch
+	  mov si,info
+	  mov di,offset info_fcb
+	  push ds
+	  mov ds,parametersegment
+	  rep movsb
+	  pop ds
+parret:
+	ret
+;
+parunsave:	;copy local FCB to user segment
+;---------
+	test shell_flag,true
+	jnz parret
+	  mov cl,parlg
+	  xor ch,ch
+	  mov si,offset info_fcb
+	  mov di,info
+	  push es
+	  mov es,parametersegment
+	  rep movsb
+	  pop es
+	ret
+
+setlret1:
+	mov al,1
+staret:
+	mov lret,al
+	ret
+
+	;these functions added for mpm interface
+
+;*****************************************************
+;*
+;*	 bdos - xios interface
+;*
+;*****************************************************
+
+;======		========================
+xiosif:		; xios interface routine
+;======		========================
+;	entry:	AL = function number
+;		CX = argument 1
+;		DX = argument 2
+;	exit:	AX = BX = output
+
+	push es
+	callf dword ptr iosentry
+	cld! pop es
+	ret
+
+;========	================================
+rwxiosif:	; disk read/write xios interface
+;========	================================
+;	entry:	AL = function number
+;	exit:	AX = BX = output
+
+	mov dx,arecord
+	mov ch,byte ptr arecord+2
+	mov bl,curdsk
+	mov bh,1
+	xchg bh,mult_sec	;BH = multi sector count
+				; stack on entry to the xios
+	push bx			;   +C | DRV  | MCNT |
+	push track		;   +C |    TRACK    |
+	push sector		;   +8 |   SECTOR    |
+	push curdmabase		;   +6 |   DMA_SEG   |
+	push curdma		;   +4 |   DMA_OFF   |
+				;   +2 |   RET_SEG   |
+				; SP+0 |   RET_OFF   |
+	callf dword ptr iosentry
+	add sp,10		;remove parameters from stack
+	cld! push ds! pop es
+	ret
+
+;*****************************************************************
+;*****************************************************************
+;**								**
+;**   b a s i c	   d i s k   o p e r a t i n g	 s y s t e m	**
+;**								**
+;*****************************************************************
+;*****************************************************************
+
+;***************** bdos file system ******************
+
+;	error message handlers
+
+pererror:	;report permanent error
+;--------
+	mov ch,1
+	jmps goerr
+
+selerror:	;report select error
+;--------
+	mov curdsk,0ffh
+	mov ch,4
+goerr:
+	mov cl,0ffh
+	mov aret,cx			;set aret
+goback:
+	mov sp,save_sp
+	jmp bdos_return
+
+
+;	local subroutines for bios interface
+;-----------------------------------------------------
+
+move:		;block move data
+;----
+;	entry:	CL = length of data to move
+;		DX = source offset
+;		BX = destination offset
+
+	xor ch,ch
+	mov si,dx
+	mov di,bx
+	rep movsb
+	ret
+
+selectdisk:
+;----------
+;	select the disk drive given in AL, and fill
+;	the base addresses curtrka - alloca, then fill
+;	the values of the disk parameter block
+;	entry:	AL = disk to select
+;	exit:	C flag set if no error
+
+	mov cl,al			;current disk# to cl
+					;lsb of dl = 0 if not yet
+	mov al,io_seldsk		;logged in
+	call xiosif			;bx filled by call
+					;bx = 0000 if error,
+	or bx,bx			;otherwise disk headers
+	jz ret4				;rz - carry flag reset
+	add bx,8
+	mov si,bx
+	MOV di,OFFSET DPBADDR		;dx= source for move, bx=dest
+	mov cx,addlist			;addlist filled
+	rep movsb			;now fill the disk
+	mov si,dpbaddr			;parameter block
+	mov di,offset sectpt		;bx is destination
+	mov cx,dpblist
+	rep movsb			;data filled
+	mov cl,physhf			;convert # sectors per track
+	shl sectpt,cl			; from physical to logical
+					;set single/double map mode
+	mov al,byte ptr maxall+1	;largest allocation number
+	or al,al
+	jz retselect
+					;if high order of maxall not
+	  mov al,1			;zero then use double disk map
+retselect:
+	dec al
+	mov single,al			;true if single disk map mode
+	stc				;select disk function ok
+ret4:
+	ret
+
+rdbuff:		;read buffer and check if ok
+;------
+	mov al,io_read
+	call rwxiosif			;current drive, track,....
+
+diocomp:	;check for disk errors
+;-------
+;	entry:	AL = xios return code
+
+	or al,al! jz ret4		;rz
+	  jmp pererror			; no
+
+seek:		;seek the track given by arecord (actual record)
+;----
+	mov ax,arecord			;compute track/sector
+	xor dx,dx
+	mov dl,byte ptr arecord+2
+	div sectpt			;dx=sector, ax=track
+	add ax,offsetv
+	MOV TRACK,ax			;save bios/xios track
+	MOV CL,PHYSHF
+	SHR dx,CL			;PHY SECTOR = SHR(LOG SECTOR,PHYSHF)
+	MOV SECTOR,dx			;save bios/xios sector
+	ret
+
+;	utility functions for file access
+
+dmposition:	;compute disk map position for vrecord
+;----------
+;	exit:	AL = disk map position of vrecord
+
+	mov cl,blkshf			;shift count to CL
+	mov ch,vrecord			;current virtual record to a
+	shr ch,cl			;CH = shr(vrecord,blkshf)
+					;   = vrecord/2**(sect/block)
+	neg cl
+	add cl,7			;CL = 7 - blkshf
+	mov al,extval			;extent value and extmsk
+					;blkshf = 3,4,5,6,7
+					;CL = 4,3,2,1,0
+					;shift is 4,3,2,1,0
+	shl al,cl			;AL = shl(ext and extmsk,7-blkshf)
+	add al,ch			;add the previous
+					;shr(vrecord,blkshf) value
+					;AL is one of the following
+					;values, depending upon alloc
+					;bks blkshf
+					;1k   3	    v/8 + extval * 16
+					;2k   4	    v/16+ extval * 8
+					;4k   5	    v/32+ extval * 4
+					;8k   6	    v/64+ extval * 2
+					;16k  7	    v/128+extval * 1
+	ret				;with dm$position in a
+
+getdm:		;return disk map value from position given by cx
+;-----
+;	entry:	CX = index into disk map
+;	exit:	BX = disk map value at position CX
+
+	mov bx,offset info_fcb+dskmap
+	add bx,cx			;index by asingle byte value
+	cmp single,0			;single byte/map entry?
+	jz getdmd			;get disk map single byte
+	  mov bl,[bx]
+	  xor bh,bh
+	  ret				;with bx=00bb
+getdmd:
+	add bx,cx			;bx=.fcb(dm+1*2)
+	mov bx,[bx]			;return double precision value
+	ret
+
+index:		;compute disk block number from current fcb
+;-----
+;	exit:	BX = disk map value for vrecord in current fcb
+;		Z flag set according to value in BX
+
+	call dmposition			;0...15 in register al
+	MOV DMINX,AL
+	mov cl,al
+	xor ch,ch
+	call getdm			;value to bx
+	mov arecord,bx
+	or bx,bx
+	ret
+
+atran:		;compute actual record address, assuming index called
+;-----
+	mov cl,blkshf			;shift count to reg al
+	mov ax,arecord
+	xor bh,bh
+	mov bl,ah
+	shl ax,cl
+	shl bx,cl
+	xchg ax,bx
+	mov al,vrecord
+	and al,blkmsk			;masked value in al
+	mov blkoff,al
+	or bl,al
+	mov arecord,bx			;arecord=bx or
+					;(vrecord and blkmsk)
+	mov byte ptr arecord+2,ah
+	ret
+
+getfcb:		;set local variables from currently addressed fcb
+;------
+	mov al,info_fcb+nxtrec
+	mov vrecord,al			;vrecord=fcb(nxtrec)
+	cmp info_fcb+reccnt,0
+	jne getfcb0
+	  call get_dir_ext
+	  mov cl,al
+	  call set_rc
+getfcb0:
+	mov al,info_fcb+reccnt
+	cmp al,81h! jb getfcb1
+	  mov al,80h
+getfcb1:
+	mov rcount,al			;rcount=fcb(reccnt)
+	mov al,extmsk			;extent mask to a
+	and al,info_fcb+extnum		;fcb(extnum) and extmsk
+	mov extval,al
+	ret
+
+setfcb:		;place local values back into current fcb
+;------
+	mov al,1
+	add al,vrecord
+	mov info_fcb+nxtrec,al		;fcb(nxtrec)=vrecord+seqio
+	cmp info_fcb+reccnt,80h
+	jnb ret41			;dont reset if fcb(rc) > 7fh
+	mov al,rcount
+	mov info_fcb+reccnt,al		;fcb(reccnt)=rcount
+ret41:	ret
+
+getdptra:
+;--------
+; compute the address of a directory element at
+;  positon dptr in the buffer
+;	exit:	BX = buffa + dptr
+
+	mov bl,dptr
+	xor bh,bh
+	add bx,buffa		;bx = buffa + dptr
+	ret
+
+
+rddir:		;read the current directory record
+;-----
+	MOV ax,DCNT			;seek the record containing
+	MOV CL,DSKSHF! SHR ax,CL	; the current dir entry
+	MOV ARECORD,ax			;ARECORD = SHR(DCNT,DSKSHF)
+	MOV BYTE PTR ARECORD+2,0
+	MOV AH,3			;LOCATE COMMAND
+	CALL DEBLOCK_DIR
+	;JMPS SETDATA
+
+setdata:	;set data dma address
+;-------
+	MOV ax,DMABASE
+	MOV CUR_DMABASE,ax
+	MOV ax,DMAAD
+	MOV CURDMA,ax
+	RET
+
+endofdir:	;check if end of directory (dcnt = 0ffffh)
+;--------
+;	exit:	Z flag set if at end of directory
+
+	mov bx,offset dcnt
+
+test_ffff:
+;---------
+	cmp w[bx],0ffffh
+	ret
+
+setenddir:	;set dcnt to the end of directory (dcnt = 0ffffh)
+;---------
+	mov dcnt,enddir
+	ret
+
+read_dir:	;read next directory entry
+;--------
+
+	mov dx,dirmax			;in preparation for subtract
+	mov bx,dcnt
+	inc bx
+	mov dcnt,bx			;dcnt=dcnt+1
+					;continue while dirmax >= dcnt
+					;(dirmax-dcnt no cy)
+	sub dx,bx
+	jb setenddir			;yes, set dcnt to end
+					;of directory
+;	not at end of directory, seek next element
+					;cl=initialization flag
+	mov al,ldcnt
+	and al,dskmsk			;low(dcnt) and dskmsk
+	mov cl,fcbshf			;to multiply by fcb size
+	shl al,cl
+					;a = (low(dcnt) and dskmsk)
+					;shl fcbshf
+	mov dptr,al			;ready for next dir operation
+	or al,al
+	jnz ret71			;return if not a new record
+	call rddir			;read the directory record
+ret71:
+	ret
+
+compext:	;compare extent# in al with that in cl
+;-------
+;	entry:	AL,CL = extent numbers to compare
+;	exit:	Z flag set if extent numbers match
+;		BX,CX,DX = preserved
+
+	push cx				;save cx's original value
+	mov ch,extmsk
+	not ch				;ch has negated form of
+					;extent mask
+	and cl,ch			;low bits removed from cl
+	and al,ch			;low bits removed from al
+	sub al,cl
+	and al,maxext			;set flags
+	pop cx				;restore cx
+	ret
+
+get_dir_ext:
+;-----------
+;	compute directory extent from fcb
+;	scan fcb disk map backwards
+;	upon return dminx = 0 if no blocks are in fcb
+;	exit:	AL = directory extent number
+;		BX = .fcb(extnum)
+
+	mov bx,offset info_fcb+nxtrec	;BX = .fcb(vrecord)
+	mov dx,1001h			;DH = disk map position (rel to 1)
+					;DL = no blocks switch
+get_de1:
+	dec dh
+	dec bx				;decrement disk map ptr
+	cmp b[bx],0			;is disk map byte non-zero ?
+	jne get_de2			; yes
+	  or dh,dh			; no - continue scan
+	  jnz get_de1
+	  dec dl			;DL = 0 if no blocks found
+get_de2:
+	mov dminx,dl			;dminx = 0 if no blocks in fcb
+	cmp single,true			;are disk block indexes single byte ?
+	mov al,dh			;al = block offset in disk map
+	jz get_de3			;yes
+	  shr al,1			;divide block offset by 2
+
+;	al = last non-zero block index in fcb (rel to 0)
+;	compute ext offset from last non-zero block index by
+;	shifting block index right 7-blkshf
+
+get_de3:
+	mov cl,7
+	sub cl,blkshf
+	shr al,cl			;al = ext offset
+
+	mov ah,extmsk			;if ext offset > extmsk then
+	cmp ah,al			;  continue scan
+	jb get_de1
+
+;	dir ext = (fcb ext & (~extmsk) & maxext) | ext offset
+
+	mov bx,offset info_fcb+extnum	;bx = .fcb(ext)
+	mov cl,[bx]			;cl = fcb extent value
+	not ah				;ah = ~extmsk
+	and ah,maxext			;ah = ah & maxext
+	and ah,cl			;ah = ah & fcb extent
+	or al,ah			;al = dir ext
+	ret
+
+searchi:	;search initialization
+;-------
+	mov bx,offset info_fcb
+	mov srcha,bx			;searcha = .info_fcb
+	mov srchl,cl			;searchl = cl
+	ret
+
+search_name:	;search matching name
+;-----------
+	mov cl,namlen
+	;jmps search
+
+search:		;search for directory element at .info_fcb
+;------
+;	entry:	CL = search length
+
+	call searchi
+	call setenddir			;dcnt = enddir
+					;to start at the beginning
+					;(drop through to searchn)
+;
+searchn:
+;-------
+;	search for the next directory element, assuming
+;	a previous call on search which sets searcha and searchhl
+;	exit:	Z flag = 0 for successful searches
+
+	call read_dir			;read next dir element
+	call endofdir
+	jz srchfin
+					;skip to end if so
+					;not end of directory,
+					;scan for match
+	  mov dx,srcha			;dx=beginning of user fcb
+	  call getdptra			;bx = buffa+dptr
+	  mov cl,srchl			;length of search to cl
+	  xor ch,ch			;ch counts up, cl counts down
+
+	  mov al,[bx]			;is fcb an xfcb ?
+	  and al,11101111b
+	  cmp al,[bx]
+	  je srch_loop			;no
+	  jmps search_n
+srchfin:				;end of directory, or empty name
+lret_eq_ff:
+	mov al,255
+	mov ch,al
+	inc ch				;zero flag set on unsuccessful
+	jmp staret			;searches
+
+srchloop:
+	or cl,cl
+	jz endsearch
+	mov si,dx
+	lods al				;fcb character
+	and al,07fh
+					;scan next character if not
+					;chksum byte
+	cmp ch,chksum
+	jz srchok
+					;not the ubytes field,
+					;extent field
+	cmp ch,extnum			;may be extent field
+	jz srchext			;skip to search extent
+
+	  cmp ch,modnum			;is field module # ?
+	  jnz $+4			;no
+	    and al,3fh			;yes - mask off high order bits
+
+	  sub al,[bx]
+	  and al,7fh			;mask-out flags/extent modulus
+	  jnz searchn_jmp
+	  jmps srchok			;matched character
+
+srchext:				;AL = fcb character
+					;attempt an extent # match
+	push cx				;save counters
+	mov cl,[bx]			;directory character to c
+	call compext			;compare user/dir char
+	pop cx				;recall counters
+	jnz searchn_jmp			;skip if no match
+
+srchok:					;current character matches
+	inc dx! inc bx
+	inc ch! dec cl
+	jmps srchloop
+
+searchn_jmp:
+	jmp searchn
+
+endsearch:		;entire name matches, return dir position
+	xor al,al
+	mov lret,al
+	mov ch,al
+	inc ch				;zero flag reset on successful
+	ret				;searches
+
+check_wild:	;check for ? in file name or type
+;----------
+	mov bx,offset info_fcb
+	call chk_wild
+	jnz ret10
+	mov al,9			;extended error 9
+	jmp set_aret
+
+chk_wild:	;check fcb for ? marks
+;--------
+;	entry:	BX = .fcb(0)
+;	exit:	Z flag = 1 if ? mark found
+
+	mov cx,3f0bh			;ch = 3f, cl = 11
+chk_wild1:
+	inc bx				;advance fcb ptr
+	mov al,ch
+	sub al,[bx]
+	and al,ch
+	jz ret10			;rtn with z flag set if ? fnd
+	dec cl
+	jnz chk_wild1
+	or al,al			;rtn with z flag reset - no ?s
+ret10:	ret
+
+open:		;search for the directory entry, copy to fcb
+;----
+	call search_name
+	jz ret10			;return with lret=255 if end
+					;not end of directory,copy fcb
+opencopy:
+					;(referenced below to copy fcb
+	jmp	patch			; code for patch 6
+done:
+;	push bx				;bx = .fcb(modnum)
+;	dec bx! dec bx
+	mov ah,[bx]			;ah = extnum
+	push ax				;save extnum & modnum
+	call getdptra
+	mov dx,bx			;dx = .buff(dptr)
+	mov bx,offset info_fcb		;bx=.fcb(0)
+	mov cl,nxtrec			;length of move operation
+	call move			;from .buff(dptr) to .fcb(0)
+					;note that entire fcb is
+					;copied, including indicators
+	call get_dir_ext
+	mov cl,al			;cl = dir_ext
+	pop ax! pop bx
+	mov [bx],al			;restore modnum
+	dec bx! dec bx
+	mov [bx],ah			;restore extnum number
+
+;	bx = .user extent#, cl = dir extent#
+;	if user ext < dir ext then user := 128 records
+;	if user ext = dir ext then user := dir records
+;	if user ext > dir ext then user := 0 records
+
+set_rc:
+;------
+;	entry:	BX = .user extent #
+;		CL = dir extent #
+
+	xor  ch,ch
+	mov si,offset info_fcb+reccnt
+	mov al,[bx]			;al = current extent
+	sub al,cl			;compare fcb ext to dir ext
+	jz set_rc2			;fcb ext = dir ext
+					;  actual_rc = 0, fcb(rc) = fcb(rc)
+	  mov al,ch
+	  jae set_rc1			;fcb ext > dir ext
+					;  actual_rc = 0, fcb(rc) = 0
+
+	    mov al,128			;fcb ext < dir ext
+	    or al,[si]			;  fcb(rc) = 128 | fcb(rc)
+set_rc1:
+	  mov [si],al
+ret11:	  ret
+
+set_rc2:
+	cmp b[si],al			;is fcb(rc) = 0?
+	jnz ret11			;no
+	xor al,al			;AL = 0
+	mov b[si],al			;required by func 99
+	cmp dminx,al			;do blocks exist in fcb?
+	jz ret11			;no
+	mov b[si],80h			;fcb(rc) = 80h
+	ret
+
+restore_rc:
+;----------
+;	if actual_rc ~= 0 then fcb(rc) = actual_rc
+;	entry:	BX = .fcb(extnum)
+
+	mov al,info_fcb+reccnt
+	cmp al,81h
+	jb restore_rc1
+	  and al,7fh
+	  mov info_fcb+reccnt,al
+restore_rc1:
+	ret
+
+openreel:
+;--------
+;	close the current extent, and open the next one
+;	if possible.  rmf is true if in read mode.
+;	lret is set to 0 if successful
+
+	mov al,info_fcb+modnum
+	mov save_mod,al			;save current module #
+	mov bx,offset info_fcb+extnum
+	mov al,[bx]
+	mov cl,al
+	inc cl				;increment ext #
+	call comp_ext			;did we cross a dir fcb boundary ?
+	jnz $+5
+	  jmp openr3			;no
+	mov al,maxext
+	and al,cl
+	mov [bx],al			;update fcb extent field
+	jnz openr0			;branch if in same module
+
+;		extent number overflow, go to next module
+
+	  add bx,(modnum-extnum)	;bx=.fcb(modnum)
+	  inc b[bx]			;fcb(modnum)=++1
+					;module number incremented,
+					;check for overflow
+	  mov al,[bx]
+	  and al,maxmod			;mask high order bits
+	  jz openerr			;cannot overflow to 0
+					;otherwise, ok to continue
+					;with new module
+openr0:
+	call search_name		;next extent found?
+	jz openerr			;end of file encountered
+	call opencopy
+openr2:
+	call getfcb			;set parameters
+	xor al,al
+	mov vrecord,al
+	jmp staret			;lret = 0
+	;ret
+
+openerr:
+;-------
+	mov bx,offset info_fcb+extnum
+	mov al,save_mod
+	mov 2[bx],al
+	mov al,[bx]
+	dec al
+	and al,1fh
+	mov [bx],al
+					;cannot move to next extent
+					;of this file
+	jmp setlret1			;lret = 1
+	;ret
+openr3:
+	mov [bx],cl			;increment extent field
+	call get_dir_ext
+	mov cl,al
+	cmp al,[bx]			;is dir ext < fcb(ext)?
+	jae openr4			;no
+	  dec b[bx]			;decrement extent
+	  jmp set_lret1			;yes - reading unwritten data
+openr4:
+	call restore_rc
+	call set_rc
+	jmps openr2
+
+diskread:				;(may enter from seqdiskread)
+;--------
+					;read the next record from
+					;the current fcb
+	call getfcb			;sets parameters for the read
+	mov al,vrecord
+	cmp al,rcount			;vrecord-rcount
+					;skip if rcount > vrecord
+	jb recordok
+					;not enough records in extent
+					;record count must be 128
+					;to continue
+	  cmp al,128			;vrecord = 128?
+	  jnz diskeof			;skip if vrecord<>128
+	  call openreel			;go to next extent if so
+					;now check for open ok
+	  cmp lret,0			;stop at eof
+	  jnz diskeof
+recordok:				;fcb addresses a record to read
+	call index			;error 2 if reading
+					;unwritten data
+					;(returns 1 to be compatible
+					;with 1.4)
+					;arecord=0000?
+	jz diskeof
+	call atran			;arecord now a disk address
+	CALL CHECK_NPRS
+	JC RECORDOK2
+	  JNZ $+5
+	    JMP READ_DEBLOCK
+	  CALL SETDATA
+	  call seek			;to proper track,sector
+	  call rdbuff			;to dma address
+RECORDOK2:
+	jmp setfcb			;replace parameter
+
+diskeof:
+	jmp setlret1			;lret = 1
+	;ret
+
+CHECK_NPRS:
+;----------
+;	DIR_CNT CONTAINS THE NUMBER OF 128 BYTE RECORDS
+;	TO TRANSFER DIRECTLY.  THIS ROUTINE SET DIR_CNT
+;	WHEN INITIATING A SEQUENCE OF DIRECT PHYSICAL I/O
+;	OPERATIONS.  DIR_CNT IS DECREMENTED EACH TIME CHECK_NPRS
+;	IS CALLED DURING SUCH A SEQUENCE.
+;	exit:	~C FLG & ~Z FLG - DIRECT PHYSICAL I/O OPERATION
+;		~C FLG &  Z FLG - INDIRECT(DEBLOCK) I/O OPERATION
+;		 C FLG		- NO PHYSICAL I/O OPERATION
+
+	MOV CH,blk_off			;CH = VRECORD & BLKMSK
+	MOV AL,DIR_CNT
+	CMP AL,2			;IS DIR_CNT > 1?
+	JC CHECK_NPR1			;NO
+	  DEC AL			;DIR_CNT = DIR_CNT - 1
+	  MOV DIR_CNT,AL		;we are in mid-multi sector i/o
+	  STC
+	  ret				;RETURN WITH C FLAG SET
+CHECK_NPR1:
+	MOV AL,PHYMSK			;CL = PHYMSK
+	MOV CL,AL
+	AND AL,CH			;AL = VRECORD & PHYMSK
+					;ARE WE IN MID-PHYSICAL RECORD?
+	JZ CHECK_NPR11			;NO
+CHECK_NPR1X:
+	  OR CL,CL			;IS PHYMSK = 0?
+	  JZ CHECK_NPR1Y		;YES
+	    XOR AL,AL			;RETURN WITH Z FLAG SET & C FLAG RESET
+	    RET
+CHECK_NPR1Y:
+	  OR AL,1			;RESET C & Z FLAGS
+	  RET
+CHECK_NPR11:
+	MOV DH,CL
+	not DH				;DH = ~ PHYMSK
+	MOV AL,MULTNUM
+	CMP AL,2			;IS MULT_NUM < 2?
+	JC CHECK_NPR1X			;YES
+	MOV BX,OFFSET VRECORD
+	MOV AH,[BX]			;AH = VRECORD
+	ADD AL,ah
+	CMP AL,80H
+	JC CHECK_NPR2
+	  MOV AL,80H
+CHECK_NPR2:				;AL = MIN(VRECORD + MULT_NUM,80H) = X
+	PUSH CX				;SAVE VRECORD & BLKMSK, PHYMSK
+	MOV B[BX],7FH			;VRECORD = 7F
+	PUSH BX! PUSH AX
+	MOV BL,AL			;BL = X
+	MOV AL,BLKMSK
+	MOV DL,AL
+	INC DL				;DL = BLKMSK + 1
+	not AL
+	AND AH,AL			;AH = VRECORD & ~BLKMSK
+	MOV AL,RCOUNT
+	AND AL,DH			;AL = RCOUNT & ~PHYMSK
+	CMP AL,BL			;IS AL < X?
+	JC CHECK_NPR23			;YES
+	MOV AL,BL			;AL = MIN(VRECORD + MULT_NUM,80H) = X
+CHECK_NPR23:
+	SUB AL,AH			;AL = AL - VRECORD & ~BLKMSK
+	CMP AL,DL			;IS AL < BLKMSK + 1?
+	JC CHECK_NPR9			;YES
+	  PUSH AX			;AL = MAX # OF RECORDS
+	  CALL DMPOSITION		;COMPUTE MAXIMUM DISK POSITION
+	  MOV CH,AL			;CH = MAX DISK POS
+	  MOV AL,DMINX			;AL = CURRENT DISK POS
+	  CMP AL,CH			;IS CURR POS = MAX POS?
+	  MOV DL,AL
+	  JZ CHECK_NPR5			;YES
+	    MOV CL,AL
+	    PUSH CX			;CL = CURR POS, CH = MAX POS
+	    MOV CH,0
+	    CALL GET_DM			;BX = BLOCK NUMBER (CURR POS)
+CHECK_NPR4:
+	    PUSH BX
+	    INC CX			;CURR POS = CURR POS + 1
+	    CALL GET_DM			;GET NEXT BLOCK(CURR POS)
+	    POP DX
+	    INC DX
+	    CMP BX,DX			;DOES CURR BLK = LAST BLK + 1?
+	    JZ CHECK_NPR4		;YES
+
+	    DEC CL			;CL = INDEX OF LAST SEQ BLK
+	    POP DX
+	    MOV AL,DH			;AL = MAX POS
+	    CMP AL,CL			;IS AL < LAST SEQ BLK POS
+	    JC CHECK_NPR5		;YES
+	      MOV AL,CL
+CHECK_NPR5:				;AL = LAST BLK POS
+	  SUB AL,DL			;AL = AL - STARTING POS
+	  MOV CH,AL
+	  INC CH			;CH = # OF CONSECUTIVE BLOCKS
+	  MOV AL,BLKMSK
+	  INC AL			;AL = BLKMSK + 1
+	  MUL CH			;AL = # OF CONSECUTIVE LOGICAL RECS
+	  POP CX			;CL = MAXIMUM # OF RECORDS
+	  XCHG AL,CL
+	  CMP AL,CL			;IS MAX < # OF CONS. RECS?
+	  JC CHECK_NPR9			;YES
+	  MOV AL,CL
+CHECK_NPR9:				;AL = # OF CONSECUTIVE RECS
+	POP CX
+	POP BX
+	MOV [BX],CH			;RESTORE VRECORD
+	POP CX
+	MOV DH,MULT_NUM
+	SUB AL,CH			;AL = AL - VRECORD & blkmsk
+	CMP AL,DH			;IS AL < MULT_NUM
+	JC CHECK_NPR10			;YES
+	  MOV AL,DH
+CHECK_NPR10:				;AL = # OF CONSECUTIVE RECS
+	not CL
+	AND AL,CL			;IF DIR_CNT = 0 THEN
+	JZ RET13B			;RETURN WITH Z FLAG SET, C FLAG RESET
+	MOV DIR_CNT,AL			;DIR_CNT = AL & ~PHYMSK
+	MOV CL,PHYSHF
+	SHR AL,CL			;AL = # OF CONSECUTIVE PHYSICAL RECS
+	mov mult_sec,al			;save multisector count for r/w
+	OR AL,1				;RETURN WITH C AND Z FLAGS RESET
+RET13B: RET
+
+tmp_select:
+;----------
+;	entry:	DL = drive to select (0-f)
+
+	mov seldsk,dl
+
+curselect:
+;---------
+	mov al,seldsk
+	cmp al,curdsk
+	jne select			;don't select if seldsk = curdsk
+	  inc al! jz select0
+	ret
+
+SELECT:		;select disk in info_fcb for subsequent input or output ops
+;------
+	cmp al,16 ! jb disk_select
+select0:
+	    jmp selerror
+disk_select:
+;-----------
+;	entry:	AL = disk to select
+
+	mov adrive,al
+	mov curdsk,al
+	xor dx,dx			;dl = 1 if drive logged in
+	call selectdisk
+	jnc select0			;carry set if select ok
+	ret
+
+parsave33r:
+;----------
+	call parsave33
+	;jmps reselect
+
+reselect:
+;--------
+	mov cl,07fh
+	mov bx,offset info_fcb+f7
+	and [bx],cl			;fcb(7) = fcb(7) & 7fh
+	and 1[bx],cl
+	and byte ptr extnum-f7[bx],1fh	;fcb(ext) = fcb(ext) & 1fh
+		;check current fcb to see if reselection necessary
+	mov resel,true			;mark possible reselect
+	mov al,info_fcb			;drive select code
+	mov fcbdsk,al			;save drive
+	and al,00011111b		;non zero is auto drive select
+	dec al				;drive code normalized to
+					;0...30, or 255
+	cmp al,0ffh
+	jz noselect			;auto select function,
+	  mov seldsk,al			;save seldsk
+noselect:
+	call curselect
+					;set user code
+	mov al,usrcode			;0...31
+	mov info_fcb,al
+	ret
+
+compare:	;compare strings
+;-------
+;	entry:	CL = length of strings
+;		BX,DX = offset of strings
+;	exit:	Z flag set if strings match
+
+	mov ch,0
+	mov si,bx
+	mov di,dx
+	repe cmps al,al
+	ret
+
+
+;	individual function handlers
+;-----------------------------------------------------
+
+func14:		;select disk info
+;======
+	call tmp_select
+	mov al,seldsk
+	mov p_dsk,al
+	ret
+
+func15:	       ;open file
+;======
+	call parsave33r			;copy fcb from user seg.
+	mov info_fcb+modnum,0		;fcb(modnum)=0
+	call check_wild			;check for ?s in fcb
+	call open			;attempt to open fcb
+	call openx			;returns if unsuccessful
+	xor al,al
+ret30:	ret 				;no - open failed
+
+openx:
+;-----
+	call end_of_dir			;was open successful
+	jz ret30			;no
+	mov bx,offset info_fcb+nxtrec
+	cmp b[bx],0ffh
+	jne openxa
+	mov al,info_fcb+chksum
+	mov [bx],al
+openxa:
+	pop bx				;discard return address
+	MOV CL,40H
+	ret
+
+func20:		;read a file
+;======
+	call parsave33r
+	jmp disk_read
+	;jmp goback
+
+set_aret:
+;--------
+	mov cl,al			;save error index
+	mov byte ptr aret+1,al		;aret+1 = extended errors
+	call lret_eq_ff
+
+	jmp goback			;return physical & extended errors
+
+;	BLOCKING/DEBLOCKING BUFFER CONTROL BLOCK (BCB) FORMAT
+
+;	    +-------+-------+-------+-------+-------+-------+
+;	00h |  DRV  |        RECORD         | PEND  |  SEQ  |
+;	    +-------+-------+-------+-------+-------+-------+
+;	06h |     TRACK     |    SECTOR     |  BUFFER_ADDR  |
+;	    +-------+-------+-------+-------+-------+-------+
+;	0Ch |     LINK      |  PROCESS_OFF  |
+;	    +-------+-------+-------+-------+
+
+READ_DEBLOCK:
+;------------
+	mov ah,1			;AH = 1
+	CALL DEBLOCK_DTA
+	JMP SET_FCB
+
+DEBLOCK_DIR:
+;-----------
+	MOV CUR_DMABASE,DS		;BUFFERS IN SYSTEM DATA AREA
+	MOV BX,DIRBCBA
+	jmps DEBLOCK			;PREVIOUS LOCATE CALL
+
+DEBLOCK_DTA:
+;-----------
+	MOV BX,DTABCBA
+	MOV CUR_DMABASE,0		;get segment from BCB
+
+DEBLOCK:	;BDOS BLOCKING/DEBLOCKING ROUTINE
+;-------
+;	entry:	Z flag reset -> get new BCB address
+;		AH = 1 -> READ COMMAND
+;		   = 2 -> WRITE COMMAND
+;		   = 3 -> LOCATE COMMAND
+;		   = 4 -> FLUSH COMMAND
+;		   = 5 -> DIRECTORY UPDATE
+
+	MOV DEBLOCK_FX,AH		;SAVE DEBLOCK FX
+	mov cl,phymsk			;CL = PHYMSK
+	MOV AL,BYTE PTR ARECORD
+	AND AL,cl
+	MOV PHY_OFF,AL			;PHY_OFF = LOW(ARECORD) & PHYMSK
+	not cl				;CL = ~PHYMSK
+	and BYTE PTR ARECORD,cl		;LOW(ARECORD) = LOW(ARECORD) & ~PHYMSK
+	mov bx,[bx]			;GET BCB ADDRESS
+	MOV CURBCBA,BX			;BX = 1st curbcb
+	MOV ax,10[BX]			;dma address field - offset/segment
+	cmp cur_dmabase,0		;if cur_dmabase <> 0, deblocking is
+	jne deblock0			; for dir buf and addr is offset
+	  mov cur_dmabase,ax		;else deblocking data buffer and
+	  xor ax,ax			; addr is segment, offset = 0
+deblock0:
+	MOV CURDMA,ax			;save current buffer address
+	CALL DEBLOCK9			;BX=CURBCBA, DX=.ADRIVE, CL=4
+	cmp b[bx],0ffh! je deblock2
+	  CALL COMPARE			;DOES BCB(0-3) = ADRIVE || ARECORD?
+	  JZ DEBLOCK45			;YES
+DEBLOCK2:
+	mov bx,curbcba
+	mov b[bx],0ffh			;discard in case of error
+	MOV AL,2
+	CALL DEBLOCK_IO			;READ PHYSICAL RECORD
+	CALL DEBLOCK9			;BX=CURBCBA, DX=.ADRIVE, CL=4
+	CALL MOVE
+	MOV B[DI],0			;CURBCBA->BCB(4) = 0
+DEBLOCK45:
+	xor al,al
+	MOV ah,PHY_OFF
+	shr ax,1			;AX = phy_off * 080h
+	MOV SI,CURDMA
+	ADD SI,AX			;SI = CURDMA + PHY_OFF*80H
+	MOV al,DEBLOCK_FX
+	CMP al,3			;IS DEBLOCK_FX = LOCATE?
+	JNZ DEBLOCK6			;NO
+	  MOV BUFFA,SI			;YES
+	  RET
+DEBLOCK6:
+	MOV CX,40H			;transfer 40h words
+	MOV DI,DMAAD
+	mov ax,dmabase
+	mov dx,cur_dmabase
+	push ds! push es
+	mov ds,dx			;setup source segment
+	mov es,ax			;setup destination segment
+	rep movsw			;transfer data
+	pop es! pop ds
+	RET
+
+DEBLOCK9:				;SETUP FOR MOVE OR COMPARE
+	MOV BX,CURBCBA
+	MOV DX,OFFSET ADRIVE
+	MOV CL,4
+	RET
+
+DEBLOCK_IO:
+;----------
+;	entry:	AL = 0 -> SEEK ONLY
+;		   = 1 -> WRITE
+;		   = 2 -> READ
+
+	PUSH AX
+	CALL SEEK
+	POP AX
+	DEC AL
+	JS deblk_io2
+;	  JNZ deblk_io1
+;	    mov cl,1
+;	    JMP WRBUFF
+;deblk_io1:
+	  CALL RDBUFF
+deblk_io2:
+	mov si,offset track
+	mov di,curbcba
+	add di,6			;MOVE TRACK & SECTOR
+	mov cx,2			;TO BCB
+	rep movsw
+	ret
+
+
+endcode	equ	offset $
+
+;*************** end bdos file system ****************
+
+;****************** BDOS data area *******************
+;
+;
+	dseg
+;       Variables in data segment:
+	org	endcode
+
+iosentry	rw	0
+biosco		dw	biosoffset	;offset and
+bioscs		dw	0		;segment for callf to BIOS
+
+;
+;*****************************************************
+;
+;*****************************************************
+;*
+;*	bdos file system data area
+;*
+;*****************************************************
+
+;	variables in data segment:
+;
+
+;the following variables are set to zero upon entry to file system
+
+fcbdsk		db	0		;disk named in fcb
+parcopfl	db	0		;true if parameter block copied
+aret		dw	0		;adr value to return
+lret		equ	byte ptr aret	;low(aret)
+resel		db	0		;reselection flag
+DIR_CNT		DB	0		;DIRECT I/O COUNT
+MULT_NUM	DB	0		;MULTI-SECTOR COUNT used in bdos
+zerolength	equ	(offset $)-(offset fcbdsk)
+mult_sec	db	1		;multi sector count passed to xios
+
+BLK_OFF		DB	0		;RECORD OFFSET WITHIN BLOCK
+;
+
+DEBLOCK_FX	DB	0		;DEBLOCK FUNCTION #
+PHY_OFF		DB	0		;RECORD OFFSET WITHIN PHYSICAL RECORD
+CURBCBA		DW	0		;CURRENT BCB OFFSET
+
+TRACK		DW	0	;BCB RECORD'S TRACK
+SECTOR		DW	0	;BCB RECORD'S SECTOR
+
+;	seldsk,usrcode are initialized as a pair
+p_dsk		db	0	;selected disk num
+p_user		db	0	;curr user num
+
+;info		dw	0	;info adr
+srcha		dw	0	;search adr
+
+;the following variable order is critical
+
+;variables copied from uda for mp/m			x
+
+;variables included in fcb checksum for mp/m and cp/m	  x
+
+;variables used to access system lock list for mp/m	    x
+
+;dmaad		dw	0	;dma offset		1
+;dmabase		dw	0	;dma base		2
+;srchl		db	0	;search len		4
+
+;dcnt		dw	0	;directory counter	7
+;dblk		dw	0	;directory block	8 ?? - not used - ??
+u_mult_cnt	rb	0
+mult_cnt	db	1	;bdos multi-sector cnt 10
+;df_password	rb	8	;process default pw    11
+
+;high_ext	db	0	;fcb high extent bits	  2
+;xfcb_read_only	db	0	;xfcb read only flag	  3
+curdsk		db	0ffh	;current disk		  4 1
+
+	org ((offset $) + 1) and 0fffeh
+
+;	curtrka - alloca are set upon disk select
+;	(data must be adjacent)
+
+;cdrmaxa		dw	0	;ptr to cur dir max val
+;drvlbla		dw	0	;drive label data byte addr
+buffa		dw	0	;ptr to dir dma addr
+dpbaddr		dw	0	;curr disk param block addr
+checka		dw	0	;curr checksum vector addr
+alloca		dw	0	;curr alloc vector addr
+DIRBCBA		DW	0	;DIRECTORY BUFFER CONTROL BLOCK ADDR
+DTABCBA		dw	0	;DATA BUFFER CONTROL BLOCK ADDR
+addlist		equ	10	;"$-buffa" = addr list size
+
+;	sectpt - offset obtained from disk parm block at dpbaddr
+;	(data must be adjacent)
+
+sectpt		dw	0	;sectors per track
+blkshf		db	0	;block shift factor
+blkmsk		db	0	;block mask
+extmsk		db	0	;extent mask
+maxall		dw	0	;max alloc num
+dirmax		dw	0	;max dir num
+dirblk		dw	0	;reserved alloc bits for dir
+chksiz		dw	0	;size of checksum vector
+offsetv		dw	0	;offset tracks at beginning
+PHYSHF		DB	0	;PHYSICAL RECORD SHIFT FACTOR
+PHYMSK		DB	0	;PHYSICAL RECORD MASK
+endlist		rs	0	;end of list
+dpblist		equ	(offset endlist)-(offset sectpt)
+				;size
+
+;	local variables
+
+save_mod	db	0	;open_reel module save field
+
+dminx		db	0	;local for diskwrite
+single		db	0	;set true if single byte
+				;alloc map
+rcount		db	0	;record count in curr fcb
+extval		db	0	;extent num and extmsk
+vrecord		db	0	;curr virtual record
+ADRIVE		DB	0	;CURRENT DISK - must preceed arecord
+arecord		dw	0	;curr actual record
+		db	0	;curr actual record high byte
+CUR_DMABASE	DW	0
+CUR_DMA		DW	0
+
+;	local variables for directory access
+
+dptr		db	0	;directory pointer 0,1,2,3
+
+;	shell variables
+
+shell_si	dw	0	;bdos command offset
+shell_dma	dw	0	;dmaad save area
+shell_flag	db	0	;parsave shell flag
+
+;	special 8086 variables:
+
+u_retseg	dw	0	;user return segment
+
+parlg		db	0	;len of parameter block
+
+
+;	bdos stack switch variables and stack
+;	used for all bdos disk functions
+
+	org	((offset $) + 1) and 0fffeh
+
+		; 69 word bdos stack
+
+		dw	0cccch,0cccch,0cccch
+		dw	0cccch,0cccch,0cccch
+		dw	0cccch,0cccch,0cccch
+		dw	0cccch,0cccch,0cccch
+		dw	0cccch,0cccch,0cccch
+		dw	0cccch,0cccch,0cccch
+		dw	0cccch,0cccch,0cccch
+		dw	0cccch,0cccch,0cccch
+		dw	0cccch,0cccch,0cccch
+		dw	0cccch,0cccch,0cccch
+		dw	0cccch,0cccch,0cccch
+		dw	0cccch,0cccch,0cccch
+		dw	0cccch,0cccch,0cccch
+		dw	0cccch,0cccch,0cccch
+		dw	0cccch,0cccch,0cccch
+		dw	0cccch,0cccch,0cccch
+		dw	0cccch,0cccch,0cccch
+		dw	0cccch,0cccch,0cccch
+		dw	0cccch,0cccch,0cccch
+		dw	0cccch,0cccch,0cccch
+		dw	0cccch,0cccch,0cccch
+		dw	0cccch,0cccch,0cccch
+		dw	0cccch,0cccch,0cccch
+bdosstack	rw	0
+
+save_sp		rw	1
+
+;	local buffer area:
+
+info_fcb	rb	0;40	;local user FCB
+
+	db	'COPYRIGHT(C)1983,'
+	db	'DIGITAL RESEARCH(01/26/83)'
+	db	'XXXX-0000-654321'
+
+;
+info    	dw      0		;information address
+;
+u_wrkseg	rw	0
+parametersegment dw     0       ;user parameter segment
+;
+;
+dmaad	dw	0		;user DMA address
+dmabase	dw	0		;user DMA base
+seldsk	db	0		;current user disk
+usrcode	db	0		;current user number
+dcnt	dw	0		;directory index
+ldcnt   equ     byte ptr dcnt   ;low(dcnt)
+srchl	db	0		;search length
+;
+;
+
+startpat	equ	offset $
+
+	cseg
+	org	startpat
+
+patch:
+	mov	bx,0894h
+	mov	al,[bx]
+	push	bx
+	dec	bx
+	dec	bx
+	jmp	done
+
+
+;	db	0		;end of this data area
+
+;***************** end BDOS data area ****************
+
+;******************** end of BDOS ********************
+end
+

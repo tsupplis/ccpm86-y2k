@@ -1,0 +1,24 @@
+
+declare md$structure literally
+  'structure(
+  link word,
+  start word,
+  length word,
+  plist word,
+  unused word)';
+
+declare ms$structure literally
+  'structure(
+   link word,
+   start word,
+   length word,
+   flags word,
+   mau word)';
+
+declare sat$structure literally
+  'structure(
+   start word,
+   len   word,
+   num$allocs byte)';
+
+

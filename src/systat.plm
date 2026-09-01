@@ -1,0 +1,155 @@
+$title('CCP/M-86 1.0 Systat Process - Transient')
+$compact
+				/* want 32 bit pointers */
+status:
+do;
+
+$include (:f2:copyrt.lit)
+
+$include (:f2:vaxcmd.lit)
+
+$include (scomon.plm)
+
+
+
+/**************************************************************************
+
+                             MAIN PROGRAM
+
+**************************************************************************/
+
+
+plmstart: procedure public;
+  dcl (i,version) byte,
+      ver address,
+      validchar byte; 
+  dcl bdosversion lit '30h';	     /* BDOS 3.o or later */
+  dcl osproduct lit '14h';           /* CCP/M-86          */		  
+  dcl mpmproduct lit '11h';          /* MP/M-86           */   
+
+  dcl vers$str$pointer pointer;
+  dcl vers$str$ptr structure (
+      offset word,
+      segment word) at (@vers$str$pointer);
+  dcl (doscan,chr) byte;
+  
+  ver = get$version;
+  if low(ver) < bdosversion or
+    ( (high(ver) < osproduct) and (high(ver) <> mpmproduct) ) then 
+  do;
+     call print$buffer (.('Requires Concurrent CP/M-86 or MP/M-86$'));
+     call reboot;                                        /* use CP/M exit */
+  end;
+  else
+  do;
+    version = high(ver) mod 2;               /* 0 = CCP/M-86, 1 = MP/M-86 */
+    sysdat$pointer = get$sysdat;
+    flag$ptr.segment,md$ptr.segment,ms$ptr.segment,
+    sat$ptr.segment,qd$ptr.segment,pd$ptr.segment,vccb$ptr.segment
+    = sysdat$ptr.segment;
+
+    doscan = true;      
+    repeat = false;
+    specified = false;                                         /* Default  */
+    intrval = 01h;                                             /* Default  */
+                                                       /* Scan for option  */
+      do while doscan ;                                /* Loop until Q(uit)*/
+        if buff(0) <> 0 then do;                       /* Command line arg */
+           i = 1;                                      /* was used. Get it.*/
+           do while buff(i) = ' ' ;            /* Skip intervening  blanks */ 
+                 i = i + 1;  
+                 end;
+           if buff(i) = lbracket then  
+                 i = i + 1;
+           else
+                 call print$opt$err;
+           chr = buff(i);                                       /* 1st arg */
+           i = i + 1;
+           if (buff(i) = ',') or (buff(i) = ' ') or (buff(i) = ']') then 
+                  i = i + 1;                        /* Skip blank or comma */
+           else 
+                  call print$opt$err;
+           if (buff(i-1) <> rbracket) then do;      /* Keep going,more args*/   
+              if (buff(i) = 'c') or (buff(i) = 'C') then do;
+                  repeat = true;
+                  i = i + 1;
+                  end;
+              else 
+                  call print$opt$err; 
+            if (buff(i) <> rbracket) then do;              /* Still more ?*/
+                        if (buff(i) = ' ') or (buff(i) = ',') then do;
+                            i = i + 1;
+                            end;
+                        else
+                            call print$opt$err;
+                                           /* Get ascii hex interval data */
+                       intrval = aschex(buff(i));                    
+                       i = i + 1;
+                       if (buff(i) <> rbracket) then do;
+                          intrval = shl(intrval,4);
+                          intrval = intrval + aschex(buff(i));
+                       end;                /* Now convert to system ticks */   
+                       intrval = intrval * sd.tickspersec; 
+              end;
+         end;
+                    
+         buff(0) = 0;                                  /* Go back to menu*/ 
+         specified = true;                             /* next time.     */
+         end;
+    else do;                                           /* No args's given*/
+        call disp$mainhdr;                             /* Show the menu */
+        chr = conin;
+        end;
+ 
+        validchar = false;
+        do while not(validchar);                       /* Select action  */
+        validchar = true;
+        if (chr = 'h') or (chr = 'H') then do;   
+        call display$help;
+        end; 
+        else if (chr = 'm') or (chr = 'M') then do;
+        call display$mem;
+        end;
+        else if (chr = 'o') or (chr = 'O') then do;
+        call display$gen(version);
+        end;
+        else if (chr = 'e') or (chr = 'E') then do;
+        call terminate;                                      /* The Exit */  
+        end;
+        else if (chr = 'p') or (chr = 'P') then do;
+        call display$proc(0);
+        end;
+        else if (chr = 'q') or (chr = 'Q') then do;
+        call display$queue;
+        end;
+        else if (chr = 'u') or (chr = 'U') then do;
+        call display$proc(1);
+        end;
+        else if (chr = 'c') or (chr = 'C') then do;
+        call display$cons(version);
+        end;
+        else do;                         /* Incorrect character was used */
+         validchar = false;
+        
+         if not(specified) then do;      /* Invalid char was from menu   */
+	   if (chr = CR) then
+               call print$buffer(.('                        ->$')); 
+           call print$buffer(.('     Invalid Option.$'));
+           call co(CR);                /* Move left to beginning of line */
+           call print$buffer(.('                        ->$'));
+           chr =  conin;       /* Get another char, hopefully a good one */
+           end;
+          
+        else                   /* Invalid char was from the command line */
+             call print$opt$err;
+             
+          end;                           /* Incorrect char case          */
+        end; 			         /* inner while loop - validchar */
+         
+     end;			         /* outer while loop - doscan    */
+  end;
+   
+end plmstart;
+  
+end status;
+

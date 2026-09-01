@@ -1,0 +1,36 @@
+$title ('SDIR 8086 - Main Module')
+sdir:
+do;
+
+$include (copyrt.lit)
+
+/*		commands used to generate		*/
+/*
+asm86 scd.a86
+plm86 main86.plm debug object(main86) optimize(3) 'p2' 'p3' 'p4'
+plm86 scan.plm debug object(scan) optimize(3) 'p2' 'p3' 'p4'
+plm86 search.plm debug object(search) optimize(3) 'p2' 'p3' 'p4'
+plm86 sort.plm debug object(sort) optimize(3) 'p2' 'p3' 'p4'
+plm86 disp.plm debug object(disp) optimize(3) 'p2' 'p3' 'p4'
+plm86 dpb86.plm debug object(dpb86) optimize(3) 'p2' 'p3' 'p4'
+plm86 util.plm debug object(util) optimize(3) 'p2' 'p3' 'p4'
+plm86 timest.plm debug object(timest) optimize(3) 'p2' 'p3' 'p4'
+link86 scd.obj,main86,scan,search,sort,disp,util,dpb86,timest to sdir86.lnk
+loc86 sdir86.lnk od(sm(code,dats,data,const,stack)) -
+   ad(sm(code(0),dats(10000h))) ss(stack(+32))
+h86 sdir86
+
+   (on a micro)
+	vax sdir86.h86 $fans
+	gencmd sdir86 data[b1000 m3c5 x800]
+
+	* constants are last to force hex generation.
+	* a minimum data of 3c5h paragraphs is 12K plus the data space
+	* of SDIR, enough for 512 directory entries
+	* the max is lowered from 0fffh to 800h
+		(Aug 12, 1982 for CCP/M-86 IBM PC)
+*/
+
+$include (sdirmain.plm)
+
+

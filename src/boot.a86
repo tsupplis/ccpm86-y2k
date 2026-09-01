@@ -1,0 +1,94 @@
+;****************************************************************
+;*								*
+;*		BOOT SECTOR FOR IBM PC				*
+;*								*
+;****************************************************************
+
+min_mem			equ	160	;minimum memory in K
+load_track_segment	equ	2600H	;at 152K mark
+
+;Check for at least 160K being present in the IBM PC.
+;Use last 8K of 160K minimum memory for loader.
+
+;Since track is 4K we have 4K extra past the Loader for
+;disk buffer space and other unitialized storage
+;used by the Loader.
+
+;Note: that wherever it is decided to place the loader, the IBM PC
+;cannot read over a 64K page boundary.
+
+;the command:
+
+;GENCMD BOOT 8080
+;is used for this module
+
+bw_video_ram		equ	0b000h	;where to print an
+color_video_ram		equ	0b800h	;error message
+
+cseg	load_track_segment + 20H	;add 20H to get to sector 2
+loader:					;where the Loader starts
+
+cseg	0
+org	0			;The IBM ROM sets up
+				;SS=30H and SP is 80H: stack is in
+				;the interrupt vectors.
+	int 12H			;get memory size
+	cmp ax,min_mem
+	jnb get_track_0
+	  jmps mem_error
+
+get_track_0:
+	xor bx,bx		;set up call to ROM diskette read
+	mov ax,load_track_segment
+	mov es,ax		;ES:BX transfer location
+	mov ax,0208h		;AH=2=read,AL=8=sectors to read
+	mov cx,0001h		;CH=0=track,CL=1=sector
+	mov dx,0000h		;DH=0=head #,DL=0=drive #
+	int 13H			;call ROM diskette entry
+	jnc track_ok
+	  jmps track_error
+
+track_ok:
+	jmpf loader
+
+mem_error:
+	mov cx,length mem_msg
+	mov si,offset mem_msg
+	jmps prt_msg
+
+track_error:
+	mov cx,length trk_msg
+	mov si,offset trk_msg
+	;jmps prt_msg
+
+prt_msg:
+	mov ax,bw_video_ram
+	int 11H			;get equipment information
+	and al,00110000b	;get video bits
+	cmp al,30H
+	je do_msg
+	  mov ax,color_video_ram
+do_msg:
+	mov es,ax
+	mov ax,cs
+	mov ds,ax
+	xor di,di
+	mov ah,07H		;normal display attribute
+prt_loop:
+	lodsb
+	stosw
+	loop prt_loop
+	cli
+	hlt
+
+
+last_code_offset	equ	offset $
+dseg
+org	last_code_offset
+
+mem_msg		db	'Not enough memory present for loader'
+trk_msg		db	'Can''t read boot track'
+
+org	512 - 1			;force even sector size
+		db	0
+

@@ -1,0 +1,8 @@
+
+/* Flag Format */
+
+dcl	flag$structure	lit	'structure(
+	pd word,
+	ignore byte)';
+
+

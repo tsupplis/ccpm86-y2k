@@ -1,0 +1,1473 @@
+  
+
+
+
+
+
+    /* Common Include Module for RSP and Transient CCPMSTAT */
+
+
+$include(:f2:newcom.lit)
+dcl buff (128) byte external;
+
+
+mon1:
+  procedure (func,info) external;
+    dcl func byte;
+    dcl info address;
+  end mon1;
+
+mon2:
+  procedure (func,info) byte external;
+    dcl func byte;
+    dcl info address;
+  end mon2;
+
+mon3:
+  procedure (func,info) address external;
+    dcl func byte;
+    dcl info address;
+  end mon3;
+
+mon4:
+  procedure (func,info) pointer external;
+    dcl func byte;
+    dcl info address;
+  end mon4;
+
+
+patch: procedure;	/* dummy area for patching code segments */
+  declare i address;
+	i=i+5;  i=i+5;  i=i+5;  i=i+5;  i=i+5;
+	i=i+5;  i=i+5;  i=i+5;  i=i+5;  i=i+5;
+	i=i+5;  i=i+5;  i=i+5;  i=i+5;  i=i+5;
+	i=i+5;  i=i+5;  i=i+5;  i=i+5;  i=i+5;
+	i=i+5;  i=i+5;  i=i+5;  i=i+5;  i=i+5;
+	i=i+5;  i=i+5;  i=i+5;  i=i+5;  i=i+5;
+	i=i+5;  i=i+5;  i=i+5;  i=i+5;  i=i+5;
+	i=i+5;  i=i+5;  i=i+5;  i=i+5;  i=i+5;
+	i=i+5;  i=i+5;  i=i+5;  i=i+5;  i=i+5;
+	i=i+5;  i=i+5;  i=i+5;  i=i+5;  i=i+5;
+	i=i+5;  i=i+5;  i=i+5;  i=i+5;  i=i+5;
+  end patch;
+
+
+dcl maxpd byte initial (63);                /* Maximum # process descript's*/
+dcl maxmd byte initial (80);                /* Maximum # memory descriptors*/
+dcl maxqflags byte initial (40h);           /* Max Value for a queue flag  */ 
+dcl freename (*)byte initial ('* FREE *');  /* For free memory partitions  */
+dcl maxqueues byte initial (64);            /* Maximum # of system queues  */
+dcl lbracket byte initial ('[');
+dcl rbracket byte initial (']');
+dcl repeat byte;                            /* Controls continuous display */
+dcl intrval word;                           /* Controls update timing      */
+dcl specified byte;                         /* Command Line argument flag  */
+dcl flaglen byte initial (3);
+
+/***************************************************************************/
+/*                                                                         */
+/*                  Terminal-dependent Control Characters                  */
+/*                                                                         */
+/***************************************************************************/
+
+dcl clearseq (6) byte initial (2,01bh,'E',0,0,0);  /* ESC E = clear screen*/
+dcl homeseq (6)  byte initial (2,01bh,'H',0,0,0);  /* ESC H = home cursor */ 
+dcl CR  lit '13';                                  /* CR = carriage return*/
+dcl LF  lit '10';                                  /* LF = line feed      */
+
+
+$include (:f2:mdsat.lit)
+$include (:f2:proces.lit)
+$include (:f2:sd.lit)
+$include (:f2:qd.lit)
+$include (:f2:flag.lit)
+$include (:f2:uda.lit)
+$include (:f2:vccb.lit)
+/*$include (:f2:ccb.lit)*/
+
+dcl pd$pointer pointer;  /* double word bases for MP/M-86 data structures */
+dcl pd$ptr structure(
+  offset word,
+  segment word) at (@pd$pointer);
+dcl pd based pd$pointer pd$structure;
+
+dcl qd$pointer pointer;
+dcl qd$ptr structure(
+  offset word,
+  segment word) at (@qd$pointer);
+dcl qd based qd$pointer qd$structure;
+
+dcl md$pointer pointer;
+dcl md$ptr structure(
+  offset word,
+  segment word) at (@md$pointer);
+dcl md based md$pointer md$structure;
+
+dcl ms$pointer pointer;
+dcl ms$ptr structure(
+  offset word,
+  segment word) at (@ms$pointer);
+dcl ms based ms$pointer ms$structure;
+ 
+dcl sat$pointer pointer;
+dcl sat$ptr structure(
+  offset word,
+  segment word) at (@sat$pointer);
+dcl sat based sat$pointer sat$structure;
+
+dcl flag$pointer pointer;
+dcl flag$ptr structure(
+  offset word,
+  segment word) at (@flag$pointer);
+dcl flag based flag$pointer flag$structure;
+
+dcl vccb$pointer pointer;
+dcl vccb$ptr structure (
+    offset word,
+    segment word) at (@vccb$pointer);
+dcl vccb based vccb$pointer ccb$structure;
+ 
+dcl uda$pointer pointer;
+dcl uda$ptr structure (
+    offset word,
+    segment word) at (@uda$pointer);
+dcl uda based uda$pointer uda$structure;
+
+
+/* BDOS Calls */
+
+  reboot:
+    procedure;
+      call mon1(0,0);
+    end reboot;
+
+  conin:
+    procedure byte;
+      return(mon2(1,0));
+    end conin;
+
+  co:
+    procedure (char);
+      dcl char byte;
+      call mon1 (2,char);
+    end co;
+
+  rawconin:
+    procedure byte;
+      return mon2(6,0fdh);
+    end rawconin;
+
+  constat:
+    procedure byte;
+    return(mon2(11,0));
+    end constat;
+
+  rawco:
+    procedure (char);
+      dcl char byte;
+      call mon1(6,char);
+    end rawco;
+  
+  delay:
+    procedure (num);
+      dcl num address;
+      call mon1(141,num);
+    end delay;
+ 
+  print$buffer:
+    procedure (bufferadr);
+      dcl bufferadr address;
+      call mon1 (9,bufferadr);
+    end print$buffer;
+
+  get$version:
+    procedure word;
+      return mon3(12,0);
+    end get$version; 
+
+  terminate:
+    procedure;
+      call mon1(143,0);
+    end terminate;
+
+  get$sysdat:
+    procedure pointer;
+      return mon4(154,0);
+    end get$sysdat;
+
+  get$currpd:
+    procedure pointer;
+      return mon4(156,0);
+    end get$currpd;  
+
+
+/* utility functions */
+
+  crlf:
+    procedure;
+      call co (CR);
+      call co (LF);
+    end crlf;
+  
+  print$infield:                        /* Prints 'len' # of bytes in a  */
+                                        /* left- or right-justified field*/
+                                        /* of 'width' dimension.         */
+    procedure (width,justify,len,dataddr);
+
+      dcl dataddr pointer;
+      dcl (width,len) byte, 
+          (i,justify) byte;
+      dcl char based dataddr byte;
+      dcl dat$ptr structure(
+          offset word,
+          segment word) at (@dataddr);
+     
+    if len <= width then do;                             /* Error Check */
+       if justify = 'r' then                           /* Right Justify */
+          do i=1 to (width-len) ;                    /* Pad on the left */
+              call co(' ');
+          end;
+          do i=1 to len ;
+              call co (char and 7fh);                 /* Print the data */
+              dat$ptr.offset = dat$ptr.offset + 1;
+          end;
+        if justify = 'l' then                          /* Left-justified*/
+           do i = 1 to (width-len);                  /* Pad on the right*/
+              call co(' ');
+           end;
+       end; 
+          
+  end print$infield;
+
+     
+
+  dcl hex$digit (*) byte data ('0123456789ABCDEF');
+
+  display$hex$byte:
+    procedure (value);
+      dcl value byte;
+      call co (hex$digit(shr(value,4)));
+      call co (hex$digit(value mod 16));
+    end display$hex$byte;
+ 
+  display$hex$word:
+    procedure (value);
+      dcl value word;
+      call display$hex$byte (high(value));
+      call display$hex$byte (low (value));
+    end display$hex$word;
+
+  
+print$hex$byte:	                        /* Prints hex byte in a right- or */
+                                        /* left-justified field of 'width'*/
+                                        /* dimension.                     */
+   procedure (width,justify,val);
+   dcl (val,width) byte,
+       (i,justify) byte;
+   
+   if width < 2 then return;           /* Must be at least 2 for hex byte */
+   else do;
+        if justify = 'r' then                            /* Right Justify */
+        do i=1 to (width - 2) ;
+            call co(' ');                              /* Pad on the left */
+        end;
+        call display$hex$byte(val);                   /* Print the digits */
+        if justify = 'l' then
+        do i=1 to (width-2) ;
+            call co(' ');                             /* Pad on the right */
+        end;
+   end;  
+ end print$hex$byte;
+
+
+print$hex$word:	                       /* Prints hex word in a right- */
+                                       /* or left-justified field of  */
+                                       /* 'width' dimension.          */
+   procedure(width,justify,val);
+   dcl val word,
+       (justify,width) byte;
+   dcl i byte;
+
+   if width < 4 then return;	                      /* Error check */
+   else do;
+   if justify = 'r' then                 /* Field is right-justified */
+      do i=1 to (width-4) ;
+          call co(' ');	                          /* Pad on the left */
+       end;
+      call display$hex$word(val);                /* Print the digits */
+   if justify = 'l' then  
+       do i=1 to (width-4) ;
+       call co(' ');                             /* Pad on the right */
+       end;
+   end;
+
+ end print$hex$word;
+
+clear: procedure;
+dcl i byte;
+
+   do i = 1 to clearseq(0);            /* 1st element = counter        */
+   call rawco(clearseq(i));            /* Direct clear_screen sequence */
+   end;                                /* to terminal.                 */
+end clear;
+
+home: procedure;
+dcl i byte;
+
+  do i = 1 to homeseq(0);              /* 1st element = counter        */
+  call rawco(homeseq(i));              /* direct home cursor sequence  */
+  end;                                 /* to terminal.                 */
+
+end home;   
+
+skip$lines:  procedure(numlines);
+dcl (numlines,i) byte;
+
+  do i = 1 to numlines;
+     call co(LF);
+  end;
+end skip$lines;
+
+cons$wait: procedure;
+dcl chr byte;
+     
+  call print$buffer(.(CR,LF,
+                    '     Type any key to leave and return to main menu.$'));  
+  chr = conin;
+          
+ end cons$wait;
+
+aschex:                                             /* Convert ascii to hex*/
+       procedure(num) byte;
+dcl num byte;
+
+    if (num > 47) and (num < 58) then do;                   /* 0 - 9 range */
+        num = num - '0';
+        end;
+      else do;
+        if (num > 64) and (num < 71) then do;              /* A - F range */
+            num = num - 55;
+            end;
+        else do;
+            if (num > 96) and (num < 103) then do;         /* a - f range */
+                num = num - 87;
+                end;      
+            else
+                num = 015h;                           /* Error -> Default */
+            end; 
+          end;
+      return (num);
+
+end aschex;
+
+get$intrval: procedure word;      
+dcl (chr,chr1) byte,
+     ticdelay word;
+                                  /* Find out if user wants continuous */
+                                  /* and if so, how short an interval  */
+       call crlf;call print$buffer(.(CR,LF,'    Continuous Display?$'));
+       chr = conin;
+       if (chr = 'y') or (chr = 'Y') then do;
+          repeat = true;
+          call print$buffer(.(CR,LF,'Time Interval (in hex) :$'));
+                  
+    chr = conin;
+    if (chr <> LF) and (chr <> CR) then do;       /* It's not a default */
+        chr = aschex(chr);                      /* Get true hex version */
+        chr1 = conin;                              /* wait for CR or LF */
+        if (chr1 <> LF) and (chr1 <> CR) then do;      /* 2nd hex digit */
+            chr = shl(chr,4) + aschex(chr1);
+            chr1 = conin;                             /* Get this CR LF */
+            end;
+        end;
+    else
+        chr = 01h;                                     /* Default value */
+    ticdelay = chr * (sd.tickspersec);       /* Convert to system ticks */
+    end;
+    return (ticdelay);                       
+    
+ end get$intrval;
+
+
+      
+disp$mainhdr: procedure;                           /* Main Menu Display */
+
+   call home; call clear;
+   call crlf; call crlf;
+   call print$infield(34,'r',14,@('Which Option ?'));
+   call crlf; call crlf;
+   call print$infield(33,'r',7,@('H (elp)')); 
+   call crlf;
+   call print$infield(35,'r',9,@('M (emory)')); 
+   call crlf; call print$infield(37,'r',11,@('O (verview)'));
+   call crlf; call print$infield(44,'r',18,@('P (rocesses - all)'));
+   call crlf; call print$infield(35,'r',9,@('Q (ueues)'));
+   call crlf; call print$infield(43,'r',17,@('U (ser processes)'));
+   call crlf; call print$infield(37,'r',11,@('C (onsoles)'));
+   call crlf; call print$infield(33,'r',7,@('E (xit)'));
+   call crlf; call crlf; call print$infield(26,'r',2,@('->'));
+   
+end disp$mainhdr;
+
+print$opt$err: procedure;
+    call print$buffer(.(CR,LF,'     Illegal command tail.$'));
+    call crlf; 
+    call terminate;
+    end print$opt$err;
+ 
+display$help: procedure;
+
+call home; call clear;
+call crlf; call crlf;
+call crlf; call print$infield(42,'r',23,@('VALID SYSTAT COMMANDS :'));
+call crlf; call crlf; call print$infield(25,'r',6,@('SYSTAT'));
+call crlf; call print$infield(34,'r',15,@('SYSTAT [OPTION]'));
+call crlf; call print$infield(36,'r',17,@('SYSTAT [OPTION C]'));
+call crlf; call print$infield(39,'r',20,@('SYSTAT [OPTION C ##]'));
+call crlf; call crlf; call print$infield(28,'r',9,@('- where -'));
+call crlf; call crlf; 
+call print$infield(44,'r',25,@('-> C = continuous display'));
+call crlf; call print$infield(47,'r',28,@('-> ## = 1-2 digit hex timer.'));
+call crlf; call crlf; call print$infield(30,'r',11,@('-> OPTION ='));
+call crlf; call print$infield(67,'r',44,@('M(emory)  P(rocesses)  O(verview) C(onsoles)'));
+call crlf; call print$infield(56,'r',33,@('U(ser Processes)  Q(ueues) H(elp)'));
+call crlf;
+
+if not(specified) then
+call cons$wait;
+else
+call terminate;
+       
+end display$help;	
+
+
+
+prntheader: procedure;	                    /* Used in Process Data Display */
+  
+   call home; call clear;
+   call print$infield(20,'r',18,@('Virtual    Process'));
+   call crlf;
+   call print$infield(20,'r',18,@('Console     Name  '));
+   call print$infield(37,'r',35,@('Flag  Prior   Status       Resource'));
+   call crlf;
+   call print$infield(20,'r',18,@('-------    -------'));
+   call print$infield(37,'r',35,@('----  -----   ------       --------'));
+  
+   end prntheader;
+
+
+   
+   disp$status: procedure(stat);          /* Prints formatted status field */
+     dcl stat byte;                       /* of Process display.           */
+
+         if (stat >=0) and (stat < 11) then do; 
+         do case stat; 
+                 call print$infield(13,'l',5,@('READY'));
+                 call print$infield(13,'l',4,@('POLL'));
+                 call print$infield(13,'l',5,@('DELAY'));
+                 call print$infield(13,'l',4,@('SWAP'));
+                 call print$infield(13,'l',9,@('TERMINATE'));
+                 call print$infield(13,'l',5,@('SLEEP'));
+                 call print$infield(13,'l',7,@('READING'));
+                 call print$infield(13,'l',7,@('WRITING'));
+                 call print$infield(13,'l',9,@('FLAG WAIT'));
+                 call print$infield(13,'l',8,@('CIO WAIT'));
+                 call print$infield(13,'l',8,@('SYNCHING'));
+         end;
+         end;
+         else		
+            call print$infield(13,'l',5,@('ERROR'));
+
+    end disp$status; 	         
+
+
+      
+   disp$resource: procedure(stats,rsrce);/* Prints formatted resource field */
+      dcl stats byte;                    /* of Process display.             */
+      dcl (rsrce,offs) word;
+      dcl (count,notfound) byte;         /* For flag table traversal        */
+
+      if (stats >=0) and (stats < 11) then do;
+      do case stats;
+              call print$infield(13,'l',3,@('CPU         '));	/* Case 0 */
+              do;                                               /* Case 1 */
+               call print$infield(8,'l',8,@('DEVICE #'));
+               call print$hex$byte(4,'l',low(rsrce));
+              end;
+              do;                                               /* Case 2 */
+               call print$infield(8,'l',8,@('TICKS = '));
+               call print$hex$word(4,'l',rsrce);
+              end;
+               call print$infield(13,'l',7,@('SWAPERR     '));  /* Case 3 */
+               call print$infield(13,'l',3,@('CPU         '));	/* Case 4 */
+              do;
+                if rsrce = sd.rlr then                          /* Case 5 */
+                   call print$infield(13,'l',10,@('READY LIST'));
+                else if rsrce = sd.dlr then
+                   call print$infield(13,'l',10,@('DELAY LIST'));
+                else if rsrce = sd.drl then
+                   call print$infield(13,'l',10,@('DISPATCHER'));
+                else if rsrce = sd.plr then
+                   call print$infield(13,'l',9,@('POLL LIST'));
+                else
+                   call print$infield(13,'l',5,@('OTHER'));     
+              end;
+              do;                                               /* Case 6 */
+               qd$ptr.offset = rsrce;
+               call print$in$field(12,'l',pnamsiz,@qd.name);
+              end;
+              do;                                               /* Case 7 */
+               qd$ptr.offset = rsrce;
+               call print$infield(12,'l',pnamsiz,@qd.name);
+              end;	
+              do;                                               /* Case 8 */
+                call co(023h);                              /* A '#' sign */
+                if rsrce <> 0ffffh then
+                call print$hex$byte(12,'l',low(rsrce));
+                else
+                call print$in$field(12,'l',1,@('?'));
+              end;
+              do;                                               /* Case 9 */
+              call print$infield(10,'l',9,@('CONSOLE #'));
+	      call display$hex$byte(low(rsrce));
+              end;
+              call print$infield(13,'l',13,@('             ')); /* Case 10*/
+          end; /* case */
+       end;
+       else                                       /* Invalid Status Value */
+       call print$infield(12,'l',5,@('ERROR'));  
+      end disp$resource; 		
+
+dcl pd$list (64) structure (          /* Stores fields of successive pd's.*/
+                   cns  byte,
+                   name (8) byte,
+                   flag word,
+                   prior byte,
+                   stat byte ,
+                   resource word);
+   
+dcl link$list (64) word;
+
+display$proc: procedure(lnkfield);
+   dcl lnkfield byte;	       /* True = user proc's only,False = all proc's*/
+   dcl (char,temp) byte;       /* Temp controls continuous printout */
+   dcl (k,n) byte,
+       (notfound,i) byte;
+          
+   if not(specified) then
+   intrval = get$intrval;      /* Find out from user what kind of display  */
+   temp = true;
+   call prntheader;
+      
+   do while (temp or repeat);            /* Display until user hits any key */
+   disable;			 /* critical section required to obtain list*/
+   temp = false;
+   n = -1; 
+   pd$ptr.offset = sd.thrdrt;                 /* Start at Thread List root. */
+getpds:	                                        /* Put all pd's on the list */
+   do while (pd$ptr.offset <> 0) and (n <> maxpd);
+      n = n + 1;
+      if not(lnkfield) or (pd.mem <> 0) then /* Is it user processes only ? */
+      do;                         /* Either display all processes anyway or */
+                                  /* or this is a valid user process.       */
+      pd$list(n).cns = pd.cns;
+       do i= 0 to pnamsiz-1;
+          pd$list(n).name(i) = pd.name(i);
+       end;
+      pd$list(n).flag = pd.flag;
+      pd$list(n).prior = pd.prior;
+      pd$list(n).stat = pd.stat;
+                                  /* Use sysdat info to determine what each*/
+                                  /* process is waiting for or using. Get  */
+                                  /* Queue names,flag #'s,system ticks,list*/
+                                  /* names and device or console #'s. Must */
+                                  /* be done in critical region.           */
+      i = pd.stat;                /* Save this to determine resource .     */
+      if (i = 1) or (i = 2 )then
+         pd$list(n).resource = pd.wait;  /* Device # or # of ticks delayed */
+      else
+      if i = 5 then             /* Process is sleeping - find out which list*/
+           do;
+           uda$ptr.segment = pd.uda;
+           uda$ptr.offset = 0;
+           pd$list(n).resource = uda.dparam;
+           end;
+      else
+      if (i = 6) or (i = 7) then   /* Process is reading from or writing to */
+         do;                       /* a queue. Get address of queue name.   */
+           uda$ptr.segment = pd.uda;
+           uda$ptr.offset = 0;
+           if i = 6 then
+           pd$list(n).resource = (uda.dparam) - 12h;
+           else
+           pd$list(n).resource = (uda.dparam) - 14h;
+         end;     
+      else
+      if i = 8 then               /* Process is waiting on a flag, get the #*/
+         do;
+         pd$list(n).resource = 0ffffh;         /* Remains if no flag found .*/
+         flag$ptr.offset = sd.flags;
+         notfound = true;
+         k = 0;                                            /* Flag counter */
+         do while notfound;
+            if (flag.pd <> pd$ptr.offset) then do;
+               k = k+ 1;
+               flag$ptr.offset = flag$ptr.offset + flaglen;
+               if k > sd.nflags then                        /* End of table */
+                  notfound = false;
+               end;
+            else                                         /* This is the flag*/ 
+               do;
+               pd$list(n).resource = k;
+               notfound = false;
+               end;  
+           end;
+         end;
+      else
+      if i = 9 then do;
+         pd$list(n).resource = pd.cns;           
+         end;   
+     end;                                                 /* Valid processes*/ 
+     else
+          n = n-1;                               /* Ignore system processes */
+      pd$ptr.offset = pd.thread;                     /* Get the next process*/
+   end getpds;
+		                               
+  if n = -1 then return;                             /* stop here if no pds */ 
+
+enable;
+call home; call skip$lines(3);                       /*  enables interrupts */ 
+printpds:
+   do k = 0 to n;
+      if k <> 0 then call crlf;
+      call print$hex$byte(7,'r',pd$list(k).cns);/* print virtual console #*/
+      call print$buffer(.('      $'));    
+      call print$infield(9,'l',pnamsiz,@pd$list(k).name); /* print name */
+      call print$hex$word(8,'l',pd$list(k).flag);
+      call print$hex$byte(7,'l',pd$list(k).prior);  /* print its priority */
+      call disp$status(pd$list(k).stat);          /* print process status */
+      call disp$resource(pd$list(k).stat,pd$list(k).resource);
+                                                        /* print resource */
+      
+    end printpds;
+   
+    if n < 21 then do;
+    do k = n to 18;
+       call print$buffer(.(CR,LF,
+    '                                                                     $'));
+    end;
+    end; 
+
+
+if constat then do;                             /* Check for User Interrupt*/
+    repeat = false;
+    char = conin;                                     /* Swallow stop char */
+    end;  
+if repeat then do;                              /* If still going,delay it */
+    call delay(intrval);                        /* and go back to loop top */
+    if (n >= 20) then
+       call prntheader; 
+   end;
+else do;
+   if not(specified) then                      /* If not comline args then */ 
+   call cons$wait;                             /* let them get to main menu*/
+   else
+   call terminate;
+   end;
+
+end;/*while loop*/
+
+end display$proc;
+
+
+dcl sortrecd structure ( name (8) byte,        /* Stores data when sorting*/
+                         start    word,	         
+                         pd       word,
+                         len      word,
+                         cns      byte );	
+
+dcl sortarray (80) structure (	               /* For sorting and printing*/
+                         name (8) byte,
+                         start    word,
+                         pd       word,
+                         len      word,
+                         cns      byte );
+
+dcl sharearray (80) structure (                  /* For Shared Code List */
+                         name (8) byte,
+                         start    word,
+                         disk     byte,
+                         user     byte,
+                         len      word,
+                         cns      byte );
+
+disp$memhdr :  procedure;
+
+  call home; call clear;
+  call print$buffer(.('Process   Virtual                    | $'));
+  call print$buffer(.('Process   Virtual  $'));
+  call print$buffer(.(CR,LF,' Name     Console  PD#   Start  Len  | $'));
+  call print$buffer(.(' Name     Console   PD#   Start  Len $'));
+  call print$buffer(.(CR,LF,'________  _______  ____  _____  ____ | $'));
+  call print$buffer(.(' _______  _______   ____  _____  ____$'));
+  
+
+end disp$memhdr;
+
+print$sorted: 	                    /* Prints two columns of memory data */
+      procedure(cnt,scnt);          /* Uses sorted array of structures.  */
+  dcl (cnt,scnt) byte,              /* cnt: regular mem,scnt: shared mem */
+      (m,q,k)    byte;
+
+
+  call home;
+  call skip$lines(3);
+  
+  if (cnt > 1) then do;                  /* Must have two per line here */  
+  do m = 0 to ((cnt/2)-1) ;                  /* If odd #, hold last one */
+      if m > 0 then
+      call crlf;		     /* Print 2 columns,ascending values*/
+      k = m; 
+      do q = 1 to 2 ;
+          call print$infield(12,'l',pnamsiz,@sortarray(k).name);
+          if sortarray(k).cns = 030h then
+             call print$buffer(.('       $'));
+          else call print$hex$byte(7,'l',sortarray(k).cns); 
+          call print$hex$word(6,'l',sortarray(k).pd);
+          call print$hex$word(7,'l',sortarray(k).start);
+          call print$hex$word(5,'l',sortarray(k).len);
+          if (q mod 2) <> 0 then
+             call print$buffer(.('|  $'));
+          k = k + (cnt/2);             /* Go to other half of the array */
+          end;
+      end;
+    end;    
+
+    if (cnt mod 2) <> 0 then do;           /* Only put one on last line */
+                                               /* Print blanks on left  */
+       call print$buffer(.(CR,LF,
+                         '                                     |  $'));
+       call print$infield(12,'l',pnamsiz,@sortarray(cnt-1).name);
+       if sortarray(cnt-1).cns = 030h then
+          call print$buffer(.('       $'));
+       else
+          call print$hex$byte(7,'l',sortarray(cnt-1).cns);
+       call print$hex$word(6,'l',sortarray(cnt-1).pd); 
+       call print$hex$word(7,'l',sortarray(cnt-1).start);
+       call print$hex$word(5,'l',sortarray(cnt-1).len);
+     end;
+                                            /* Print Shared Code,if any */
+     if (scnt > 0) then do;
+        call print$buffer(.(CR,LF,
+        '                          Shared  Code  List                 $'));
+        call print$buffer(.('               $'));
+        end;
+   
+     if (scnt > 1) then do;              /* At least 1 full line to display .*/
+        do m = 0 to ((scnt/2) - 1);      /* If there's an odd # of partitions*/
+           call crlf;                    /* this will print all but last one.*/
+           k = m;
+           do q = 1 to 2;
+              call print$infield(12,'l',pnamsiz,@sharearray(k).name);
+              if sharearray(k).cns = 030h then
+               call print$buffer(.('       $'));
+              else
+               call print$hex$byte(7,'l',sharearray(scnt-1).cns);
+              call print$hex$byte(2,'l',sharearray(k).disk);
+              call print$hex$byte(4,'l',sharearray(k).user);
+              call print$hex$word(7,'l',sharearray(k).start);
+              call print$hex$word(5,'l',sharearray(k).len);
+              if (q mod 2) <> 0 then
+                  call print$buffer(.('|  $'));
+              k = k + (scnt/2);
+              end;
+           end;
+          end;
+
+         if (scnt > 0) then do;                 /* Check if one is left   */
+                                     
+             if (scnt mod 2) <> 0 then do;      /* Odd # of md's.         */
+                                                /* Put just 1 on last line*/
+             call print$buffer(.(CR,LF,
+                         '                                     |  $'));
+             call print$infield(12,'l',pnamsiz,@sharearray(scnt-1).name);
+             if sharearray(scnt-1).cns = 030h then
+              call print$buffer(.('       $'));
+             else
+              call print$hex$byte(7,'l',sharearray(scnt-1).cns);
+             call print$hex$byte(2,'l',sharearray(scnt-1).disk);
+             call print$hex$byte(4,'l',sharearray(scnt-1).user);
+/***         call print$infield(13,'r',13, @('**     ****  $'));   ***/
+             call print$hex$word(7,'l',sharearray(scnt-1).start);
+             call print$hex$word(5,'l',sharearray(scnt-1).len);
+           end;
+
+         scnt = scnt + 1;                        /* Count its heading    */
+      end;  
+     
+     if ((cnt+scnt)/2) < 21 then do;             /* Clear rest of screen */
+     do k = ((cnt+scnt)/2) to 18;
+        call print$buffer(.(CR,LF,
+        '                                                                 $'));
+        call print$buffer(.('           $'));
+        end;  
+     end;
+    
+ 
+end print$sorted;
+
+
+display$mem:  procedure;
+  dcl (i,mdcnt,pdcnt) byte;              /* Mdcnt = memory descriptor count*/
+  dcl (x,y) byte,                        /* Pdcnt = process descr. count   */
+      (cont,scdcnt) byte,                     /* cont = Boolean 'continue' */
+      n integer,  
+      (temp,chr) byte,
+      savmau word;
+
+  if not(specified) then
+  intrval = get$intrval;                /* Get hex value from terminal */
+  temp = true;     
+
+  call home; call clear;    
+  call disp$memhdr;
+  do while (temp or repeat);                    /* Display at least once */
+  temp = false;
+  do pdcnt = 0 to maxpd;
+     link$list(pdcnt) = 0;
+     end;
+  n = -1;
+  pdcnt = 0;
+  
+
+  disable;                  /* Critical section required to obtain list */
+
+getmemowners:
+  pd$ptr.offset = sd.thrdrt;                    /* Start at Thread Root */
+    do while (pd$ptr.offset <> 0) and (pdcnt <> maxpd);
+       if pd.mem <> 0 then do; 	                /* If it owns memory,   */
+         link$list(n:=n+1) = pd$ptr.offset;     /* put it on the list.  */
+         pdcnt = pdcnt + 1;
+       end; 
+       pd$ptr.offset = pd.thread;               /* Go to next process   */
+     end;	
+  if pdcnt = 0 then return;
+  
+getmds: 
+  mdcnt = 0;					
+  do i = 0 to (pdcnt-1);
+     pd$ptr.offset = link$list(i);             /* Reset Proc Descriptor */
+     ms$ptr.offset = pd.mem;
+     cont = true;
+     do while (cont and (mdcnt <= maxmd));	
+         sortarray(mdcnt).pd = pd$ptr.offset;   /* Get proc descriptor  */
+         cont = false;
+         md$ptr.offset = ms.mau;                /* Md is on MAL         */
+         sortarray(mdcnt).start = md.start;
+         sortarray(mdcnt).len = md.length;
+         sortarray(mdcnt).cns = pd.cns;
+         do x = 0 to 7;                            /* Get  owner's name */
+            sortarray(mdcnt).name(x) = pd.name(x); /*  A byte at a time */
+            end;
+         if ms.link <> 0 then do;               /* More md's for this   */ 
+                                                /* process ?            */
+            savmau = ms.mau;
+            ms$ptr.offset = ms.link;
+            do while (ms.mau = savmau) and (ms.link <> 0);
+               savmau = ms.mau;                 /* Look for a different */
+               ms$ptr.offset = ms.link;         /* partition,same pd.   */
+               end;
+            if (savmau <> ms.mau) then          /* Check if same mau    */ 
+               cont = true;                 /* If not, go get another md*/
+            end;
+          mdcnt = mdcnt + 1;                 
+
+       end;                         /* while cont : a single pd's memory*/
+
+   end;                                               /* All pd's memory*/
+
+                                 /* That's all the used memory. Now go  */
+                                 /* to the Memory Free List.            */
+      md$ptr.offset = sd.mfl;
+      do while md$ptr.offset <> 0 and (mdcnt < maxmd);
+         do x = 0 to 7;
+            sortarray(mdcnt).name(x) = freename(x); /*Use 'FREE' as name*/
+         end;
+         sortarray(mdcnt).start = md.start;
+         sortarray(mdcnt).pd = 0;
+         sortarray(mdcnt).len = md.length;
+         sortarray(mdcnt).cns = 030h;
+         mdcnt = mdcnt+1;
+         md$ptr.offset = md.link;
+      end;
+                                                  /* Get shared code  */
+    getshared:                                    /* Free and used    */
+         n = -1;
+         pdcnt = 0;
+         scdcnt = 0;
+         pd$ptr.offset = sd.slr;                 /* Top of shared list*/
+         do while (pd$ptr.offset <> 0) and (pdcnt < maxpd);
+            link$list(n:=n + 1) = pd$ptr.offset;
+            pdcnt = pdcnt + 1; 
+            pd$ptr.offset = pd.thread;
+            end;
+        if (pdcnt > 0) then do;
+            do i = 0 to (pdcnt-1);
+               pd$ptr.offset = link$list(i);
+               ms$ptr.offset = pd.mem;
+               cont = true;
+               do while (cont and (scdcnt < maxmd));         
+                  cont = false;
+                  sharearray(scdcnt).cns = pd.cns;
+;                  sharearray(scdcnt).disk = pd.ldsk;
+;                  sharearray(scdcnt).user = pd.luser;
+                  md$ptr.offset = ms.mau;
+                  sharearray(scdcnt).start = md.start;
+                  sharearray(scdcnt).len = md.length;
+/*****
+
+    The follow is not needed as the code after sortmds will
+   put in process name or free
+
+                  if pd.prior = 0 then do;                 
+                    do x = 0 to (pnamsiz - 1);
+                        sharearray(scdcnt).name(x) = freename(x); 
+                        end; 
+                     end; 
+                  else do;          
+                     do x = 0 to (pnamsiz - 1); 
+                        sharearray(scdcnt).name(x) = pd.name(x); 
+                        end; 
+                     end; 
+*****/
+                  if (ms.link <> 0) then do;
+                     savmau = ms.mau;
+                     ms$ptr.offset = ms.link;
+                     do while (ms.mau = savmau) and (ms.link <> 0);
+                        savmau = ms.mau;
+                        ms$ptr.offset = ms.link;
+                        end;
+                     if (ms.mau <> savmau) then
+                          cont = true;
+                     end;
+                  scdcnt = scdcnt + 1;
+         end;
+      end; 
+    end;
+     
+    enable;                                   /* End critical section */
+
+                                   /* Now sort the list of partitions */
+  sortmds : 
+          do x = 0 to (mdcnt-1);
+	  sortrecd.start = sortarray(x).start;
+          do i = 0 to 7;  
+	     sortrecd.name(i) = sortarray(x).name(i);
+          end;
+	  sortrecd.len = sortarray(x).len;
+          sortrecd.pd = sortarray(x).pd;
+	  sortrecd.cns = sortarray(x).cns;
+          y = x;
+   find : do while (y > 0) and ( sortarray(y-1).start > sortrecd.start);
+          sortarray(y).start = sortarray(y-1).start;
+          do i = 0 to 7;
+	     sortarray(y).name(i) = sortarray(y-1).name(i);
+	  end;
+          sortarray(y).len = sortarray(y-1).len;
+          sortarray(y).pd = sortarray(y-1).pd;
+	  sortarray(y).cns = sortarray(y-1).cns;
+          y = y-1;
+          end find;
+
+          sortarray(y).start = sortrecd.start;
+          do i = 0 to 7;
+	     sortarray(y).name(i) = sortrecd.name(i);
+	  end;
+          sortarray(y).len = sortrecd.len;
+          sortarray(y).pd = sortrecd.pd;
+	  sortarray(y).cns = sortrecd.cns;
+          end sortmds;
+
+/*  This code has been added to show when an shaered code memory
+    block is free to be given to a new process                   */  
+
+  if (pdcnt>0) then do;
+    do i=0 to (pdcnt-1);
+      x=0;
+      do while ((sharearray(i).start >= (sortarray(x).start+sortarray(x).len))
+              and (x<mdcnt));
+        x = x + 1;
+        end;
+
+/** next 7 lines needed as some free chunks are not in sortarray.  This
+      comes about as shared code chunks are not put back on the memory
+      free list until 1). It is needed or 2). a disk reset is done in
+      which shared code that orginated from disk in question are freed.  **/
+
+      if (sharearray(i).start<sortarray(x).start) then do;
+        do y=0 to 7;
+          sharearray(i).name(y)=freename(y);
+          end;
+        sharearray(i).cns = 030H;   /*** blank ***/
+        sharearray(i).user = 0;       /*** no owner ***/ 
+        sharearray(i).disk = 0;
+        end;
+      else do;      /*** there is a chunk (free or used) ***/
+        do y=0 to 7;
+          sharearray(i).name(y) = sortarray(x).name(y);
+          end;
+        sharearray(i).cns = 030H;    /*** blank ***/
+        sharearray(i).user = 0;        /*** no owner ***/
+        sharearray(i).disk = 0;
+        end;
+      end;
+    end;
+
+
+  call print$sorted(mdcnt,scdcnt);              /* Print the sorted list */
+  if constat then do;                           /* Want to loop again ?  */
+     repeat = false;
+     chr = conin;                               /* Swallow stop char     */
+     end;
+  if repeat then do;                         /* Keep looping,delay first */
+     if ((mdcnt / 2) >= 20) then
+        call disp$memhdr;
+     call delay(intrval);
+     end;
+  else do;
+     if not(specified) then                     /* Get back to main menu*/
+     call cons$wait;                       
+     else                                       /* Skip menu, -> system */
+     call terminate;                        
+     end;
+   end;/*while*/
+
+end display$mem;
+
+
+dcl qlist (64) structure (
+               name (8) byte,
+               nmsgs word,
+               msglen word,
+               msgcnt word,
+               nq word,
+               dq word,
+               owner (8) byte,
+               flags byte);
+
+print$qhdr: procedure;	                        /* Print Queue Heading */
+
+   call home; call clear;
+   call print$buffer(.('   NAME    NMSGS   MSGLEN  MSGCNT  $'));
+   call print$buffer(.('READER   WRITER   MX-OWNER  FLAGS  $'));
+   call crlf;
+   call print$buffer(.(' ________  ______  ______  ______  $'));
+   call print$buffer(.('______   ______   ________  _____ $'));
+   call crlf;
+   
+end print$qhdr;
+        
+
+display$flag$status:                        /* Print Queue Flag Status*/
+        procedure(flag);
+  dcl prev boolean;
+  dcl (i,flag,cnt) byte;
+
+  prev = false;
+  i = 1;
+  cnt = 0;
+
+  do while (i <= maxqflags) ;  
+  if (flag and i) <> 0 then do;
+     if prev then do;                      /* Take care of formatting */
+        call co(',');
+        cnt = cnt + 1;                     /* Count all chars         */
+        end;
+     call display$hex$byte(i);
+     cnt = cnt + 2;
+     prev = true;
+     end;
+   i = i*2;                              /* Flags are 1 bit each        */
+   end;
+   do i = cnt to 14;                     /* Clear previous line's flags */
+      call co(' ');
+   end;
+
+end display$flag$status;
+
+
+display$queue:
+              procedure;
+dcl temp byte,
+    n integer,
+    (qdcnt,cont) byte,
+    (chr,i) byte;
+
+   if not(specified) then
+   intrval = get$intrval;       
+   temp = true;
+   call print$qhdr;
+
+   do while ( temp or repeat);
+   temp = false;
+   qdcnt = 0;
+   call home; call skip$lines(2);
+
+ getqueues:
+   disable;                                   /* Begin Critical Section */ 
+   qd$ptr.offset = sd.qlr;
+   do while ((qdcnt < maxqueues) and (qd$ptr.offset <> 0)) ;
+     do i = 0 to pnamsiz-1; 
+     qlist(qdcnt).name(i)= qd.name(i);
+     end;
+     qlist(qdcnt).nmsgs = qd.nmsgs;
+     qlist(qdcnt).msglen = qd.msglen;
+     qlist(qdcnt).msgcnt = qd.msgcnt;
+     qlist(qdcnt).nq = qd.nq;
+     qlist(qdcnt).dq = qd.dq;
+     if ((qd.flags mod 2) <> 0) then do;            /* It's an MX queue */
+        pd$ptr.offset = qd.buffer;
+        if pd$ptr.offset <> 0 then                   /* It has an owner */
+           do i = 0 to pnamsiz -1;
+              qlist(qdcnt).owner(i) = pd.name(i);
+           end; 
+        else                                      /* No one owns it now */ 
+           do i = 0 to pnamsiz-1;                 /* Print blanks       */ 
+              qlist(qdcnt).owner(i) = ' ';
+           end;
+      end;
+     else                                        /* It's not an MX queue*/
+          do i = 0 to pnamsiz-1;
+             qlist(qdcnt).owner(i) = ' ';
+          end;  
+     qlist(qdcnt).flags = qd.flags;
+     qdcnt = qdcnt + 1;
+     qd$ptr.offset = qd.link;
+    end; 
+   enable;                                      /* End critical section */
+
+   print$qds:                                   /* Print the Queue info */
+     do i = 0 to qdcnt-1;
+     call print$buffer(.(' $')); 
+     call print$infield(11,'l',pnamsiz,@qlist(i).name);/* Queue Name   */
+     call print$hex$word(8,'l',qlist(i).nmsgs);       /* Number of Msgs*/
+     call print$hex$word(8,'l',qlist(i).msglen);      /* Message Length*/
+     call print$hex$word(7,'l',qlist(i).msgcnt);      /* Message Count */
+     pd$ptr.offset = qlist(i).dq;
+     if pd$ptr.offset <> 0 then
+          call print$infield(9,'l',pnamsiz,@pd.name);
+     else
+          call print$buffer(.('         $'));
+     pd$ptr.offset = qlist(i).nq;
+     if pd$ptr.offset <> 0 then
+          call print$infield(9,'l',pnamsiz,@pd.name);
+     else
+          call print$buffer(.('         $'));
+     call print$infield(10,'l',pnamsiz,@qlist(i).owner);   /* Print it */
+     call display$flag$status(qlist(i).flags);      /* Print Flag Value*/
+     call crlf;
+          end;
+
+                                                 /* Print the Flag Key */
+  call print$buffer(.('     Flag Values :  1 = MX, 2 = NO DELETE, $'));
+  call print$buffer(.('4 = NOT USER WRITEABLE, $'));
+  call crlf;
+  call print$buffer(.('     8 = RSP, 10 = FROM QD TABLE, 20 = RPL QUEUE, $'));
+  call print$buffer(.('40 = DEVICE QUEUE.$'));
+  qdcnt = qdcnt - 1;                            /* To normalize */
+   
+  if (qdcnt < 22) then do;
+     do i = qdcnt to  17;
+       call print$buffer(.(CR,LF,
+'                                                                             $'));
+         end;
+     end;
+
+  if constat then do;                                /* Check for continue */
+     repeat = false;
+     chr = conin;
+     end;
+  if repeat then do;                             /* Keep going,delay first */
+     call delay(intrval);
+     if (qdcnt >= 19) then do;
+     call print$qhdr;
+     end;
+     end;
+  else do;                                         /* Stop display        */
+     if not(specified) then                        /* Go to main menu     */
+     call cons$wait;
+     else                                          /* Go back to system   */
+     call terminate; 
+     end;
+  end; /* while loop */
+
+end display$queue;
+	 
+dcl cns$list (32) structure (
+                  phys byte,
+                  virt byte,
+                  state word,
+                  name (8) byte);
+
+print$cnshdr: procedure;
+
+    call home; call clear;
+    call print$infield(20,'r',20,@('  PHYSICAL   VIRTUAL$'));
+    call crlf;
+    call print$infield(20,'r',20,@('  CONSOLE    CONSOLE$'));
+    call print$infield(39,'l',18,@('    NAME     STATE$'));
+    call crlf;
+    call print$infield(20,'r',20,@('  --------   -------$'));
+    call print$infield(39,'l',18,@('  --------   -----$'));
+    call crlf;
+end print$cnshdr;
+    
+display$cons: procedure(vers);
+dcl (vers,char) byte;
+dcl (count,index) byte;
+dcl temp byte;
+dcl state word;
+
+     if vers then do;
+        call home; call clear;
+        call crlf; call crlf;
+        call print$buffer(.('Not implemented for MP/M-86 2.1         $'));
+        return;
+        end;
+
+     index = 0;
+
+     if not(specified) then    /* If user has not used com line specs */
+        intrval = get$intrval; /* see if continuous display is needed */
+     temp = true;
+     call print$cnshdr;
+
+     do while (temp or repeat);              /* Do at least once and     */  
+     disable;                                /* maybe keep going until   */
+     vccb$ptr.offset = sd.ccb;               /* user hits a key to stop  */
+     temp = false;
+     do count = 0 to (sd.ncns - 1);          /* Do all vccbs             */
+        cns$list(count).phys = vccb.pc;      /* Get the physical cons #  */
+        cns$list(count).virt = vccb.vc;      /* Get virtual console #    */
+        cns$list(count).state = vccb.state;  /* Get state word           */
+        if vccb.attach <> 0 then do;         /* If owned, get owner name */
+           pd$ptr.offset = vccb.attach;      /* Attach = owner's offset  */
+           do index = 0 to pnamsiz - 1;
+              cns$list(count).name(index) = pd.name(index);
+           end;
+           end;
+        else                                 /* Else no one owns it     */
+           cns$list(count).name(0) = 0;      /* We'll print "FREE" later*/
+        vccb$ptr.offset = vccb$ptr.offset + vccb$len ;
+        end;
+     enable;
+                                             /* Now interpret and print */ 
+     call home; call skip$lines(3);
+
+ print$cns: 
+     do count = 0 to (sd.ncns - 1);
+        
+        call print$hex$byte(7,'r',cns$list(count).phys); /* Physical #  */
+        call print$hex$byte(10,'r',cns$list(count).virt); /* Virtual #   */
+
+        if cns$list(count).name(0) = 0 then       /* No one owns this one*/
+           call print$infield(13,'r',8,@freename);
+        else                        
+           call print$infield(13,'r',8,@cns$list(count).name);
+          
+                                                 /* Now print its states */
+        state = cns$list(count).state;
+        if ((state and 02h) <> 0)              /* either foregr or backgr*/
+           then call print$infield(6,'r',5,@(' BACK'));
+           else call print$infield(6,'r',5,@(' FORE'));
+        if ((state and 01h) <> 0)              /* either buffered or dyna*/
+           then call print$infield(5,'r',5,@(',BUFF'));
+           else call print$infield(5,'r',5,@(',DYNA'));
+        if ((state and 04h) <> 0) then       /* It's purging             */
+           call print$infield(8,'r',8,@(',PURGING'));
+        if ((state and 08h) <> 0) then       /*  It's in Noswitch mode   */
+           call print$infield(8,'r',8,@(',NOSWTCH'));
+        if ((state and 010h) <> 0) then      /*  It's suspended          */
+           call print$infield(5,'r',5,@(',SUSP'));
+        if ((state and 020h) <> 0) then     /* It's owner is terminating */
+           call print$infield(6,'r',6,@(',ABORT'));
+        if ((state and 040h) <> 0) then     /* It's in filefull mode     */
+           call print$infield(9,'r',9,@(',FILEFULL'));
+        if ((state and 080h) <> 0) then     /* It's in ^S mode           */
+           call print$infield(3,'r',3,@(',^S'));
+        if ((state and 0100h) <> 0) then    /* It's in ^O mode           */
+           call print$infield(3,'r',3,@(',^O'));
+        if ((state and 0200h) <> 0) then    /* It's in ^P mode           */
+           call print$infield(3,'r',3,@(',^P'));
+        call print$infield(15,'r',1,@(' '));/* Clear rest of line        */
+        call crlf;
+        end;
+        if sd.ncns < 21 then do;
+           do index = sd.ncns to 18;
+              call print$buffer(.(CR,LF,
+    '                                                                    $'));
+           end;
+        end;
+        if constat then do;
+           repeat = false;
+           char = conin;
+           end;
+        if repeat then do;
+           call delay(intrval);
+           if (sd.ncns >= 20) then
+              call print$cnshdr;
+           end;
+        else do;
+           if not(specified) then
+              call cons$wait;
+              else
+              call terminate;
+              end;
+end; /* while loop */
+
+end display$cons;     
+
+dcl driv$letter (*) byte data ('ABCDEFGHIJKLMNOP');
+
+display$gen: procedure(vers);                  /* Overview Display Routine*/
+   dcl vers byte;
+   dcl (count,qsize) word;
+   dcl mode word;
+   
+   
+   call home; call clear;
+   pd$pointer = get$currpd;                 /* Get PD for Current Process*/
+   vccb$ptr.offset = sd.ccb + (pd.cns * size(vccb));
+
+   call crlf; call print$infield(42,'r',17,@('Default Disk =   '));
+   call co(driv$letter(pd.dsk));
+   call co(':'); 
+
+   call crlf; call print$infield(42,'r',24,@('Default User Number =   '));
+   call display$hex$byte(pd.user);
+
+   call crlf; call print$infield(42,'r',20,@('Default Printer =   '));   
+   if (vers) then                                         /* It's MPM-86 */
+   call display$hex$byte(pd.lst - sd.ncondev);
+   else                                               /* It's Concurrent */
+   call display$hex$byte(pd.lst);
+
+   if (vers) then do;                                    /* It's MP/M-86 */
+   call crlf; call print$infield(42,'r',29,@('Current Physical Console =   '));
+   end;
+   else do; 
+   call crlf; call print$infield(42,'r',28,@('Current Virtual Console =   '));
+   end;
+   call display$hex$byte(pd.cns);
+   
+   if (not vers) then do;   
+   call crlf;call print$infield(42,'r',20,@('Background Mode =   '));
+   mode = (vccb.state); 
+   if (mode >= 0) and (mode <= 0200h ) then do; 
+      if (mode mod 2) = 0 then
+      call print$buffer(.('DYNAMIC $'));
+      else
+      call print$buffer(.('BUFFERED$'));
+      end;
+   else call print$buffer(.('OTHER $'));
+   end;
+
+   if (not vers) then do;    
+   call crlf; call print$infield(42,'r',17,@('Buffer Space =   '));
+   call display$hex$word(vccb.maxbufsiz);
+   call co('K');
+   end;
+
+   call crlf; 
+   call print$infield(42,'r',31,@('Maximum Memory Per Process =   '));
+   call display$hex$word(sd.mmp);
+   call print$buffer(.('  PARA$'));
+   
+   call crlf; 
+   if not(vers) then 
+   call print$infield(42,'r',31,@('Number of Virtual Consoles =   '));
+   else
+   call print$infield(42,'r',32,@('Number of Physical Consoles =   '));
+   call display$hex$byte(sd.ncns);
+   
+   call crlf; call print$infield(42,'r',23,@('Number of Printers =   '));
+   call display$hex$byte(sd.nlst);
+   
+   call crlf; call print$infield(42,'r',20,@('Temporary Drive =   '));
+   call co(driv$letter(sd.tempdisk));
+   call co(':');
+   
+   call crlf; call print$infield(42,'r',17,@('System Drive =   '));
+   call co(driv$letter(sd.srchdisk));
+   call co(':');
+   
+   call crlf; call print$infield(42,'r',21,@('Ticks Per Second =   '));
+   call display$hex$byte(sd.tickspersec);
+   
+   call crlf; call print$infield(42,'r',20,@('Day File Option =   '));
+   if sd.dayfile = 0 then 
+      call print$buffer(.('NO $'));
+   else 
+      call print$buffer(.('YES$'));      
+        
+
+   call crlf; call print$infield(42,'r',23,@('BDOS Compatability =   '));
+   if sd.cmod <> 0 then
+      call print$buffer(.('YES$'));
+   else
+      call print$buffer(.('NO $'));
+   
+   call crlf; call print$infield(42,'r',20,@('Number of Flags =   '));
+   call display$hex$byte(sd.nflags);
+   
+   call crlf; call print$infield(42,'r',27,@('Free Queue Descriptors =   '));
+      pd$ptr.offset = sd.qul;
+      count = 0;
+      do while pd$ptr.offset <> 0;
+         count = count + 1;
+         pd$ptr.offset = pd.link;
+      end;
+   call display$hex$byte(count); 
+   
+   call crlf; call print$infield(42,'r',22,@('Free Queue Buffer =   '));
+        md$ptr.offset = .sd.qmau(0);
+        sat$ptr.segment = md.start;          /* start of qbuffer SAT       */
+        sat$ptr.offset = size(sat);          /* skip 1st 5 bytes bookeeping*/
+	qsize = 0;
+	do while sat.start <> 0;	     /* byte offset for queue buffer*/
+           if sat.num$allocs = 0 then        /* dooes anyone own this piece?*/
+              qsize = qsize + sat.len;
+           sat$ptr.offset = size(sat) + sat$ptr.offset; /* Get next entry   */
+        end;
+   call display$hex$word(qsize);
+   call print$buffer(.(' BYTES$'));
+   
+   call crlf; call print$infield(42,'r',29,@('Free Process Descriptors =   '));
+      pd$ptr.offset = sd.pul;
+      count = 0;
+      do while pd$ptr.offset <> 0;
+         count = count + 1;
+         pd$ptr.offset = pd.link;
+      end;
+   call display$hex$byte(count);
+   
+   call crlf; call print$infield(42,'r',28,@('Free Memory Descriptors =   '));
+      pd$ptr.offset = sd.mdul;
+      count = 0;
+      do while pd$ptr.offset <> 0;
+         count = count + 1;
+         pd$ptr.offset = pd.link;
+      end;
+   call display$hex$byte(count);
+   
+   call crlf;
+   if not(specified) then
+   call cons$wait;
+   else
+   call terminate;
+
+end displaygen;
+      
+
+
+
