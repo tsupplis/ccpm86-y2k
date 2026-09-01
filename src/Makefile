@@ -1,7 +1,7 @@
 PLM86=intel_plm86
 ASM86=intel_asm86
-DRASM86=zxasm86
-GENCMD=zxgencmd
+DRASM86=cpm_asm86
+GENCMD=cpm_gencmd
 RASM86=pcdev_rasm86
 LINK86=pcdev_linkcmd
 
