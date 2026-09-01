@@ -61,9 +61,7 @@ The sources are written in Intel PL/M-86 and ASM-86, located in the `src/` direc
 
 The build relies on the cross-development toolchain from:
 
-- **[cpm86-crossdev](https://github.com/tsupplis/cpm86-crossdev)** — provides the assemblers, linker, and CP/M-86 build utilities used by the Makefile (`cpm_asm86`, `cpm_gencmd`, `pcdev_rasm86`, `pcdev_linkcmd`)
-
-> **Caveat:** Intel PL/M is not yet integrated into the build toolchain. The `PLM86` variable in the Makefile references `intel_plm86` which must be provided separately. (in plan for incorporation in cpm86-crossdev)
+- **[cpm86-crossdev](https://github.com/tsupplis/cpm86-crossdev)** — provides all required build tools: the Intel PL/M-86 compiler, assemblers, linker, and CP/M-86 build utilities (`intel_plm86`, `cpm_asm86`, `cpm_gencmd`, `pcdev_rasm86`, `pcdev_linkcmd`)
 
 ### Building
 
