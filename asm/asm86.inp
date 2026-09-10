@@ -1,0 +1,4 @@
+asm86.lib = brexpr,cm,cm2,cmac1,cmac2,cmac3,cmac4,cmac5,
+cmsubr,dline,ermod,expr,files,global,instr,io,
+mnem1,mnem2,mnem3,mnem4,outp,predef,print,pseud1,
+pseud2,scan,subr1,subr2,symb,text
