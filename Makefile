@@ -1,7 +1,8 @@
-SUBDIRS=tools asm xios31
+SUBDIRS=tools asm ddt86 xios31
 
 DISTDIR=dist
 DISTZIP=dist.zip
+Y2KDISTZIP=y2k-dist.zip
 
 all clean:
 	@for d in $(SUBDIRS); do \
@@ -15,6 +16,10 @@ dist:
 		find $$d -maxdepth 1 -name '*.cmd' -exec cp {} $(DISTDIR)/ \; ; \
 	done
 	COPYFILE_DISABLE=1 zip -X -j $(DISTZIP) $(DISTDIR)/*.cmd
-	rm -rf $(DISTDIR)
+	COPYFILE_DISABLE=1 zip -X -j $(Y2KDISTZIP) $(DISTDIR)/sdir.cmd \
+	 $(DISTDIR)/tod.cmd \
+	 $(DISTDIR)/date.cmd \
+	 $(DISTDIR)/show.cmd \
+
 
 .PHONY: all clean dist $(SUBDIRS)

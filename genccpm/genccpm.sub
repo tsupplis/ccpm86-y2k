@@ -1,0 +1,8 @@
+drc genc1 -h
+drc genc2 -h
+drc genc3 -h
+drc genc4 -h
+drc genc5 -h
+drc genc6 -h
+link86 genccpm=genc1,genc2,genc3,genc4,genc5,genc6[libsyms
+

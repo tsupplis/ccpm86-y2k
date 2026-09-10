@@ -66,7 +66,7 @@ The `tools/` directory builds the following CP/M-86 `.cmd` executables. The Y2K-
 | `tod.cmd`     | Time-of-day utility                  |
 | `type.cmd`    | File type/display utility            |
 | `vcmode.cmd`  | Video console mode utility           |
-| `chset.cmd`   | Character set utility                |
+| `chset.cmd`   | Process config utility               |
 | `initdir.cmd` | Directory initialization utility     |
 
 The `asm/` directory builds `asm86.cmd`, DRI's native CP/M-86 8086 assembler.
