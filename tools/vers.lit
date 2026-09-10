@@ -1,0 +1,8 @@
+declare
+   bdos20 lit '20h',
+   bdos22 lit '22h',
+   bdos30 lit '30h',
+   mpm    lit '01h',
+   cpm86  lit '10h',
+   mpm86  lit '11h',
+   ccpm86 lit '14h';
