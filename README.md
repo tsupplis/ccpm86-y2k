@@ -1,6 +1,6 @@
 # Concurrent CP/M-86 & Concurrent DOS Y2K Patches
 
-This projects regroups patch versions of Concurrent Y2K OS utilties.
+This projects regroups patch versions of Concurrent Y2K OS utilties. It is also the premises for a full rebuild of Concurrent CP/M-86 3.1 starting with independent utilities.
 
 Currently the supported OSes are
 - Concurrent CP/M-86 3.1
@@ -27,9 +27,19 @@ The source for CP/M-86 and Concurrent CP/M-86, sources and binaries is http://ww
 
 A cleaned-up distribution and kernel is available at https://github.com/tsupplis/cpm86-kernel. This distribution is working well in virtual environments, patched with all known patches, 'y2k' friendly (it contains the version of tod which sources are in this project) and AT friendly.
 
-## Binaries
+## Repository Layout
 
-The `binaries/` directory contains all the compiled CP/M-86 `.cmd` executables. The Y2K-patched tools are listed in the table above. The full set of rebuilt binaries is:
+| Directory | Contents |
+|-----------|----------|
+| `tools/`  | PL/M-86 / ASM-86 sources for the Y2K-patched CP/M-86 utilities |
+| `asm/`    | Sources for ASM86, DRI's native CP/M-86 8086 assembler (self-hosted, runs under CP/M-86) |
+| `doc/`    | Reference documentation (the RASM-86/LINK-86/LIB-86 Programmer's Utilities Guide) |
+
+Each of `tools/` and `asm/` has its own `Makefile`, and a top-level `Makefile` drives both.
+
+## Utilities
+
+The `tools/` directory builds the following CP/M-86 `.cmd` executables. The Y2K-patched tools are listed in the compliance table above.
 
 | Binary        | Description                          |
 |---------------|--------------------------------------|
@@ -53,28 +63,41 @@ The `binaries/` directory contains all the compiled CP/M-86 `.cmd` executables. 
 | `type.cmd`    | File type/display utility            |
 | `vcmode.cmd`  | Video console mode utility           |
 
+The `asm/` directory builds `asm86.cmd`, DRI's native CP/M-86 8086 assembler.
+
 ## Sources and Build
 
-The sources are written in Intel PL/M-86 and ASM-86, located in the `src/` directory. A `Makefile` is provided to rebuild all tools.
+The sources are written in Intel PL/M-86 and ASM-86.
 
 ### Dependencies
 
 The build relies on the cross-development toolchain from:
 
-- **[cpm86-crossdev](https://github.com/tsupplis/cpm86-crossdev)** — provides all required build tools: the Intel PL/M-86 compiler, assemblers, linker, and CP/M-86 build utilities (`intel_plm86`, `cpm_asm86`, `cpm_gencmd`, `pcdev_rasm86`, `pcdev_linkcmd`)
+- **[cpm86-crossdev](https://github.com/tsupplis/cpm86-crossdev)** — provides all required build tools: the Intel PL/M-86 compiler, assemblers, linker, and CP/M-86 build utilities (`intel_plm86`, `cpm_asm86`, `cpm_gencmd`, `pcdev_rasm86`, `pcdev_linkcmd`, `pcdev_lib86`)
 
 ### Building
 
+Build everything from the repository root:
+
 ```sh
-cd src
 make
 ```
 
-The Makefile targets:
+This recurses into `tools/` and `asm/`. You can also build each independently:
 
-- **`all`** — builds all `.cmd` binaries and low-level snippets (`boot.h86`, `load.h86`, `lbdos.h86`, `lbdos3.sys`)
-- **`clean`** — removes all generated object and binary files
-- **`ccpmtest.img`** — creates a test CP/M disk image with all tools copied onto it
+```sh
+cd tools && make
+cd asm && make
+```
+
+The top-level Makefile targets:
+
+- **`all`** — builds all `.cmd` binaries in `tools/` and `asm/` (default)
+- **`clean`** — removes all generated object and binary files in both subdirectories
+- **`dist`** — collects every `.cmd` from `tools/` and `asm/` into a single flat `ccpm86-y2k.zip`
+
+The `tools/Makefile` additionally builds low-level snippets (`boot.h86`, `load.h86`, `lbdos.h86`, `lbdos3.sys`) and a `ccpmtest.img` test CP/M disk image with all tools copied onto it.
+
 
 ### Code Pattern Fixed for Y2K
 
