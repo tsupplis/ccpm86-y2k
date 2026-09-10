@@ -7,7 +7,7 @@ dist/**
 **/*.lin
 **/*.log
 **/*.sys
-**/*.lib
+tools/lib
 **/.*.swp
 **/*.obj
 **/*.o
