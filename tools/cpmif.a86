@@ -1,0 +1,44 @@
+;
+;	__CPMIF( func,arg ) is an extended version of __BDOS( func,arg )
+;	supplied with the DRC compiler.  The extension made was the
+;	saving of registers AX and CX in common data segments, as
+;	recommended by the DRC Language Programmer's Guide (p. 5-6,5-7)
+;
+;		_SYSERR		CX register save area
+;		_EXTERR		AX register save area
+;
+
+	PUBLIC	__CPMIF
+
+_SYSERR	DSEG	COMMON	BYTE
+REG_CX	RW	1
+
+_EXTERR	DSEG	COMMON	BYTE
+REG_AX	RW	1
+
+	DSEG
+
+DGROUP	GROUP	DATA
+DGROUP	GROUP	_SYSERR
+DGROUP	GROUP	_EXTERR
+
+	CSEG
+
+__CPMIF: ;(FUNC,ARG)
+	PUSH	BP
+	MOV	BP,SP
+	PUSH	DI
+	PUSH	SI
+	MOV	CX,4[BP]
+	MOV	DX,6[BP]
+	PUSH	BP
+	INT	0E0H
+	POP	BP
+	POP	SI
+	POP	DI
+	POP	BP
+	MOV	REG_AX,AX	;SAVE REG. AX
+	MOV	REG_CX,CX	;SAVE REG. CX
+	XOR	AH,AH
+	RET
+
