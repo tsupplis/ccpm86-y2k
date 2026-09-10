@@ -15,6 +15,8 @@ Only the PC/XT/AT targets have been tested. I suspect they should work with comp
 | SDIR         | Fixed     | Fixed     | Fixed     | Fixed       |
 | DATE         | Fixed     | Compliant | Compliant | Compliant   |
 | SHOW         | Fixed     | Fixed     | Compliant | Compliant   |
+| TOD          | Fixed     | Fixed     | Compliant | Compliant   |
+
 * Fixed indicates that one of the tools need to be updated on the OS distribution.
 
 - Concurrent DOS XM 6.21 seems fully compliant
@@ -31,11 +33,13 @@ A cleaned-up distribution and kernel is available at https://github.com/tsupplis
 
 | Directory | Contents |
 |-----------|----------|
-| `tools/`  | PL/M-86 / ASM-86 sources for the Y2K-patched CP/M-86 utilities |
+| `tools/`  | PL/M-86 / ASM-86 / PL/I-86 / C sources for the Y2K-patched CP/M-86 utilities |
 | `asm/`    | Sources for ASM86, DRI's native CP/M-86 8086 assembler (self-hosted, runs under CP/M-86) |
+| `ddt86/`  | Sources for DDT86, the CP/M-86 debugger, and its companion disassembler/table-generator |
+| `xios31/` | XIOS sources for Concurrent CP/M-86 3.1 (no standalone `.cmd`; produces `.h86`/`.lib`) |
 | `doc/`    | Reference documentation (the RASM-86/LINK-86/LIB-86 Programmer's Utilities Guide) |
 
-Each of `tools/` and `asm/` has its own `Makefile`, and a top-level `Makefile` drives both.
+Each of `tools/`, `asm/`, `ddt86/` and `xios31/` has its own `Makefile`, and a top-level `Makefile` drives all of them.
 
 ## Utilities
 
@@ -62,8 +66,18 @@ The `tools/` directory builds the following CP/M-86 `.cmd` executables. The Y2K-
 | `tod.cmd`     | Time-of-day utility                  |
 | `type.cmd`    | File type/display utility            |
 | `vcmode.cmd`  | Video console mode utility           |
+| `chset.cmd`   | Character set utility                |
+| `initdir.cmd` | Directory initialization utility     |
 
 The `asm/` directory builds `asm86.cmd`, DRI's native CP/M-86 8086 assembler.
+
+The `ddt86/` directory builds:
+
+| Binary        | Description                          |
+|---------------|--------------------------------------|
+| `ddt86.cmd`   | DDT86 dynamic debugging tool          |
+| `dis86.cmd`   | 8086 disassembler                    |
+| `gentab.cmd`  | Opcode table generator for the disassembler |
 
 ## Sources and Build
 
@@ -73,7 +87,7 @@ The sources are written in Intel PL/M-86 and ASM-86.
 
 The build relies on the cross-development toolchain from:
 
-- **[cpm86-crossdev](https://github.com/tsupplis/cpm86-crossdev)** — provides all required build tools: the Intel PL/M-86 compiler, assemblers, linker, and CP/M-86 build utilities (`intel_plm86`, `cpm_asm86`, `cpm_gencmd`, `pcdev_rasm86`, `pcdev_linkcmd`, `pcdev_lib86`)
+- **[cpm86-crossdev](https://github.com/tsupplis/cpm86-crossdev)** — provides all required build tools: the Intel PL/M-86 compiler, assemblers, linker, and CP/M-86 build utilities (`intel_plm86`, `cpm_asm86`, `cpm_gencmd`, `pcdev_rasm86`, `pcdev_linkcmd`, `pcdev_lib86`, `drpli_pc`, `drpli_link`, `drccpm_cc`, `drccpm_link`)
 
 ### Building
 
@@ -83,18 +97,20 @@ Build everything from the repository root:
 make
 ```
 
-This recurses into `tools/` and `asm/`. You can also build each independently:
+This recurses into `tools/`, `asm/`, `ddt86/` and `xios31/`. You can also build each independently:
 
 ```sh
 cd tools && make
 cd asm && make
+cd ddt86 && make
+cd xios31 && make
 ```
 
 The top-level Makefile targets:
 
-- **`all`** — builds all `.cmd` binaries in `tools/` and `asm/` (default)
-- **`clean`** — removes all generated object and binary files in both subdirectories
-- **`dist`** — collects every `.cmd` from `tools/` and `asm/` into a single flat `ccpm86-y2k.zip`
+- **`all`** — builds all `.cmd` binaries in every subdirectory (default)
+- **`clean`** — removes all generated object and binary files in every subdirectory
+- **`dist`** — collects every `.cmd` from all subdirectories into a single flat `dist.zip`
 
 The `tools/Makefile` additionally builds low-level snippets (`boot.h86`, `load.h86`, `lbdos.h86`, `lbdos3.sys`) and a `ccpmtest.img` test CP/M disk image with all tools copied onto it.
 
