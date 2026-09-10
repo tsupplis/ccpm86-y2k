@@ -227,4 +227,3 @@ end display$time$stamp;
 dcl last$data$byte byte initial(0);
 
 end timestamp;
-

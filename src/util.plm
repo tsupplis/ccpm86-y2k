@@ -146,4 +146,3 @@ p3byte: procedure(byte3adr,prec) public;
 end p3byte;
 
 end utility;
-
