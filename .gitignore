@@ -15,6 +15,7 @@ tools/lib
 **/*.sym
 **/*.lst
 **/*.map
+**/*.prn
 **/.vscode
 private/**
 **/*.img

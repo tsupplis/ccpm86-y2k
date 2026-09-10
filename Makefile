@@ -1,4 +1,4 @@
-SUBDIRS=tools asm
+SUBDIRS=tools asm xios31
 
 DISTDIR=dist
 DISTZIP=dist.zip

@@ -1,0 +1,379 @@
+; **********************************************************************
+; initdira - Provides BIOS (XIOS) assembler interface for INITDIR.PLI
+; 	   - Also provides examples of how to:
+;		1. Call CCP/M-86 XIOS
+;		2. Lock up disk system for direct disk I/O
+;		3. Lock up console, to prevent a job from being switched out
+; **********************************************************************
+
+
+	cseg
+
+	public	bstdma		; sets DMA segment and offset
+	public	rdsec		; reads a physical sector
+	public	sectrn		; translates a sector
+	public	seldsk		; selects a drive
+	public	setsec		; sets the sector to be read/written
+	public	settrk		; sets the track to be read/written
+	public	wrsec		; writes a physical sector
+
+	public	openvec		; returns open files vector
+	public	syslock		; locks up the disk system
+	public	sysunlock	; unlocks the disk system
+	public	conlock		; locks the console into foreground mode
+	public	conunlock	; unclocks the console
+
+
+IO_SELDSK equ	  9		; XIOS function number
+IO_READ   equ	 10		; XIOS function number
+IO_WRITE  equ	 11		; XIOS function number
+P_PRIORITY equ	145		; BDOS function: set Process PRIORITY
+S_SYSDAT  equ	154		; BDOS function: get SYStem DATa page address
+P_PDADR	  equ	156		; BDOS function: get Process Descriptor address
+Q_OPEN	  equ	135		; Open Queue
+Q_READC	  equ	138		; Read Queue Conditional
+Q_WRITEC  equ	139		; Write Queue Conditional
+
+XIOS_ptr  equ	dword ptr .28h	; loc of XIOS entry in SYSDAT 
+OPVEC	  equ	word ptr .88h	; loc of Open_Files_on_Drives vector
+UDA_seg	  equ	word ptr 10h	; loc of UDA seg in Process Descriptor
+
+
+
+;*****************************************************************
+;***   PL/I Utility Functions                                  ***
+;*****************************************************************
+getp1:	; get single byte parameter to register DL
+	mov	bx,[bx]		;BX = .char
+	mov	dl,[bx]		;to register DL
+	ret
+
+getp2:	; get single word value to DX
+getp2i:	; same as getp2
+	mov	bx,[bx]
+	mov	dx,[bx]
+	ret
+
+
+getsu:	;get sysdat and uda addrs
+	;enters: DS=local data seg
+	;exits:  DS=SYSDAT seg, ES=UDA seg (for call to XIOS)
+	mov	cx,udaaddr	;get the saved value
+	or	cx,cx		;set flags
+	jz	getsu1		;uninitialized, go do the OS call
+	mov	es,cx		;we've been here before, just load regs
+	mov	cx,sysaddr
+	mov	ds,cx
+	ret
+
+getsu1:
+	mov	cl,P_PDADR	;get Process Descriptor
+	int	0E0h		;call BDOS
+	mov	cx,es:UDA_seg[bx] ;grab UDA_seg
+	mov	udaaddr,cx	;save for future calls
+	push	cx		;save UDA_seg
+	  mov	cl,S_SYSDAT	;get address of SYStem DATa area
+	  int	0E0h		;call BDOS
+	  mov	cx,es		;mov ds,es
+	  mov	sysaddr,cx	;save for future calls
+	  mov	ds,cx
+	pop	es		;restore UDA_seg
+	ret
+
+
+
+;*****************************************************************
+;***   Simulate old XIOS style functions                       ***
+;*****************************************************************
+bstdma:	; sets DMA segment and offset
+	call	getp2		;dma address to DX
+	mov	dmaoff,dx	;stuff addr in IOPB's offset field
+	mov	dmaseg,ds	;assume all addresses relative to DS
+	ret			;no BDOS/XIOS call, just init the IOPB
+
+
+sectrn:	; translates a sector
+	call	getp2		;get sector number to DX
+	mov	bx,dx		;no translation: return (unchanged) value
+	ret
+
+
+setsec:	; sets the sector to be read/written
+	call	getp2i		;sector number to DX
+	mov	sector,dx	;stuff sector into IOPB
+	ret
+
+
+settrk:	; sets the track to be read/written
+	call	getp2i		;track number to DX
+	mov	track,dx	;stuff track into IOPB
+	ret
+
+
+;*****************************************************************
+;***  Physical I/O calls                                       ***
+;*****************************************************************
+rdsec:	; reads a physical sector
+	mov	ax,IO_READ
+	jmp	xiosiopb	;jump around this code
+
+wrsec:	; writes a physical sector
+	mov	ax,IO_WRITE	;fall thru to xiosiopb
+
+xiosiopb:	;put the IOPB on the stack, call XIOS
+	push	ds		;ds will contain SYSDAT seg
+	push	es		;es will contain UDA seg
+		;someday change this to a block move?
+	mov	ch,mscnt
+	mov	cl,drv
+	push	cx		;1st word of IOPB
+	mov	cx,track
+	push	cx		;2nd word
+	mov	cx,sector
+	push	cx		;3rd word
+	mov	cx,dmaseg
+	push	cx		;4th word
+	mov	cx,dmaoff
+	push	cx		;5th word
+
+	push	ax		;save XIOS_function
+	call	getsu		;set up DS-SYSDAT and ES-UDA
+	pop	ax		;restore XIOS_function
+	callf	XIOS_ptr	;call indirect the XIOS
+				;bl contains return status
+	pop	cx		;dma offset
+	pop	cx		;dma segment
+	pop	cx		;track
+	pop	cx		;sector
+	pop	cx		;drv & mscnt
+	pop	es		;restore original es
+	pop	ds		;ditto for ds
+	ret	
+
+
+;*****************************************************************
+;*** XIOS Select Disk Routine                                  ***
+;*****************************************************************
+seldsk:	; selects a drive
+	; also resets login sequence number of drive to 0,
+	;   to force permanent media to be logged in again on disk reset
+
+	call	getp1		;drive to DL
+	mov	drv,dl		;stuff drive into IOPB
+	push es ! push ds	;save context ************
+				;do the XIOS SELDSK call
+	push	dx		;save drive
+	call	getsu		;set up DS and ES
+	pop	cx		;restore drive
+	mov	ax,IO_SELDSK
+	mov	dx,0		;this better not be the first call
+	callf	XIOS_ptr	;call indirect XIOS
+				;xfer DPH locally
+	pop es ! push es	;restore & save Data Segment into es
+	mov	di,offset dph	;set up destination
+	mov	si,bx		;ptr to dph returned from XIOS call
+	mov	log_seqn[si],0	;force disk reset: 0 login sequence number
+	mov	cx,dphsiz
+	rep movsb		;move copy of DPH into local storage
+				;xfer DPB locally
+	mov	di,offset dpb	;set up destination
+	mov	si,es:dpbptr	;get this info from DPH
+	mov	cx,dpbsiz
+	rep movsb		;move copy of DPB into local storage
+				;cleanup
+	pop ds ! pop es		;restore context ************
+	mov	dpbptr,offset dpb ;set up local ptr in DPH
+	mov	bx,offset dph	;return address of local copy of DPH
+	ret
+
+
+;*****************************************************************
+;***  Open Drives Vector                                       ***
+;*****************************************************************
+openvec:	; returns vector of drives with open files
+	push	es		;save extra seg
+	push	ds		;save data seg
+	mov	cl,S_SYSDAT	;look in the system data page
+	int	0E0h		;call bdos
+	mov	ax,es:OPVEC	;get the vector of drives containing open files
+	mov	bx,ax		;stuff both regs
+	pop	ds		;restore data seg
+	pop	es		;restore extra seg
+	ret
+
+
+;*****************************************************************
+;***  System Lock and Unlock Routines                          ***
+;*****************************************************************
+syslock:	; locks up the disk system
+		; returns 0 in ax,bx if everything ok, -1 o.w.
+	push	es		;save extra seg
+	push	ds		;save data seg
+
+	mov	cl,S_SYSDAT	;look in the system data page
+	int	0E0h		;call bdos
+	mov	cx,es:OPVEC	;get the vector of drives containing open files
+	test	cx,0FFFFh	;check all drives
+	jnz	syslfail	;fail if any open files
+
+	mov	cx,Q_OPEN
+	mov	dx,offset qpb	;mxdisk queue parm block
+	int	0E0h		;call bdos
+	or	ax,ax		;test return
+	jnz	sysltry2	;if non zero, try kluge
+	mov	cx,Q_READC	;see if we can read the queue
+	mov	dx,offset qpb	;insurance
+	int	0E0h		;call bdos
+	or	ax,ax		;test retrun
+	jnz	syslfail	;fail if we can't read mxdisk queue
+	jmp	syslokay	;okay, tell 'em so
+
+sysltry2:			;kluge for old systems
+	mov	cx,Q_OPEN
+	mov	dx,offset qpb2	;mxdisk queue parm block
+	int	0E0h		;call bdos
+	or	ax,ax		;test return
+	jnz	syslfail	;if non zero
+	mov	cx,Q_READC	;see if we can read the queue
+	mov	dx,offset qpb2	;insurance
+	int	0E0h		;call bdos
+	or	ax,ax		;test retrun
+	jnz	syslfail	;fail if we can't read mxdisk queue
+syslokay:
+	mov ax,0 ! jmp syslret	;return code 0, everything okay
+syslfail:
+	mov ax,0FFFFh		;return code -1, failure
+syslret:
+	mov	bx,ax		;stuff both regs
+	pop	ds		;restore data seg
+	pop	es		;restore extra seg
+	ret
+
+
+
+sysunlock:	;undoes a 'syslock' function
+	mov	cx,Q_WRITEC	;conditionally write to mxdisk queue
+	mov	dx,offset qpb
+	int	0E0h
+	mov	cx,Q_WRITEC	;kluge to handle old systems
+	mov	dx,offset qpb2
+	int	0E0h
+	ret
+
+
+;*****************************************************************
+;***  Console Lock and Unlock Routines                         ***
+;*****************************************************************
+
+CCB_BACKGRD  equ 0002h		;Console in Background mode
+CCB_NOSWITCH equ 0008h		;Console not allowed to switch mode
+CCB_SIZE     equ 2Ch		;size of CCB 
+CCB_STATE    equ word ptr 0Eh	;addr of Console State word in CCB
+CON_NUM      equ byte ptr 020h	;addr of console number in PD
+CCB_PTR      equ word ptr .054h	;addr of CCB table in SYSDAT
+
+PD_FLAG	     equ word ptr 06	;addr of FLAGs word in PD
+PD_KEEP	     equ 0002h		;Keep Process Flag
+TOP_PRIOR    equ 151		;What we set to for Top Priority (arbitrary)
+REG_PRIOR    equ 200		;Default Regular Priority
+
+
+conlock:	;locks the console into the foreground, sets Keep Flag,
+		;  and boosts priority
+		;returns 0 in ax,dx if everything okay, -1 o.w.
+	push	es		;save extra seg
+	call	concalc		;ES=SYSDAT, bx=CCB offset
+	test	es:CCB_STATE[bx],CCB_BACKGRD	;is console in background?
+	jnz	conlfail	;background operation not allowed!
+	or	es:CCB_STATE[bx],CCB_NOSWITCH	;make sure they don't switch
+	mov	cl,P_PDADR	;get Process Descriptor
+	int	0E0h		;call BDOS
+	or	es:PD_FLAG[bx],PD_KEEP ;set Keep flag
+	mov	dl,TOP_PRIOR	;let's be quick
+	mov	cl,P_PRIORITY	;set Priority
+	int	0E0h		;call BDOS
+
+conlokay:
+	mov	ax,0 ! jmp conlret
+conlfail:
+	mov	ax,0FFFFh
+conlret:
+	mov	bx,ax
+	pop	es		;restore extra seg
+	ret
+
+
+
+conunlock:	;undoes the 'conlock' function
+	push	es		;save extra seg
+	call	concalc		;ES=sysdat, bx=CCB offset
+	and	es:CCB_STATE[bx],NOT CCB_NOSWITCH ;let them switch now
+	mov	cl,P_PDADR	;get Process Descriptor
+	int	0E0h		;call BDOS
+	and	es:PD_FLAG[bx],NOT PD_KEEP ;reset Keep flag
+	mov	dl,REG_PRIOR	;finished with quick
+	mov	cl,P_PRIORITY	;set Priority
+	int	0E0h		;call BDOS
+
+	pop	es		;restore extra seg
+	ret
+
+
+
+concalc:	;put SYSDAT in ES, offset of CCB in bx
+	mov	cx,P_PDADR	;get Process Descriptor Addr
+	int	0E0h		;call the bdos
+	xor	ax,ax		;clear ax
+	mov	al,es:CON_NUM[bx] ;grab the console number
+	mov	cx,CCB_SIZE	;stuff cx with size
+	mul	cx		;compute ccb address
+	push	ax		;save ccb offset
+	mov	cl,S_SYSDAT	;get the System Data Segment
+	int	0E0h		;call the bdos
+	pop	bx		;restore ccb offset
+	add	bx,es:CCB_PTR	;compute offset of ccb
+	ret
+
+
+
+;*****************************************************************
+;***  Data Segment                                             ***
+;*****************************************************************
+
+	dseg	
+
+sysaddr	dw	0	; save location for sysdat addr
+udaaddr	dw	0	; save location for process uda addr
+
+dphsiz	equ	014h	; size of Disk Parm Header
+dph	rb	dphsiz	; local save area
+log_seqn equ	byte ptr 6	; byte to force reset of permanent media
+dpbptr	equ	word ptr dph+8	; word of interest: DPB offset
+
+dpbsiz	equ	011h	; size of Disk Parameter Buffer
+dpb	rb	dpbsiz	; local save area
+
+
+iopb	rb	0	; the iopb structure filled in by above rtns
+mscnt	db	1	; multi sector count
+drv	rb	1	; select drive
+track	rw	1	; select track
+sector	rw	1	; select sector
+dmaseg	rw	1	; set dma address
+dmaoff	rw	1	; set dma address
+iopbsiz	equ	(offset $)-(offset iopb)
+
+
+qpb	rb	0	; queue parameter block
+	dw	0	; reserved
+	dw	0	; queueid
+	dw	0	; nmsgs
+	dw	0	; buffer
+	db	'MXdisk  ' ; queue name
+
+qpb2	rb	0	; queue parameter block number 2: be persistent
+	dw	0	; reserved
+	dw	0	; queueid
+	dw	0	; nmsgs
+	dw	0	; buffer
+	db	'mxdisk  ' ; queue name

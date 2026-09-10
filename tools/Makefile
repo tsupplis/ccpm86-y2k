@@ -4,10 +4,14 @@ DRASM86=cpm_asm86
 GENCMD=cpm_gencmd
 RASM86=pcdev_rasm86
 LINK86=pcdev_linkcmd
+PLI86=drpli_pc
+PLILINK86=drpli_link
+DRC86=drccpm_cc
+DRCLINK86=drccpm_link
 
 TOOLS=date.cmd era.cmd eraq.cmd gencmd.cmd ed.cmd help.cmd show.cmd \
     set.cmd dir.cmd tod.cmd type.cmd pip3.cmd pip4.cmd sdir.cmd ren.cmd \
-    submit.cmd vcmode.cmd systat.cmd tcopy.cmd 
+    submit.cmd vcmode.cmd systat.cmd tcopy.cmd chset.cmd initdir.cmd
 
 SNIPPETS=boot.h86 load.h86 lbdos.h86  lbdos3.sys
 
@@ -18,7 +22,10 @@ tcopy.cmd: tcopy.h86
 	
 submit.cmd: submit.h86
 	$(GENCMD) $<
-	
+
+initdir.cmd: initdir.obj initdira.obj diomod.obj
+	$(PLILINK86) initdir [locals],initdira,diomod
+
 sdir.cmd: sdir.obj scd.obj search.obj scan.obj sort.obj disp.obj util.obj \
     timest.obj dpb.obj
 	$(LINK86) sdir=scd,sdir,search,sort,disp,scan,timest,dpb,util '[data[ori[0]]'
@@ -41,6 +48,9 @@ vcmode.cmd: vcmode.obj scd.obj
 
 ren.cmd: ren.obj scd.obj
 	$(LINK86) ren=scd,ren '[data[ori[0]]'
+
+chset.cmd: main.obj chset.obj function.obj cpmif.obj
+	$(DRCLINK86) chset[map]=main,chset,function,cpmif
 
 type.cmd: type.obj scd.obj
 	$(LINK86) type=scd,type '[data[ori[0]]'
@@ -75,17 +85,32 @@ date.cmd: date.obj scd.obj
 gencmd.cmd: gencmd.obj scd.obj
 	$(LINK86) gencmd=scd,gencmd '[dat[ori[0]]'
 
+diomod.obj: diomod.a86
+	$(RASM86) $^
+
+initdira.obj: initdira.a86
+	$(RASM86) $^
+
+cpmif.obj: cpmif.a86
+	$(RASM86) $^
+
 %.h86: %.a86
 	$(DRASM86) $^
 
 %.obj: %.a86
 	$(ASM86) $^
 
+%.obj: %.c
+	$(DRC86) -o$@ $^
+
+%.obj: %.pli
+	$(PLI86) $^ \$$dl
+
 %.obj: %.plm
 	$(PLM86) $^ debug 'optimize(3)' xref
 
 clean:
-	rm -f *.sys *.cmd *.obj *.h86 *.sym *.lin *.lst ccpmtest.img
+	rm -f *.sys *.cmd *.obj *.h86 *.sym *.lin *.lst *.prn ccpmtest.img
 
 ccpmtest.img: $(TOOLS) Makefile startup.0
 	cp cpmbase.img ccpmtest.img
