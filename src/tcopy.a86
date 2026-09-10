@@ -236,4 +236,3 @@ bpb		rb	5		;direct Bios Parameter Block
 
 current_dma	dw	0
 current_sector	dw	0
-

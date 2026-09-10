@@ -1468,6 +1468,3 @@ display$gen: procedure(vers);                  /* Overview Display Routine*/
 
 end displaygen;
       
-
-
-

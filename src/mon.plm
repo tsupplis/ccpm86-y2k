@@ -16,5 +16,3 @@ mon2: procedure(f,a) byte external;
 mon3: procedure(f,a) address external;
     declare f byte, a address;
     end mon3;
-
-

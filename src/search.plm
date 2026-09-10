@@ -500,4 +500,3 @@ search$init: procedure public;                /* called once from main.plm  */
 end search$init;
 
 end search;
-

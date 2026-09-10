@@ -1314,4 +1314,3 @@ dir_buf		equ	((offset  $) + 15) and 0fff0h
 local_buf	equ	dir_buf + 512
 
 data_buf	equ	(local_buf + 512)/16
-
