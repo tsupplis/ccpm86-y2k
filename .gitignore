@@ -19,8 +19,6 @@ tools/lib
 **/.vscode
 private/**
 **/*.img
-
 src/*.cmd
-
 **/.*.swp
 **/.DS_Store
