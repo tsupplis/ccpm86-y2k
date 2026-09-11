@@ -116,7 +116,7 @@ clean:
 
 ccpmtest.img: $(TOOLS) Makefile startup.0
 	cp cpmbase.img ccpmtest.img
-	cpmcp -f ibmpc-514ss ccpmtest.img $(TOOLS) 0:
+	cpmcp -f ibmpc-514ss ccpmtest.img tod.cmd 0:
 	cpmcp -f ibmpc-514ss ccpmtest.img startup.0 0:
 	cpmls -F -f ibmpc-514ss ccpmtest.img 0:*.*
 
