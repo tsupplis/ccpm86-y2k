@@ -21,6 +21,7 @@ tools/lib
 **/*.prn
 **/.vscode
 private/**
+local/**
 **/*.img
 src/*.cmd
 **/.*.swp
