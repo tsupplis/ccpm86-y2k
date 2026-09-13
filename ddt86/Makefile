@@ -11,17 +11,18 @@ CPM_PLILINK86=drpli_link
 CPM_DRC86=drccpm_cc
 CPM_DRCLINK86=drccpm_link
 
-TOOLS=gentab.cmd ddt86.cmd dis86.cmd
+TOOLS=gentab.cmd ddt86.cmd
 
 SNIPPETS=
 
 all: $(TOOLS) $(SNIPPETS)
 
 # Final ddt86.cmd: pip-concatenate the three h86 files then gencmd (cpm section)
-ddt86.cmd: ddt86_merged.h86
+ddt86.cmd: ddt86m.h86
 	$(CPM_GENCMD) $< 8080 'code[m366]'
+	mv ddt86m.cmd ddt86.cmd
 
-ddt86_merged.h86: ddt86.h86 dis86.h86 ass86.h86
+ddt86m.h86: ddt86.h86 dis86.h86 ass86.h86
 	doscat $^ > $@
 
 # ddt86 base: cpm section — asm86 ddt86 $$fi
@@ -66,10 +67,6 @@ ass86.abs: ass86.lnk
 ass86.h86: ass86.abs
 	$(INTEL_OH86) $< to $@
 
-# dis86.cmd: standalone disassembler (loaded by ddt86 E command at runtime)
-dis86.cmd: dis86.obj ins86.obj asmtab.obj ass86.obj dislnk86.obj asslnk86.obj
-	pcdev_linkcmd dis86=dis86,ins86,asmtab,ass86,dislnk86,asslnk86 '[data[ori[0]]'
-
 op86.dat: gentab.cmd
 
 gentab.cmd: gentab.obj
@@ -92,12 +89,11 @@ cpmif.obj: cpmif.a86
 
 clean:
 	rm -f *.sys *.cmd *.obj *.exe *.map *.h86 *.abs *.lnk *.sym 
-	rm -f *.lin *.lst *.prn ccpmtest.img ddt86_merged.h86 *.abs *.lnk *.mp1
+	rm -f *.lin *.lst *.prn ccpmtest.img ddt86m.h86 *.abs *.lnk *.mp1
 
 ccpmtest.img: $(TOOLS) Makefile startup.0
 	cp cpmbase.img ccpmtest.img
 	cpmcp -f ibmpc-514ss ccpmtest.img ddt86.cmd 0:
-	cpmcp -f ibmpc-514ss ccpmtest.img dis86.cmd 0:
 	cpmcp -f ibmpc-514ss ccpmtest.img startup.0 0:
 	cpmls -F -f ibmpc-514ss ccpmtest.img 0:*.*
 
