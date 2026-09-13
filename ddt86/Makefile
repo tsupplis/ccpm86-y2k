@@ -91,7 +91,8 @@ cpmif.obj: cpmif.a86
 	$(INTEL_PLM86) $^ debug 'optimize(2)' 'pagewidth(100)' xref
 
 clean:
-	rm -f *.sys *.cmd *.obj *.exe *.map *.h86 *.abs *.lnk *.sym *.lin *.lst *.prn ccpmtest.img ddt86_merged.h86
+	rm -f *.sys *.cmd *.obj *.exe *.map *.h86 *.abs *.lnk *.sym 
+	rm -f *.lin *.lst *.prn ccpmtest.img ddt86_merged.h86 *.abs *.lnk *.mp1
 
 ccpmtest.img: $(TOOLS) Makefile startup.0
 	cp cpmbase.img ccpmtest.img
