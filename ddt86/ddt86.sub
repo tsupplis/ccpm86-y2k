@@ -1,0 +1,28 @@
+;
+;create ddt86.cmd, on micro using ISIS interface
+;
+pli gentab $$d
+link gentab
+gentab op86.dat
+;
+is14
+plm86 ins86.plm debug pagewidth(100) xref
+plm86 dis86.plm debug pagewidth(100) xref
+asm86 dislnk86.asm debug
+link86 dislnk86.obj, dis86.obj, ins86.obj,plm86.lib to dis86.lnk
+loc86 dis86.lnk to dis86.abs ad(sm(dats(0),code(0h))) od(sm(dats,code,const,data)) 
+oh86 dis86.abs to dis86.h86
+;
+plm86 ass86.plm debug xref pagewidth(100)
+plm86 asmtab.plm debug xref pagewidth(100)
+asm86 asslnk86.asm debug
+link86 asslnk86.obj, asmtab.obj, ass86.obj, po(dis86.abs), plm86.lib to ass86.lnk
+loc86 ass86.lnk to ass86.abs ad(sm(dats(0),code(0h))) od(sm(dats,code,const,data)) 
+oh86 ass86.abs to ass86.h86
+;
+cpm
+asm86 ddt86 $$fi
+pip ddt86.h86 = ddt86.h86, dis86.h86, ass86.h86
+;  the value for the minimum code group required comes from the start of
+;  the ??seg as listed in ass86.mp2
+gencmd ddt86 8080 code[m366]

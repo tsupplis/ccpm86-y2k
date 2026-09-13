@@ -77,7 +77,6 @@ The `ddt86/` directory builds:
 | Binary        | Description                          |
 |---------------|--------------------------------------|
 | `ddt86.cmd`   | DDT86 dynamic debugging tool          |
-| `dis86.cmd`   | 8086 disassembler                    |
 | `gentab.cmd`  | Opcode table generator for the disassembler |
 
 ## Sources and Build

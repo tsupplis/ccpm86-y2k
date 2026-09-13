@@ -1,0 +1,30 @@
+
+DOS 3.30 (046-N) 8086 LINKER, V3.1
+
+INPUT FILES: ASSLNK86.OBJ, ASMTAB.OBJ, ASS86.OBJ, DIS86.ABS
+OUTPUT FILE: ASS86.LNK
+CONTROLS SPECIFIED IN INVOCATION COMMAND:
+DATE:  09/13/<6  TIME:  04:39:25
+
+WARNING 14:  GROUP ENLARGED
+  FILE:  ASMTAB.OBJ
+  GROUP:  DGROUP
+  MODULE:  ASMTAB
+
+LINK MAP OF MODULE ASSLNK86
+
+LOGICAL SEGMENTS INCLUDED:
+LENGTH ADDRESS ALIGN  SEGMENT         CLASS           OVERLAY
+ 0000H ------    G    ??SEG                                         
+ 0001H ------    G    DATS            DATS                          
+ 3508H ------    G    CODE            CODE                          
+ 007EH ------    W    DATA            DATA                          
+ 0204H ------    W    CONST           CONST                         
+ 0034H ------    W    STACK           STACK                         
+ 0000H ------    W    MEMORY          MEMORY                        
+
+INPUT MODULES INCLUDED:
+ASSLNK86.OBJ(ASSLNK86)
+ASMTAB.OBJ(ASMTAB)
+ASS86.OBJ(DDTASM)
+DIS86.ABS(DISLNK86) PUBLICS ONLY
