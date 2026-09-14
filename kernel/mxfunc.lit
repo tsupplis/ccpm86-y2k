@@ -1,0 +1,8 @@
+/* MP/M-86 XIOS function numbers */
+
+dcl     mx$conin            lit '1',
+        mx$conout           lit '2',
+        mx$lstout           lit '4',
+        mx$switch           lit '7',
+        mx$upstatus         lit '8',
+        mx$consmode         lit '30';

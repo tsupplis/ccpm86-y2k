@@ -1,0 +1,24 @@
+
+/* Network-related structures and pointers for PIN, 12/7/83 RBB */
+
+dcl   net$bit lit '040h';
+
+dcl   net$flag boolean;
+dcl   nda$pointer pointer;
+dcl   nda$ptr structure (offset word, segment word) at (@nda$pointer);
+
+/* Start of NDA structure */
+
+dcl   nda based nda$pointer structure (
+                               rcb$pointer pointer,
+                               rct$pointer pointer);
+
+/* Requester configuration table */
+
+dcl   rct$ptr pointer;
+dcl   rct based rct$ptr structure (
+                                  rc$cnt word,
+                                  rc$disks(16) word,
+                                  rc$cons(16) word,
+                                  rc$list(16) word);
+

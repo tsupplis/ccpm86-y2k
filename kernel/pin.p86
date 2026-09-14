@@ -1,0 +1,592 @@
+
+
+$set (debug=0)
+$compact
+pin:
+do;
+
+/* PIN performs physical input from for each physical console
+   and places the characters into the input queue associated
+   with each virtual console.  Switch screen commands are
+   received from the XIOS and acted on by PIN.
+
+   Control S/Q, Control O and Control C are intercepted and
+   processed by PIN.  The input queues are created by VOUT.
+*/
+
+$include (comlit.lit)
+
+dcl rsp$link word external;       /* segment of SYSDAT */
+
+$include (mfunc.lit)
+$include (mxfunc.lit)
+$include (sdpin.lit)
+$include (proces.lit)
+declare pd$pointer pointer;
+declare pd$ptr structure (offset word, segment word) at (@pd$pointer);
+declare pd based pd$pointer pd$structure;
+
+$include (uda.lit)
+
+declare ncopies byte external,   /* copy number of this process, corresponds */
+        cnsnum byte at(@ncopies);/* with physical console number */
+declare himark byte;             /* total physical consoles for this PIN */
+declare lomark byte;             /* first virtual console for this PIN   */
+declare ctrlC    lit '3';        /* some ASCII codes */
+declare ctrlD    lit '4';
+declare bell     lit '7';
+declare ctrlO    lit '15';
+declare ctrlP    lit '16';
+declare ctrlQ    lit '17';
+declare ctrlS    lit '19';
+declare esc      lit '27';
+
+
+/*      -      global variables      -      */
+
+$include (netpin.lit)
+$include (vccb.lit)
+declare ccb$pointer pointer;
+declare ccb$ptr structure(offset word,segment word) at (@ccb$pointer);
+declare ccb based ccb$pointer ccb$structure;
+
+declare old$ccb$pointer pointer;
+declare old$ccb based old$ccb$pointer ccb$structure;
+
+declare lcb$pointer pointer;
+declare lcb$ptr structure(offset word,segment word) at (@lcb$pointer);
+declare lcb based lcb$pointer lcb$structure;
+
+declare screen byte;         /* current foreground screen number      */
+declare cns    word;         /* Hi byte = physical, Lo byte = virtual */
+declare cnmode word;         /* Result of GetConMode XIOS call - PCMODE*/
+
+$include (qd.lit)
+declare qpb qpb$structure;
+
+dcl null word data (0ffffh);          /* sent to VOUTQ to wake up VOUT */
+/* Note: this forces a 2 byte constant section and thus hex generation */
+
+dcl apb structure (                   /* abort parameter block */
+  pd word, term word, cns byte, rsrvd byte) initial (0,0,0,0);
+
+dcl cword word,                       /* format of console input from XIOS */
+    chars (2) byte at (@cword),
+    char byte at (@chars(0)),
+    char$type byte at(@chars(1)),
+    ct$switch lit '0ffh',
+    ct$data   lit  '0';
+
+dcl temp1$pointer pointer;
+dcl temp1$ptr structure (offset word, segment word) at (@temp1$pointer);
+dcl temp1 based temp1$pointer pd$structure;
+
+dcl temp2$pointer pointer;
+dcl temp2$ptr structure (offset word, segment word) at (@temp2$pointer);
+dcl temp2 based temp2$pointer pd$structure;
+
+mon1: procedure(func,a) external;
+  dcl func byte, a address;
+end mon1;
+
+mon2: procedure(func,a) byte external;
+  dcl func byte, a address;
+end mon2;
+
+mon3: procedure(func,a) address external;
+  dcl func byte, a address;
+end mon3;
+
+mon4: procedure(func,a) pointer external;
+  dcl func byte, a address;
+end mon4;
+
+intsys: procedure (cx, dx, bx) external;   /* internal O.S. functions */
+  dcl (cx, dx, bx) word;
+end intsys;
+
+/* the following 4 procedures call the XIOS directly, the PXIOS.A86   */
+/* sets the registers to make this legal.  DS = system data segment,  */
+/* ES = UDA.  The parameters are passed AX=FUNC, CX=P1, DX=P2         */
+
+pxios1: procedure(func,p1,p2) external;
+dcl (func,p1,p2) address;
+end pxios1;
+
+/*pxios2: procedure(func,p1,p2) byte external;
+dcl (func,p1,p2) address;
+end pxios2;*/
+
+pxios3: procedure(func,p1,p2) word external;
+dcl (func,p1,p2) address;
+end pxios3;
+
+/*pxios4: procedure(func,p1,p2) pointer external;
+dcl (func,p1,p2) address;
+end pxios4;*/
+
+conin: procedure;
+  cword = pxios3(mx$conin, 0, ccb.pc);/* get console input from XIOS     */
+end;                                  /* AX=func, CX=0, DX(device#)=0    */
+
+get$cons$mode: procedure;
+  cnmode = pxios3(mx$consmode,0100h,ccb.vc); /* get console mode from XIOS*/
+end;
+
+print$msg: procedure(len, endchar, sptr);    /* print string to delimiter */
+  dcl (len, i, endchar) byte, sptr pointer,  /* or len number of chars    */
+    string based sptr (1) byte;
+  i = 0;
+  do while string(i) <> endchar and i < len;
+    call pxios1(mx$conout, string(i), ccb.vc);
+    i = i + 1;
+  end;
+end print$msg;
+
+$if debug=1
+error: procedure (msg$ptr);
+  dcl msg$ptr pointer;
+  call print$msg(0ffh, 0, @(cr, lf, '**** PIN ERROR ****', cr, lf, 0));
+  call print$msg(0ffh, '$', msg$ptr);
+  halt;
+end error;
+
+$endif
+
+read$change$mxq: procedure (qaddr);
+dcl qaddr address;
+  qpb.qaddr = qaddr;
+  call mon1 (m$readq, .qpb);
+end read$change$mxq;
+
+write$change$mxq: procedure (qaddr);
+  dcl qaddr address;
+  qpb.qaddr = qaddr;
+  call mon1 (m$writeq, .qpb);
+end write$change$mxq;
+
+sleep: procedure (list$root);
+  dcl list$root word;
+  call intsys(mi$sleep, list$root,  ps$ciowait);
+end sleep;
+
+wake$up: procedure (list$root);
+  dcl list$root word;
+  call intsys(mi$wakeup, list$root, 0);
+end wake$up;
+
+/* The conout flag is set and "owned" before any process calls the XIOS
+   console output routine for a particular screen.  PIN sets this flag
+   to insure there is no process in the XIOS console output code.  The
+   ccb.cosleep is a temporary location for processes waiting to own the
+   the XIOS conout bit.                                                   */
+
+set$conout$flag: procedure(ccb$ptr);
+  dcl ccb$ptr pointer;
+  dcl ccb based ccb$ptr ccb$structure;
+  disable;
+  do while (ccb.flag and cf$conout) <> 0;    /* Another process is in XIOS */
+    call sleep (.ccb.cosleep);               /* PIN gets awakened 1st:     */ 
+  end;                                       /* better priority            */
+  ccb.flag = ccb.flag or cf$conout;
+  enable;
+end set$conout$flag;
+
+reset$conout$flag: procedure (ccb$ptr);
+  dcl ccb$ptr pointer;
+  dcl ccb based ccb$ptr ccb$structure;
+  ccb.flag = ccb.flag and not cf$conout;     /* wake sleeping process     */
+  call wakeup(.ccb.cosleep);
+end reset$conout$flag;
+
+wake$vout: procedure(ccb$ptr);
+  dcl ccb$ptr pointer;
+  dcl ccb based ccb$ptr ccb$structure;
+  if (ccb.state and csm$buffered) = 0 then
+    return;                        /* dynamic mode */
+  qpb.qaddr = ccb.voutq;
+  qpb.buffptr = .null;             /* VOUT message is 2 byte format     */
+  call mon1(m$cwriteq, .qpb);      /* null message if first byte = 0ffh */
+  qpb.qaddr = ccb.voutq;
+  qpb.buffptr = .null;             /* VOUT needs two wake-ups in some   */
+  call mon1(m$cwriteq, .qpb);      /* situations                        */
+  call wake$up(.ccb.vsleep);
+end wake$vout;
+
+write$vinq: procedure(c);
+  dcl c word;
+  qpb.qaddr = ccb.vinq;
+  qpb.buffptr = .c;
+  if mon3(m$cwriteq, .qpb) = 0ffffh then   /* ring console bell if type */
+  do;
+    call set$conout$flag(@ccb);  /* XIOS is not reentrant on same console */
+    call pxios1(mx$conout, bell, ccb.vc);  /* ahead buffer if full      */
+    call reset$conout$flag(@ccb);
+  end;
+end write$vinq;
+
+set$ccb: procedure (vc);                       /* base VCCB structure */
+  dcl vc byte;
+  old$ccb$pointer = ccb$pointer;
+  ccb$ptr.offset = sd.ccb + size(ccb) * vc;
+end set$ccb;
+
+
+/* the functions below act on special keys received from the keyboard */
+
+dcl controlS$has$been$pressed boolean initial (false);
+
+switch: procedure;                         /* switch virtual consoles */
+  if char >= himark then
+    return;                                  /* check for legal range */
+  if (ccb.state and csm$noswitch) <> 0 then        /* no switch state */
+    return;        
+  call get$cons$mode;                 /*returns graphics or alpha mode*/
+  if (cnmode and 0ffh) > 15 then      /*Graphics-active processes may */
+     return;                          /*not switch into background    */
+  char = char + lomark;              /* normalize to right ccb number */
+  if char = ccb.vc then   /* request is for currently selected screen */
+    return;
+  call set$ccb(screen := char);   /* switch old$ccb and ccb structures */
+
+  /*        -  Switch Out Action  -         */
+
+  call read$change$mxq(oldccb.vcmxq);          /* read the MX 1st THEN */
+  call set$conout$flag(@oldccb);               /* the conout flag      */
+
+  pd$ptr.offset = oldccb.attach;
+  uda$ptr.segment = pd.uda;
+  uda$ptr.offset = 0;
+  if (pd.ps_flag and psf_suspend) then       /* tell system to suspend */
+     oldccb.state = oldccb.state or csm$suspend;        /* the process */ 
+
+  pd$pointer = mon4(m$getpd,0);             /* restore PD offset       */
+  oldccb.state = oldccb.state or csm$background;
+  if (oldccb.state and csm$purging) <> 0 then
+    oldccb.state = oldccb.state and not double(csm$purging);
+  /* turn off purge */
+
+  /* Ensure the two affected screens are not currently being updated  */
+  /* by the XIOS console output routines.                             */
+
+  call read$change$mxq(ccb.vcmxq);
+  call set$conout$flag$(@ccb);
+
+  cns = ccb.pc; 
+  cns = shl(cns,8) + ccb.vc;          /* Hi byte = phys.,Lo byte = virtual*/
+  call pxios1(mx$switch, 0, cns);           /* for XIOS device parameter  */ 
+
+  call reset$conout$flag(oldccb$pointer);
+  call write$change$mxq(oldccb.vcmxq);  /* allow VOUT to change state     */
+  if (oldccb.state and csm$buffered) <> 0 then     /* background buffered */
+    call wake$vout(@oldccb);             /* send chars to VOUT if buffer, */
+                                    /* else user process hangs on USLEEP  */
+
+  /*        -  Switch In Action  -                 */
+
+  if (ccb.state and csm$suspend) <> 0 then       /* process is suspended  */
+     do;                                         /* put it back in action */
+     disable;
+     ccb.state = ccb.state and not double(csm$suspend);
+     pd$ptr.offset = ccb.attach;
+     temp1$ptr.offset = susplst;                 /* get Suspend List Root */
+     do while (temp1.link <> pd$ptr.offset) and  /* search SPL for process*/
+              (temp1.link <> 0);
+              temp1$ptr.offset = temp1.link;
+              end;
+     if (temp1.link = pd$ptr.offset) then        /* it's on suspend list */
+        do;
+        temp1.link = pd.link;      /* temp1 = PD ; take it off the  list */
+                                          /* Get the Dispatch Ready List */
+        temp2$ptr.offset = dsptchlst;
+        pd.link = temp2.link;
+        pd.stat = psrun;
+        temp2.link = pd$ptr.offset;           /* put on top of list      */
+       end;
+     enable;
+     end;
+  ccb.state = ccb.state and not double(csm$background);
+  if (ccb.state and csm$buffered) <> 0 then
+  do;                                   /* buffer or buffer error states */
+                                                        /* turn on purge */
+    ccb.state = (ccb.state or csm$purging) and not double(csm$filefull);
+                                       /* turn off error could print msg */
+    call wake$vout(@ccb);                             /* here eventually */
+  end;
+  call reset$conout$flag(ccb$pointer);
+  call write$change$mxq(ccb.vcmxq);
+  if (ccb.state and csm$ctrlS) <> 0 then    /* we "own" the XIOS console */
+    controlS$has$been$pressed = true;                    /* output flag  */
+  else
+    controlS$has$been$pressed = false;
+  call pxios1(mx$upstatus, 0, ccb.pc);
+end switch;
+
+dcl drive$letters (17) byte initial ('ABCDEFGHIJKLMNOP ');
+
+controlC: procedure;
+  dcl (junk,cur$drive,logged$in$drives) word;
+  dcl letter$index byte;
+  if (pd.conmode and pcm$ctlc) <> 0 then
+  do;
+    call write$vinq(cword);
+    return;
+  end; 
+  call read$change$mxq(ccb.vcmxq); /* keep CCB state from changing        */
+                                   /* while we test and change it         */
+  ccb.state = ccb.state and not double(csm$ctrlS or csm$ctrlO);
+  controlS$has$been$pressed = false;
+                                   /* control C turns off control S and   */
+                                   /* control O, doesn't change control P */
+  if (ccb.state and csm$purging) <> 0 then /* stop purge                  */
+    ccb.state = ccb.state and not double (csm$purging) or csm$abort;
+  qpb.qaddr = ccb.vinq;            /* drain input queue, we have better   */
+  qpb.buffptr = .junk;             /* priority than user process or TMP   */
+  do while mon2(m$creadq, .qpb) <> 0ffh;  /* drain type-ahead q */
+  end;
+  ccb.nchar = 0;                   /* zero console status look ahead      */
+  call write$change$mxq(ccb.vcmxq);
+  call wake$vout(@ccb);          /* let VOUT clean up if buffering        */
+  call wake$up(.ccb.usleep);     /* user process could have gone to sleep */
+                                 /* during this rigamarole                */
+
+  apb.pd = ccb.attach;           /* CIO keeps aborts from happening       */
+  call mon1(m$abort, .apb);      /* while in the XIOS, do abort after     */
+                                 /* VOUT has cleaned up, otherwise the TMP*/
+                                 /* with a better priority can print its  */
+                                 /* prompt, and then VOUT prints one last */
+                                 /* purge character                       */
+
+               /* reset drives and print which fail */
+  logged$in$drives = mon3(m$getlogin,0);
+  cur$drive = 1;                 /* drive to reset                        */
+  letter$index = 0;
+  do junk = 0 to 15;
+    if (logged$in$drives and cur$drive) <> 0 then
+      if mon2(m$resetdrv, cur$drive) <> 0 then
+      do;
+        drive$letters(letter$index) = 'A' + junk;
+        letter$index = letter$index + 1;
+      end;
+    cur$drive = shl(cur$drive,1);
+  end;
+  if letter$index > 0 then
+  do;
+    call set$conout$flag(@ccb);
+    call print$msg(0ffh,0,@(cr,lf,'Open file on drive(s) ',0));
+    call print$msg(1,0,@drive$letters(0));
+    do junk = 1 to letter$index - 1;
+      call print$msg(1,0,@(','));
+      call print$msg(1,0,@drive$letters(junk));
+    end;
+    call print$msg(2,0,@(cr,lf));
+    ccb.startcol, ccb.column = 0;        /* for function 10 - line redraw */
+    call reset$conout$flag(@ccb);
+  end;
+end controlC;
+
+controlO: procedure;             /* toggle console output byte bucket     */
+  if (pd.conmode and pcm$ctlo) <> 0 then  /* ignore if control P or if func */
+  do;
+    call write$vinq(cword);
+    return;
+  end;
+  call read$change$mxq(ccb.vcmxq);
+  ccb.state = ccb.state xor csm$ctrlO;
+  call write$change$mxq(ccb.vcmxq);
+  call wake$vout(@ccb);
+  call pxios1(mx$upstatus, 0, ccb.pc);
+end controlO;
+
+turn$off$ctrlO: procedure;
+  call read$change$mxq(ccb.vcmxq);
+  ccb.state = ccb.state and not double(csm$ctrlO);
+  call write$change$mxq(ccb.vcmxq);
+  call wake$vout(@ccb);
+  call pxios1(mx$upstatus, 0, ccb.pc);
+end turn$off$ctrlO;
+
+controlS: procedure;
+  if (pd.flag and pf$noctls) <> 0 then  /* special condition for CLI day */
+    return;                             /* file logging */
+  if (pd.conmode and pcm$ctlS) <> 0 then
+  do;
+    call write$vinq(cword);
+    return;
+  end; 
+  call read$change$mxq(ccb.vcmxq);
+  ccb.state = ccb.state and not double(csm$ctrlO) or csm$ctrlS;
+                                        /* control S turns off control O */
+  call pxios1(mx$upstatus, 0, ccb.pc);
+  call write$change$mxq(ccb.vcmxq);
+  controlS$has$been$pressed = true;
+end controlS;
+
+controlQ: procedure;
+  call read$change$mxq(ccb.vcmxq);
+  ccb.state = ccb.state and not double(csm$ctrlS);
+  call write$change$mxq(ccb.vcmxq);
+  call wake$vout(@ccb);
+  call wakeup(.ccb.usleep);
+  call pxios1(mx$upstatus, 0, ccb.pc);
+  controlS$has$been$pressed = false;
+end controlQ;
+
+controlP: procedure;
+  if (pd.conmode and pcm$rout) <> 0 then /* control P is ignored if console */
+  do;
+    call write$vinq(cword);
+    return;                              /* mode is raw output */
+  end; 
+  call turn$off$ctrlO;
+  call read$change$mxq(ccb.vcmxq);
+  if (ccb.state and csm$ctrlP) = 0 then  /* turn control P on */   
+  do;
+    lcb$ptr.offset = sd.lcb + pd.lst * size(lcb);
+    disable;
+                                               /* Network check,12/7/83,RBB */
+    net$flag = true;
+    if (sd.module$map and net$bit) <> 0 then   /* Check for net loaded      */
+       if pd.nda$para <> 0 then                /* Check for process attached*/
+       do;
+         nda$ptr.segment = pd.nda$para;
+         nda$ptr.offset = 0;
+         rct$ptr = nda.rct$pointer;            /* Check if printer is mapped*/
+         if (rct.rc$list(pd.lst) and 0080h) <> 0 then
+             net$flag = false;
+       end;
+    if (lcb.attach = 0) and net$flag then
+    do;
+       lcb.attach = 0ffffh;
+       lcb.msource = screen;
+       ccb.mimic = pd.lst;
+       ccb.state = ccb.state or csm$ctrlP;
+       enable;
+    end;
+    /*if lcb.attach = 0 then 
+    do;  
+      lcb.attach = 0ffffh;
+      lcb.msource = screen;
+      ccb.mimic = pd.lst;
+      ccb.state = ccb.state or csm$ctrlP;
+      enable;
+    end;                                  */
+    else
+    do;
+      enable;
+      call set$conout$flag(@ccb);
+      call print$msg(0ffh,0,@(cr,lf,'Printer Busy',cr,lf,0));      
+      ccb.column,ccb.startcol = 0;              /* for function 10 */
+      call reset$conout$flag(@ccb);
+    end;
+  end;
+  else                                     /* turn off control P */
+  do;
+    disable;
+    lcb$ptr.offset = sd.lcb + ccb.mimic * size(lcb);
+    lcb.attach = 0;
+    lcb.msource,ccb.mimic = 0ffh;
+    ccb.state = ccb.state and not double(csm$ctrlP);
+    ccb.flag = ccb.flag and not cf$bufp;
+    call wakeup(.lcb.queue);
+    enable;
+  end;
+  call write$change$mxq(ccb.vcmxq);
+  call pxios1(mx$upstatus, 0, ccb.pc);
+end controlP;
+
+raw: procedure boolean;
+  if (pd$ptr.offset := ccb.attach) = 0 then  /* 0 during initialization */
+     return(true);
+  if (pd.flag and pf$raw) = 0 then           /* set by function 6 only  */
+    return(false);
+
+/* 3.1M maintenance fix for call to status line routine			*/
+  if (controlS$has$been$pressed) then
+/*					end of 3.1M patch		*/
+    call controlQ;          /* avoid deadlock if user is mixing func 6  */
+
+  return(true);             /* other console I/O calls                  */
+end raw;
+
+plmstart: procedure public;
+
+  sysdat$ptr.segment, lcb$ptr.segment, ccb$ptr.segment = rsp$link;
+  temp1$ptr.segment,temp2$ptr.segment = rsp$link;        /* init pointers */
+    
+  ccb$ptr.offset = sd.ccb ;
+                                           /* CCB 0 is first in the table */
+  lomark = 0;  
+  do while ccb.pc <> cnsnum;                /* Find first ccb in list that*/
+     ccb$ptr.offset = ccb$ptr.offset + size(ccb); /* belongs to this PIN  */
+     end;
+  lomark = ccb.vc;                          /* First virtual for this PIN */
+                                            /* All of its virtuals are    */
+                                            /* linked thru ccb link field.*/
+  himark = 1;                               /* Find out how many virtual  */
+  do while ccb.link <> 0;                   /* consoles this PIN needs to */
+     himark = himark + 1;                   /* manage (himark).           */
+     ccb$ptr.offset = ccb.link;
+     end;
+  ccb$ptr.offset = sd.ccb + (lomark * size(ccb));    /* Reset ccb pointer */
+
+  pd$pointer = mon4(m$getpd, 0);
+
+  screen = lomark;                         /* initial foreground console  */
+
+  cns = ccb.pc;                            /* Hi byte = pc, Lo byte = vc. */       
+  cns = shl(cns,8) + ccb.vc;       /* This is the initial device parameter*/
+                                           /* for the XIOS call to switch */
+
+  do forever;
+    call conin;
+    if char$type = ct$switch then
+      call switch;
+    else if (char$type and 1) <> 0 then
+      call write$vinq(cword);
+    else
+    do;
+      if raw then
+        call write$vinq(cword);
+      else
+      do;
+        if controlS$has$been$pressed then
+        do;
+          if char = ctrlC then
+            call controlC;
+          else if char = ctrlQ then
+            call controlQ;
+          else if char = ctrlP then
+            call controlP;
+          else
+          do;
+            call set$conout$flag(ccb$pointer);  /* guard against unlikely */
+            call pxios1(mx$conout,bell,ccb.vc); /* race condition  */
+            call reset$conout$flag(ccb$pointer);
+          end;
+        end;
+        else
+        do; /* controlS has not been pressed */
+          if char = ctrlC then
+            call controlC;
+          else if char = ctrlS then
+            call controlS;
+          else if char = ctrlO then
+            call controlO;
+          else if char = ctrlP then
+            call controlP;
+          else
+          do;
+            if (ccb.state and csm$ctrlO) <> 0 then
+              call turn$off$ctrlO;
+            call write$vinq(cword);
+          end;
+        end;
+      end;/* else (if not raw) */
+    end;  /* if char$type <> ct$data and char$type <> ct$switch then */
+          /* XIOS console input is ignored                           */
+  end;    /* do forever */
+
+end plmstart;
+end pin;
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         

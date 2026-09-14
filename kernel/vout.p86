@@ -1,0 +1,492 @@
+$title('VOUT.RSP - virtual console disk write')
+$set(debug=0)
+$compact
+vout:
+do;
+
+/* Disk output process.  Reads Virtual OUTput Queue (VOUTQ) associated
+with a virtual console in buffered background mode.  Output is spooled
+to the file VOUTX.$$$.  When console is in foreground purge mode, spooled
+output is read from this file and dumped on the screen.  There is one
+copy of the VOUT process per virtual console.  Each VOUT RSP has
+its own data area, but the code is reentrant for all the VOUT RSPs.
+*/
+
+/* VAX commands used to generate VOUT.RSP
+
+asm86 rvout.a86
+plm86 vout.plm optimize(3) debug 'p1' 'p2' 'p3'
+link86 rvout.obj, pxios.obj, vout.obj to vout.lnk
+loc86 vout.lnk od(sm(code,dats,data,const,stack)) -
+  ad(sm(code(0))) ss(stack(0))
+h86 vout.dat
+refmt vout.mp2 vout.2
+ren vout.2 vout.mp2
+
+the hex is uploaded to a micro to make a binary file using the command:
+
+gencmd vout data[bxxx]
+
+xxx is taken from the VOUT.MP2 file generated on the VAX by LOC86.
+xxx is the next paragraph after the CODE segment.
+*/
+
+
+$include (copyrt.lit)
+$include (comlit.lit)
+$include (qd.lit)
+$include (mfunc.lit)
+$include (mxfunc.lit)
+$include (fcb.lit)
+
+dcl name$len lit '4';           /* number of letters in RSP name: 'VOUT' */
+dcl fcblen lit '36';
+
+dcl rsplink word external;	/* set to SYSDAT by O.S. initialization */
+dcl udaseg word external;		/* DS for this process */
+dcl ncopies byte external;
+dcl copynum byte at (.ncopies); /* VOUT process copy number, also the */
+                                /* virtual console number for console */
+                                /* output to the XIOS */
+
+$include (sd.lit)
+
+dcl ccb$pointer pointer;
+dcl ccb$ptr structure ( offset address, segment address) at
+  (@ccb$pointer);
+$include (vccb.lit)
+dcl ccb based ccb$pointer ccb$structure;
+
+dcl data$msg lit '0';
+dcl wake$msg lit '0ffh';
+dcl voutq$msg structure (
+  dayta byte, type byte);
+
+mon1: procedure (func,a) external;
+  dcl func byte, a address;
+end mon1;
+
+mon2: procedure (func,a) byte external;
+  dcl func byte, a address;
+end mon2;
+
+mon4: procedure (func,a) pointer external;
+  dcl func byte, a address;
+end mon4;
+
+intsys: procedure (cx, dx, bx) external;     /* internal O.S. functions */
+  dcl (cx, dx, bx) word;                     /* see RVOUT module        */
+end intsys;
+
+/* special disk output assembly module */
+
+pxios1: procedure (func,p1,p2) external;
+  dcl func byte, (p1,p2) address;       /* XIOS interface for process */
+end pxios1;                             /* not in the O.S. */
+
+dcl ps$ciosleep lit '9';
+
+sleep: procedure(addr);
+  dcl addr word;
+  call intsys(mi$sleep, addr, ps$ciosleep);
+end sleep;
+
+wakeup: procedure(addr);
+  dcl addr word;
+  call intsys(mi$wakeup, addr, 0);
+end wakeup;
+
+
+$if debug=1
+                /* conditionally compiled error print routines */
+
+ print$msg: procedure(endchar, sptr);
+  dcl (i, endchar) byte, sptr pointer,
+      string based sptr (1) byte;
+  i = 0;
+  do while string(i) <> endchar;
+    call pxios1(mx$conout, string(i), copynum);
+    i = i + 1;
+  end;
+end print$msg;
+
+print$hex: procedure (nib);
+  dcl nib byte;
+  nib = nib and 0fh;
+  if nib < 10 then
+    call pxios1(mx$conout, nib + '0', copynum);
+  else
+    call pxios1(mx$conout, nib + 'A' - 10, copynum);
+end print$hex;
+
+error: procedure(msgptr);
+  dcl msgptr pointer;
+  call print$msg(0, @(cr, lf, '**** VOUT ERROR ****  ',0));
+  call print$msg(0, msgptr);
+  call print$msg(0, @(', CCB.STATE = ', 0));
+  call print$hex(shr(ccb.state, 12));
+  call print$hex(shr(ccb.state,  8));
+  call print$hex(shr(ccb.state,  4));
+  call print$hex(ccb.state);
+  call print$msg(0, @('H', cr, lf, 0));
+end error;
+
+$endif
+
+read$change$mxq: procedure;
+  qpb.qaddr = ccb.vcmxq;
+  call mon1 (m$readq, .qpb);
+end read$change$mxq;
+
+write$change$mxq: procedure;
+  qpb.qaddr = ccb.vcmxq;
+  call mon1 (m$writeq, .qpb);
+end write$change$mxq;
+
+dcl logeof lit '0ffh';
+dcl dump$op lit '0ffh';
+
+dcl writing boolean initial (false);
+dcl delete$flag boolean initial (true);      /* delete when convienient     */
+dcl deleted boolean initial (true);          /* has been deleted            */
+dcl file$is$empty boolean initial (true);
+dcl rrr address initial(0);                  /* next random record to read  */
+dcl wrr address initial(0);                  /* next random record to write */
+
+delete$file: procedure;
+  call mon1(m$closef, .fcb);                 /* force allocation vector     */
+  call mon1(m$deletef, .fcb);                /* update */
+  delete$flag = false;
+  deleted = true;
+end delete$file;
+
+make$file: procedure boolean;
+  call setb(0, @fcb(f$ex), fcblen-f$ex);
+  fcb(f$drvusr) = sd.tempdisk + 1;    /* try deleting the file in case drive */
+  call mon1(m$deletef, .fcb);         /* was read only when delet$file was   */
+                                      /* called or tempdisk has changed      */
+  if mon2(m$makef, .fcb) = 0ffh then  /* open in locked mode */
+    return(false);            /* error - force open attempt next time */
+  deleted = false;
+  return(true);
+  /* fcb(f$ex) = fcb(f$ex) or 80h;   /* make system         */
+  /* call mon1(m$setatt, .fcb); */
+end make$file;
+
+reset$file: procedure;
+  delete$flag, file$is$empty = true;
+  writing = false;                  /* force setdma */
+  wrr, rrr = 0;                     /* not necessary ? */
+end reset$file;
+
+dcl bufsiz lit '128';
+
+dcl in$buf(bufsiz) byte;            /* buffer to fill on from reading VOUTQ */
+dcl in$ptr word initial (0ffffh);   /* initially empty buffer */
+
+dcl purge$buf (buf$siz) byte;       /* buffer to use when purging */
+dcl purge$ptr word initial (0ffffh);
+dcl num$purge$buf$chars word initial (0);
+
+write$buf: procedure boolean;
+  if deleted then
+  do;
+    if not make$file then             /* delete and make file */
+      return(false);
+  end;
+  else if rrr = wrr and not file$is$empty then
+    return(false);              /* don't write if we haven't purged it yet */
+  if not writing then		/* we want to be in write mode */
+  do;
+    call mon1(m$setdma,.in$buf);
+    writing = true;
+  end;
+  fcb(f$rrec) = low(wrr);
+  fcb(f$rrec+1) = high(wrr);
+  if mon2(m$writerf, .fcb) <> 0 then
+    return(false);             /* out of disk space or physical error */
+  file$is$empty = false;
+  in$ptr = 0ffffh;
+  wrr = (wrr + 1) mod (ccb.maxbufsiz * 8);   /* next record to write */
+  return(true);
+end write$buf;
+
+read$buf: procedure boolean;
+  dcl ret boolean;
+  if file$is$empty then
+  do;
+    if not deleted then         /* made file but had a write error */
+      call reset$file;
+    return(false);
+  end;
+  if writing then               /* we want to be in read mode */
+  do;
+    call mon1(m$setdma, .purge$buf);
+    writing = false;
+  end;
+  fcb(f$rrec) = low(rrr);
+  fcb(f$rrec+1) = high(rrr);
+  ret = mon2(m$readrf,.fcb) = 0; /* physical error if false - skips record */
+  rrr = (rrr + 1) mod (ccb.maxbufsiz * 8);
+  if rrr = wrr then             /* done with file  ? */
+    call reset$file;
+  return(ret);                  /* return read status */
+end read$buf;
+
+dcl active$msg boolean initial (false);
+read$voutq: procedure;
+  if active$msg then
+    return;
+  qpb.qaddr = ccb.voutq;
+  qpb.buffptr = .voutq$msg;
+  call mon1(m$readq, .qpb);
+  if voutq$msg.type = data$msg then
+    active$msg = true;
+end read$voutq;
+
+drain$voutq: procedure(char$adr) boolean;
+  dcl char$adr address;               /* return false if no chars found in */
+  dcl char based char$adr byte;       /* VOUTQ, return true and put char @ */
+  dcl (have$a$char, qempty) boolean;  /* char$adr if there is one          */
+  qpb.qaddr = ccb.voutq;
+  qpb.buffptr = .voutq$msg;
+  have$a$char, qempty = false;
+  do while not have$a$char and not qempty;
+    if mon2(m$creadq, .qpb) = 0 then      /* successful queue read */
+      have$a$char = voutq$msg.type = data$msg;  /* and msg is data */
+    else
+      qempty = true;
+  end;
+  char = voutq$msg.dayta;
+  if qempty then
+    return(false);               /* no chars in queue */
+  return(true);                  /* char was a data msg */
+end drain$voutq;
+
+put$char: procedure boolean;
+  active$msg = false;
+  if voutq$msg.type <> data$msg then
+    return(true);
+  voutq$msg.type = wake$msg;   /* probably garbage */
+  in$buf(in$ptr := in$ptr + 1) = voutq$msg.dayta;
+  if in$ptr = buf$siz - 1 then
+    return(write$buf);                     /* don't call again no write  */
+  return(true);
+end put$char;
+
+get$char: procedure (charadr) boolean;
+  dcl charadr address, char based charadr byte;
+  if purge$ptr + 1 = num$purge$buf$chars then
+    if read$buf then
+    do;
+      num$purge$buf$chars = bufsiz;
+      purge$ptr = 0ffffh;
+    end;
+    else if in$ptr <> 0ffffh then   /* data in buff but not in file */
+    do;
+      call move(in$ptr + 1, .in$buf, .purge$buf);
+      write$pending = false;
+      num$purge$buf$chars = in$ptr + 1;
+      in$ptr, purge$ptr = 0ffffh;  /* indicate data in purge$buf */
+    end;
+    else if active$msg then
+    do;
+      active$msg = false;
+      char = voutq$msg.dayta;
+      return(true);
+    end;
+    else
+    do;
+      if not drain$voutq(char$adr) then        /* get chars from VOUTQ       */
+      do;
+        do while (ccb.flag and cf$vout) <> 0;  /* user process is NQing wait */
+          call mon1(m$delay, 2);               /* for q write to finish      */
+        end;
+        return(drain$voutq(char$adr));         /* now read message, usr proc */
+      end;                                     /* sleeps because of state    */
+      else
+        return(true);                          /* got a char from VOUTQ      */
+     end;
+  purge$ptr = purge$ptr + 1;
+  char = purge$buf(purge$ptr);
+  return (true);
+end get$char;
+
+full$disk: procedure;                          /* arrive when we can't write*/
+  call read$change$mxq;                        /* to the disk               */
+  if (ccb.state and csm$purging) = 0 then      /* wait for PIN to switch us */
+                                               /* to the foreground,        */
+    ccb.state = ccb.state or csm$filefull;     /* csm$file$full and csm$pur-*/
+                                               /* ging are mutually exclusive*/
+  call write$change$mxq;
+end full$disk;
+
+dcl write$pending boolean initial (false);
+buffer: procedure;
+  if write$pending then
+    if write$pending := not write$buf then
+    do;
+      call full$disk;
+      return;
+    end;
+  do while (ccb.state and not double(csm$ctrlP)) =
+    csm$buffered + csm$background;
+    call read$voutq;                      /* always do something with the */
+    if write$pending := not putchar then  /* character ! */
+    do;
+      call full$disk;
+      return;
+    end;
+  end;
+end buffer;
+
+dcl purgeok$mask lit '(csm$background or csm$abort or csm$ctrlS)';
+
+purge: procedure;
+  dcl (char, count) byte;
+  dcl controlP boolean;
+  dcl more$in$file boolean;
+  more$in$file = true;
+  do while (ccb.state and purgeok$mask) = 0 and
+    more$in$file;
+    call read$change$mxq;
+    controlP = (ccb.state and csm$ctrlP) <> 0;
+    if (ccb.state and purgeok$mask) = 0 then
+    do;
+      disable;
+      do while (ccb.flag and cf$conout) <> 0;
+        call sleep(.ccb.cosleep);
+      end;
+      ccb.flag = ccb.flag or cf$conout;
+      enable;
+      count = 0;
+      do while more$in$file and count < 40;    /* for performance, purge 40 */
+        if (more$in$file := get$char(.char)) and  /* chars before allowing  */
+          (ccb.state and csm$ctrlO) = 0 then     /* state to change, 40 is */
+          do;                                    /* is somewhat arbitrary  */
+            call pxios1(mx$conout, char, copynum);
+            if controlP then
+              call pxios1(mx$lstout, char, ccb.mimic);
+          end;  
+      count = count + 1;
+      end;
+      ccb.flag = ccb.flag and not cf$conout;
+      call write$change$mxq;          /* possibly wake up PIN */
+      call wakeup(.ccb.cosleep);      /* or user process      */
+    end;
+    else
+      call write$change$mxq;
+  end;
+  if not more$in$file then
+  do;
+    num$purge$buf$chars = 0;
+    purge$ptr, inptr = 0ffffh;
+    call read$change$mxq;
+    if (ccb.state and csm$purging) <> 0 then
+    do;
+      ccb.state = ccb.state and not double(csm$purging ); /*  the XIOS call  */
+      call pxios1(mx$upstatus, 0, ccb.pc);
+    end;
+    call write$change$mxq;
+  end;
+  call wakeup(.ccb.usleep);  /* wake up user process */
+end purge;
+
+abort: procedure;
+  dcl junk word;
+  do while drain$voutq(.junk);       /* drain input queue        */
+  end;                               /* may wake up user process */
+  call read$change$mxq;              
+  ccb.state = ccb.state and not double(csm$abort);
+  call write$change$mxq;
+  call reset$file;
+  write$pending = false;
+  purge$ptr, inptr = 0ffffh;
+  num$purge$buf$chars = 0;
+  call wakeup(.ccb.usleep);  /* wake up user process */
+end abort;
+
+initq: procedure(qdaddr) address;
+  dcl qdaddr address;
+  dcl ret boolean;
+  dcl iqd based qdaddr qd$structure;
+  call move(qnamsiz, .iqd.name, .qpb.name);
+  ret = mon2(m$makeq, qdaddr);                  /* 0ffh return = error */
+  ret = ret or mon2(m$openq, .qpb);             /* ret = 0 if no error */
+
+$if debug = 1
+  if ret then        /* if debugging print error */
+    call error(@('Queue initialization error',0));
+$endif
+
+  return(qpb.qaddr);
+end initq;
+
+dcl pd$pointer pointer;		/* in RSP assembly interface */
+dcl pd based pd$pointer (1) byte;
+dcl pd$name lit '8';
+
+dcl voutq$buf (32) byte;
+dcl voutq qd$structure initial
+  (0,0,0, qf$hide + qf$keep,        'VOUTQ   ',2,16,0,0,0,0,.voutq$buf);
+
+dcl vinq$buf (64) word;          /* 64 bytes type ahead */
+dcl vinq qd$structure initial
+  (0,0,0, qf$keep + qf$hide,        'VINQ    ',2,64,0,0,0,0,.vinq$buf);
+
+dcl vcmxq qd$structure initial
+  (0,0,0,qf$keep + qf$mx + qf$hide, 'VCMXQ   ',0,1,0,0,0,0,0);
+
+dcl qpb qpb$structure;
+
+dcl dummy (1) byte data ('Z');  /* make constant segment non-zero to */
+                                /* hex generation */
+
+dcl fcb(36) byte initial (0,'        ', '$$$');
+
+/* initialization */
+
+plmstart: procedure public;
+  dcl save$state word;
+  call mon1(m$errmode, 0ffh);           /* don't display errors */
+  ccb$ptr.segment, sysdat$ptr.segment = rsplink;
+  sysdat$ptr.offset = 0;
+  ccb$ptr.offset = sd.ccb + copynum * size(ccb);
+
+  pd$pointer = mon4(m$getpd,0);
+
+  call movb(@pd(pd$name), @fcb(f$name), qnamsiz);
+
+  call move(4, .fcb(f$name + name$len), .vinq.name(4));
+  ccb.vinq = initq(.vinq);
+  call move(3, .fcb(f$name + name$len), .voutq.name(5));
+  ccb.voutq = initq(.voutq);
+  call move(3, .fcb(f$name + name$len), .vcmxq.name(5));
+  ccb.vcmxq = initq(.vcmxq);
+
+  call mon1(m$setcns, copynum);         /* copynum is virtual console # */
+
+  fcb(f$drvusr) = sd.tempdisk + 1;
+  call write$change$mxq;                /* write initial MX message */
+  call mon1(m$setprior, 200);  
+
+  do forever;
+    if delete$flag then
+      call delete$file;
+    if (ccb.state and not double(csm$ctrlP + csm$ctrlO)) =
+      csm$buffered + csm$background then        /* if ctrlO,background and */
+      call buffer;                              /* buffered, then sleep    */
+    else if ( (ccb.state and not double(csm$ctrlO + csm$ctrlP))
+      and csm$purging) <> 0 then
+      call purge;
+    else if (ccb.state and csm$abort) <> 0 then
+      call abort;
+    if delete$flag then
+      call delete$file;
+    else
+      call read$voutq;
+  end;
+
+end plmstart;
+end vout;
+
