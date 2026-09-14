@@ -1,4 +1,4 @@
-SUBDIRS=tools asm ddt86 xios31
+SUBDIRS=tools asm ddt86 kernel genccpm
 
 DISTDIR=dist
 DISTZIP=dist.zip
