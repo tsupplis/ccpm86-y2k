@@ -1,0 +1,25 @@
+
+;*****************************************************
+;*
+;*	Character Definitions
+;*
+;*****************************************************
+
+ctlc	equ	003h
+ctld	equ	004h
+ctle	equ	005h
+bell	equ	007h
+ctlh	equ	008h
+tab	equ	009h
+lf	equ	00ah
+cr	equ	00dh
+ctlp	equ	010h
+ctlq	equ	011h
+ctlr	equ	012h
+ctls	equ	013h
+ctlu	equ	015h
+ctlx	equ	018h
+ctlz	equ	01ah
+ctl	equ	05eh
+rubout	equ	07fh
+

@@ -1,0 +1,16 @@
+
+;*****************************************************
+;*
+;*	System Entry Table entry format
+;*
+;*****************************************************
+
+enttab_entry	equ	word ptr 0
+entlen		equ	enttab_entry + word
+
+	; Flags Values in ent_flag
+
+ef_network	equ	0f0h	; network intercept
+
+; see SYSTEM.DEF for ent_tab definition
+

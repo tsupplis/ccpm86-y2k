@@ -1,0 +1,174 @@
+
+;*****************************************************
+;*
+;*	SYSTEM ENTRY FUNCTIONS
+;*
+;*****************************************************
+
+;=====		==========================
+n_imp:		; Function not implemented
+;=====		==========================
+	mov cx,e_not_implemented
+	mov bx,0ffffh ! ret
+
+;====		=========================
+i_ent:		; Illegal System Function
+;====		=========================
+	mov cx,e_bad_entry
+	mov bx,0ffffh ! ret
+
+;=======	====================
+bver_ent:	; Get BDOS Version #
+;=======	====================
+	mov bx,bvernum ! xor cx,cx ! ret
+
+;=======	====================
+over_ent:	; Get O.S. Version #
+;=======	====================
+	mov bx,osvernum ! xor cx,cx ! ret
+
+;if mpm
+;
+;=========	==================      ============
+;cbios_ent:	; Direct BIOS call	MPM 2.x ONLY
+;=========	==================      ============
+;
+;	mov si,dx
+;	push ds ! mov ds,u_wrkseg
+;	mov al,[si] ! mov cx,1[si]
+;	mov dx,3[si] ! pop ds
+;	cmp al,1 ! ja goxios			;if BOOT,WBOOT; terminate
+;	    mov cx,f_terminate
+;	    mov dx,0 ! jmp osif
+;goxios:
+;	cmp al,7 ! jbe gx1			;7=reader input
+;	    cmp al,15 ! je gx1			;15=list status
+;		mov bx,0ffffh ! mov cx,e_bad_entry
+;		ret
+;gx1:	mov bx,rlr
+;	cmp al,4 ! ja xlst			;4=console output
+;	    mov dl,p_cns[bx]
+;	    cmp al,4 ! je jxio
+;		mov cl,dl ! jmps jxio
+;
+;xlst:	cmp al,6 ! je jxio
+;	    cmp al,7 ! je jxio
+;		mov dl,p_lst[bx]
+;		cmp al,15 ! jne jxio
+;		    mov cl,dl
+;jxio:	sub al,2 ! mov ah,0
+;	jmp xiosif 
+;endif					;end of MP/M direct BIOS call
+
+;if ccpm					;CCP/M direct BIOS call
+
+;=========	==================      =============
+cbios_ent:	; Direct BIOS call	CCPM 2.x ONLY
+;=========	==================      =============
+
+		;  DI = 0 if last call was also func 50.
+		;  DI = 0ffffh if it wasn't
+
+;	xor di,di
+;	cmp u_func,50
+;	je c_next50
+;	  dec di
+c_next50:
+;	mov u_func,50
+	mov si,dx
+	mov bp,ds			;user register for speed
+	mov ds,u_wrkseg
+	mov al,[si] ! mov cx,1[si]
+	mov dx,3[si]
+	mov ds,bp			;DS=SYSDAT
+
+	cmp al,2 ! jne not_consts	;optimize constat
+;	  test di,di			;DI=0 if last call was func 50
+;	  jnz go_cio
+;	    mov si,rlr
+;	    mov bl,ncns			;is it a virtual console ?
+;	    cmp bl,p_cns[si]
+;	    jae go_cio
+;get_status:
+;	      mov si,u_conccb		;if it was U_CCB is valid
+;	      xor bx,bx
+;	      cmp c_nchar[si],0
+;	      jnz s_gotchar
+;	        mov bl,c_numchars[si]	;number of chars in VINQ
+;	        jmps s_quick
+go_cio:
+	  mov cx,f_ciostat		;doesn't change console mode
+	  call osif
+;s_quick:
+	  test bl,bl ! jz x_cs		;returns 1 or 0 (or char count)
+;s_gotchar:
+	    mov bx,0ffh			;BIOS returns 0ffh or 0
+x_cs:
+	  ret
+
+not_consts:
+	cmp al,4 ! jne not_conout	;console output
+	    mov dl,cl			;character to send
+	    mov cx,f_rconout
+	    jmp osif
+
+not_conout:
+	cmp al,1 ! ja goxios
+	    mov cx,f_terminate		;cold or warm boot
+	    mov dx,0 ! jmp osif
+goxios:
+	cmp al,7 ! jbe gx1		;BIOS 2-7 and 15 are ok
+	    cmp al,15 ! je gx1
+		mov bx,0ffffh ! mov cx,e_bad_entry
+		ret
+gx1:
+	cmp al,3 ! jne not_conin	;console input
+	    mov cx,f_rconin
+	    jmp osif			;BIOS return in AL and BL
+not_conin:
+	cmp al,5 ! jne not_listout
+	    mov dl,cl
+	    mov cx,f_lstout
+	    jmp osif
+not_listout:
+	cmp al,6 ! jne not_auxout
+	    mov ax,io_auxout
+	    jmp xiosif
+not_auxout:
+	cmp al,7 ! jne not_auxin
+	    mov ax,io_auxin
+	    jmp xiosif
+not_auxin:
+	mov ax,io_listst		;when we move this to CIO
+	jmp xiosif			;check for ownership
+;endif					;end of CCP/M direct BIOS
+
+
+;========	==============================
+sdat_ent:	; Ret Addr of System Data Area
+;========	==============================
+
+	mov u_retseg,ds
+	xor bx,bx ! mov cx,bx ! ret
+
+;=======	============================
+tod_ent:	; Return current Time of Day
+;=======	============================
+		; copy tod struct into user area
+	push es ! mov es,u_wrkseg
+	mov di,dx
+	mov si,offset tod ! mov cx,todlen
+	rep movsb
+	pop es ! xor cx,cx ! mov bx,cx ! ret
+
+;=======	======================
+ser_ent:	; Return Serial Number
+;=======	======================
+		; copy serial field into user area
+	push es ! mov es,u_wrkseg
+	mov di,dx ! mov si,offset serial
+	push ds ! mov ax,cs ! mov ds,ax
+	mov cx,3 ! rep movsw
+	pop ds ! pop es
+	xor cx,cx ! mov bx,cx ! ret
+

@@ -1,0 +1,50 @@
+;*****************************************************
+;*
+;*	Memory Parameter Block
+;*
+;*****************************************************
+
+mpb_start	equ	word ptr 0
+mpb_min		equ	word ptr mpb_start + word
+mpb_max		equ	word ptr mpb_min + word	
+mpb_pdadr	equ	word ptr mpb_max + word
+mpb_flags	equ	word ptr mpb_pdadr + word
+
+mpblen		equ	mpb_flags + word
+
+
+	; mpb_flags definition (also ms_flags)
+
+mf_load		equ	00001h
+mf_share	equ	00002h
+mf_code		equ	00004h
+; mf_data	equ	00008h
+; mf_extra	equ	00010h
+; mf_stack	equ	00020h
+mf_udaonly	equ	00040h
+
+;*****************************************************
+;*
+;*	Memory Free Parameter Block
+;*
+;*****************************************************
+
+mfpb_start	equ	word ptr 0
+mfpb_pd		equ	word ptr mfpb_start + word
+mfpblen		equ	mfpb_pd + word
+
+;*****************************************************
+;*
+;*	MAU Free Request
+;*
+;*	+----+----+----+----+----+----+
+;*	|   mau   |   sat   |  start  |
+;*	+----+----+----+----+----+----+
+;*
+;*****************************************************
+
+maf_mau		equ	word ptr 0
+maf_sat		equ	word ptr maf_mau + word
+maf_start	equ	word ptr maf_sat + word
+maflen		equ	maf_start + word
+

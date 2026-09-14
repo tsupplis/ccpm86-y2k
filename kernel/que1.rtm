@@ -1,0 +1,456 @@
+;*****************************************************
+;*
+;*	Queue Routines
+;*
+;*****************************************************
+
+; Each queue system entry point is mutually exclusive
+; of the other queue system entry points.
+; All the routines called in QUE2.RTM are
+; subroutines of the entry points in QUE1.RTM and
+; thus are called only when the process has ownership
+; of the q system.
+
+; If a process is already in the queue system another process
+; will wait until the first process calls Q_UNSYNC.
+; This allows us to keep interrupts on while using shared variables.
+
+; To protect against terminating and potentially losing a QD,
+; a message or neglecting to wake up a DQing or NQing
+; process; a "no abort region" is entered whenever
+; we obtain the queue system.  In addition if we assign
+; the queue system to a DQing or NQing process, the new owner
+; of the q system is forced into a "no abort region".  This
+; makes the environment of the waking NQing or DQing process appear
+; as if it never went to sleep.
+
+; A note for the uninitiated: DQing is short for "Decoding from a Queue"
+; or reading from a queue.  NQing is short for "eNcoding to a Queue"
+; or writing to a queue.
+
+
+;===========		=======================
+makeq_entry:		; Create a System Queue
+;===========		=======================
+;	input : U_WRKSEG:DX = address of QD to create
+;	output: BX = 0 if okay , 0ffffh if error
+;		CX = error Code
+
+	call q_sync			;obtain q system, BX,DX preserved
+
+	call getqdaddr			;get QD and q buffer
+	jcxz qm_gotqd
+	  jmp qm_err
+qm_gotqd:				;DI->QD in SYSDAT
+					;make sure this queue doesn't
+					;already exist
+qm_chk:
+	push es				;save UDA
+	mov es,sysdat
+	mov si,(offset qlr)-q_link
+qm_nxt:
+	mov si,q_link[si]		;go down QLR to see if QD already
+	test si,si ! jz qm_go		;exists
+	  push di ! push si		;save new QD and QLR ptr
+	  mov cx,qnamsiz/2
+	  add di,q_name			;ES:DI->QPB.NAME
+	  add si,q_name			;DS:SI->QPB.NAME
+	  repe cmpsw
+	  pop si ! pop di		;restore QLR ptr and new QD
+	  jne qm_nxt			;no match try next QD
+
+	    pop es			;names match, restore UDA
+	    call remqd			;QD pointed to by DS:DI
+	    mov cx,e_q_inuse
+	    jmps qm_err
+
+qm_go:					;no match - alright to make this q
+	pop es				;ES=UDA
+	xor dx,dx			;initialize the QD
+	mov q_dq[di],dx
+	mov q_nq[di],dx
+	mov q_msgcnt[di],dx
+	mov q_msgout[di],dx
+	mov ax,qlr			;put QD on QLR
+	mov q_link[di],ax
+	mov qlr,di
+	xor bx,bx			;return success
+	jmps qm_ret
+qm_err:
+	mov bx,0ffffh
+qm_ret:
+	jmp q_unsync			;release q system; BX,CX preserved
+
+;===========		======================
+openq_entry:		; Find an active Queue
+;===========		======================
+;	input:	U_WRKSEG:DX = address of QPB
+;
+;	output:	sets QPB.QADDR to QD offset in SYSDAT
+;		BX = 0 if okay, 0ffffh if not
+;		CX = error Code
+
+	call q_sync			;obtain q system; BX,DX preserved
+	push es				;save UDA
+	mov es,u_wrkseg
+	mov si,(offset qlr)-q_link
+	mov di,dx			;ES:DI->QPB
+qo_nqd:
+	mov si,q_link[si]		;go down QLR until QD name
+	test si,si ! jnz qo_cmp		;matches QPB name or end of QLR
+	  pop es			;ES=UDA
+	  mov cx,e_no_queue		;found end of QLR - can't open
+	  jmps qo_err
+qo_cmp:
+	  push di ! push si		;compare names
+	  mov cx,qnamsiz/2
+	  add si,q_name			;DS:SI->QD.NAME
+	  add di,qpb_name		;ES:DI->QPB.NAME
+	  repe cmpsw
+	  pop si ! pop di		;restore QD,QPB
+	  jne qo_nqd			;try next QD if no match
+
+	  test q_flags[si],qf_hide	;names match
+	  jz noprot			;check for protection:
+	    mov bx,rlr		;must be system process to
+	    test p_flag[bx],pf_sys	;open q with QF_HIDE set
+	    jnz noprot
+	      pop es			;ES=UDA
+	      mov cx,e_q_protected	;QF_HIDE and not SYS PD
+	      jmps qo_err
+noprot:
+	    mov es:qpb_qaddr[di],si	;write the QD offset into
+	    pop es			;ES=UDA
+	    xor bx,bx			;the QPB_QADDR field
+	    jmps qo_ret			;to open the q
+
+qo_err:					;CX=error code
+	mov bx,0ffffh
+qo_ret:
+	call q_unsync			;release q system; BX,CX preserved
+	ret				
+
+
+;=============		=======================
+deleteq_entry:		; Delete a System Queue
+;=============		=======================
+;	Takes QD off the QLR and place it in the QUL
+;	input:	U_WRKSEG:DX = offset of QPB
+;	output:	BX = 0 if ok, 0ffffh if error
+;		CX = error code
+
+	mov ax,es			;save UDA
+	mov es,u_wrkseg			;get QD address from user's
+	mov di,dx			;QPB
+	mov di,es:qpb_qaddr[di]		;DS:DI->QD (unverified)
+	mov es,ax			;ES=UDA
+
+					;Check for KEEP, SYS Flags
+					;DS:DI->QD
+	test q_flags[di],qf_keep
+	jnz qd_err1
+	  test q_flags[di],qf_hide
+	  jz qd_ok1
+	    mov bx,rlr			;if hide flag then
+	    test p_flag[bx],pf_sys	;SYS flag must be on in PD
+	    jnz qd_ok1
+
+qd_err1:      mov cx,e_q_protected
+	      mov bx,0ffffh
+	      ret
+qd_ok1:
+	push di				;DI->QD
+	call q_sync			;obtain q system; BX,DX preserved
+	pop di
+	mov ax,q_dq[di]			;if any process is NQing or
+	mov dx,q_nq[di]			;DQing we can't delete
+	or dx,ax ! mov cx,e_q_inuse
+	jnz qd_err2
+
+	  mov bx,(offset qlr)-q_link
+qd_nqd:					;look for QD on QLR
+	    mov si,q_link[bx]		;DI=QD to delete
+	    test si,si ! jz qd_noq
+	      cmp si,di ! je qd_found
+	      mov bx,si ! jmps qd_nqd	;try next queue
+qd_found:
+	    mov ax,q_link[di]		;found the queue, remove
+	    mov q_link[bx],ax		;it from QLR
+	    call remqd
+	    xor bx,bx			;return success
+	    jmps qd_ret
+
+qd_noq:
+	    mov cx,e_no_queue
+qd_err2:
+	    mov bx,0ffffh
+qd_ret:
+	jmp q_unsync			;release q system
+	;ret				;BX,CX preserved
+
+;===========		============
+readq_entry:		; Read Queue
+;===========		============
+	xor al,al ! jmps readq
+
+;============
+creadq_entry:		; Conditional Read Queue
+;============
+	mov al,0ffh
+	; jmps readq
+
+readq:		; Read message from queue
+;-----		-------------------------
+; If no buffer is available the process
+; making an unconditional READQ is placed into the DQ list.
+;
+;	input:	U_WRKSEG:DX = QPB
+;		AL = 0 if unconditional
+;		     <> 0 if not
+;	output:	BX = 0 if okay
+;		     0ffffh if error
+;		CX = Error Code
+
+	push ax				;save cond code
+	call q_sync			;get q system; BX,DX preserved
+	call queverify			;is the QPB valid ?
+	pop ax				;AL=cond code
+	mov si,dx			;U_WRKSEG:SI->QPB
+	jcxz qr_ver			;CX=0 QPB is ok
+	  jmp qr_err			;CX=error code from
+qr_ver:					;queverify
+	push es				;save UDA
+	mov es,u_wrkseg			;ES:SI->QPB
+	mov bx,es:qpb_qaddr[si]		;BX->QD
+	cmp q_msgcnt[bx],0		;is there a msg to read ?
+	jne qr_readit
+	
+qr_wait:
+	   pop es			;ES=UDA
+	   test al,al ! jz qr_wait1	;conditional read if AL <> 0
+	     mov cx,e_q_empty
+	     jmps qr_err
+qr_wait1:				;ES=UDA
+	    push bx ! push si		;QD, QPB
+    	    lea dx,q_dq[bx]		;DX=addr of DQ List
+	    mov bl,ps_dq		;sleep status=DQ
+	    call q_wait			;wait for a DQ
+					;we now own the q system
+					;and cannot be aborted
+	    pop si ! pop bx		;QPB, QD
+	    push es			;save UDA
+	    mov es,u_wrkseg
+qr_readit:
+	mov di,es:qpb_buffptr[si]	;ES:[DI]->user's queue buffer
+	mov cx,q_msglen[bx]		;ES=U_WRKSEG
+	test cx,cx ! jnz qr_lmsg	;check message length
+	  xor ax,ax
+	  test q_flags[bx],qf_mx		;msglen=0, check for MX q
+	  jz qr_end
+	    mov ax,rlr			;its a MX queue
+	    mov q_buf[bx],ax		;BUF = PD addr of owner
+	    xor ax,ax
+	    jmps qr_end
+qr_lmsg:				;msglen > 0
+	mov ax,q_msgout[bx] ! push ax	;MSGOUT is # of message to read
+	mul cx ! add ax,q_buf[bx]	;compute its start in buffer
+	mov si,ax
+	rep movsb			;move to QPB buffer
+	pop ax ! inc ax			;set MSGOUT to next message
+	cmp ax,q_nmsgs[bx]		;circular buffers, so
+	jne qr_end			;check for wrap around
+	  xor ax,ax
+qr_end:
+	pop es				;ES=UDA
+	mov q_msgout[bx],ax
+	dec q_msgcnt[bx]
+	lea dx,q_nq[bx]
+        call q_assign_sync		;give the queue system to
+					;first NQing process if any,
+	call q_unsync			;release q system if we still
+					;own it, exit no abort region
+	xor bx,bx			;indicate success
+	ret
+
+qr_err:
+	call q_unsync			;release q system, exit no abort
+					;region, BX,CX preserved
+	mov bx,0ffffh			;indicate error
+	ret
+
+;============		=============
+writeq_entry:		; Write Queue
+;============		=============
+	xor al,al ! jmps writeq
+
+;=============		=========================
+cwriteq_entry:		; conditional Write Queue
+;=============		=========================
+	mov al,0ffh
+	;jmps writeq
+
+writeq:		; Write message to queue
+;------		------------------------
+; If no buffer is available when making an unconditional
+; WRITEQ call, the calling process is placed into the NQ list.
+;
+;	input:	U_WRKSEG:DX = QPB
+;		AL = 0 if unconditional
+;		     <> 0 if not
+;	output:	BX = 0 if okay
+;		     0ffffh if error
+;		CX = Error Code
+
+	push ax				;save cond code
+	call q_sync			;get queue system
+					;BX,DX preserved
+	call queverify			;is the QPB valid ?
+	pop ax				;AL = cond code
+	mov di,dx			;U_WRKSEG:DI->QPB
+	jcxz qw_ver			;CX=0 QPB is ok
+	  jmp qw_err			;CX=error code from
+qw_ver:					;queverify
+	push es				;save UDA
+	mov es,u_wrkseg			;ES:DI->QPB
+	mov bx,es:qpb_qaddr[di]		;BX->QD
+	mov cx,q_msgcnt[bx]
+	cmp cx,q_nmsgs[bx]		;is there a buffer to write ?
+	jne qw_writeit
+	
+qw_wait:
+	  pop es			;ES=UDA
+	  test al,al ! jz qw_wait1	;conditional read if AL <> 0
+	    mov cx,e_q_full
+	    jmps qw_err
+qw_wait1:				;ES=UDA
+	  push bx ! push di		;save QD, QPB
+    	  lea dx,q_nq[bx]		;DX=addr of NQ List
+	  mov bl,ps_nq			;sleep status=NQ
+	  call q_wait			;sleep on NQ List
+					;q system is assigned to us,
+					;we are in no abort region
+					;by DQing process that woke us
+	  pop di ! pop bx		;QPB,QD
+	  push es			;save UDA
+	  mov es,u_wrkseg
+qw_writeit:
+	mov si,es:qpb_buffptr[di]	;U_WRKSEG:[SI]->user's queue buffer
+	mov cx,q_msglen[bx]		;ES=U_WRKSEG
+	test cx,cx ! jnz qw_lmsg	;check message length
+	  test q_flags[bx],qf_mx	;msglen=0, check for MX q
+	  jz qw_end
+	    xor ax,ax
+	    mov q_buf[bx],ax		;its a MX queue
+	    jmps qw_end			;BUF = 0
+
+qw_lmsg:				;msglen > 0
+	mov ax,q_msgout[bx]
+	add ax,q_msgcnt[bx]		;AX = # of message to write
+	cmp ax,q_nmsgs[bx]		;check for wrap around
+	jb qw_move
+	  sub ax,q_nmsgs[bx]
+qw_move:
+	mul cx ! add ax,q_buf[bx]	;compute its start in buffer
+	mov di,ax			;DI offset of new msg in buffer
+	mov ax,ds ! mov dx,es
+	mov es,ax ! mov ds,dx		;ES=SYSDAT, DS=U_WRKSEG
+	rep movsb			;move to QPB buffer
+	mov ax,es ! mov ds,ax		;DS=SYSDAT
+qw_end:
+	pop es				;ES=UDA
+	inc q_msgcnt[bx]		;one more message in the queue
+	lea dx,q_dq[bx]			;wake DQing process if any
+	call q_assign_sync
+	call q_unsync			;release q system if we still
+	xor bx,bx			;own it, exit no abort region
+	ret				;BX=0: success
+
+qw_err:
+	call q_unsync			;release q system; exit no abort
+					;region BX,CX preserved
+	mov bx,0ffffh			;indicate error
+	ret
+
+
+q_wait:				;wait on DQ or NQ list
+;------
+;	entry:	DX = list to wait on
+;		BL = sleep status
+;		calling process owns queue system through
+;		a call to q_sync
+
+;	Queue message or buffer space is not available.
+;	Give up queue system and sleep on DQ or NQ list, but
+;	do not allow any other process to read or write to a queue
+;	until we get on the sleep list.
+
+				
+	pushf ! cli		;keep abort spec from running ...
+	push bx ! push dx	;save sleep status, list address
+	call q_unsync		;does not go to dispatcher, we can be
+	pop dx ! pop bx		;aborted once on sleep list
+	call sleep_entry	;go to dispatcher
+	popf			;come back after q_assign call
+	ret			;Q_ASSIGN: wakes us up when resource
+				;is ready
+
+q_sync:				;obtain ownership of q system
+;------
+;	entry:	interrupts should be on
+;		ES=UDA
+;	exit:	we own the queue system for make,open,read,write,delete
+;		queue operations, interrupts unchanged
+;		BX,DX preserved - usually entry parameters
+
+	push bx ! push dx
+	call no_abort_entry	;we cannot abort while in the queue system
+	mov bx,offset q_spb
+	call sync_entry
+	pop dx ! pop bx
+	ret
+
+q_unsync:			;release the queue system
+;--------			;to other processes
+;	entry:	interrupts can be or off
+;	exit:	interrupts unchanged,
+;		have not gone to dispatcher,
+;		BX,CX preserved - usually return codes
+
+	push bx ! push cx
+	mov bx,offset q_spb
+	call unsync_entry	;wait for queue system
+	call ok_abort_entry	;allow calling PD to be terminated
+	pop cx ! pop bx
+	ret
+
+q_assign_sync:
+;-------------
+;	entry:	DX = address of DQ or NQ list to give the queue
+;	exit:	none
+
+;	Assign is used so a process is forced to read or write
+;	after DQing or NQing.  Otherwise an awakening DQing or NQing
+;	process	could be deleted, leaving a message or buffer space
+;	available with other processes still DQing or NQing.
+;	This message or buffer space would never be reclaimed.
+;	To prevent this situation, the waking DQing or NQing process
+;	is kept from aborting and assigned the QSPB.  Note
+;	it is ok for a process to be aborted while it is on the NQ or
+;	DQ list before this routine is called.
+
+	pushf ! cli			;keep abort spec from terminating
+	mov bx,dx			;waking process
+	mov dx,[bx]			;first process on list
+	test dx,dx			;is there a process to wake?
+	jz qa_ret
+	  push bx			;save list root
+	  call no_abort_spec_entry	;can not abort while in queue
+	  pop dx			;system
+	  popf				;interrupts are ok now -
+	  mov bx,offset q_spb		;present owner and next owner
+	  jmp assign_sync_entry		;have TEMPKEEP on
+
+qa_ret:
+	popf
+	ret
+

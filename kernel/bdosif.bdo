@@ -1,0 +1,637 @@
+
+
+;*****************************************************
+;*
+;*	BDOS interface
+;*
+;*****************************************************
+
+BMPM		equ	true
+BCPM		equ	false
+
+	CSEG
+
+if PCMODE
+	EXTRN bdosrw:NEAR
+	EXTRN compfs:NEAR
+	EXTRN closef:NEAR
+	EXTRN deletef:NEAR
+	EXTRN getspace:NEAR
+	EXTRN makef:NEAR
+	EXTRN openf:NEAR
+	EXTRN chk_pcfcb:NEAR
+	EXTRN pc_chkrec:NEAR
+	EXTRN pcsearch:NEAR
+	EXTRN renamef:NEAR
+	EXTRN setattsf:NEAR
+	EXTRN setstamp:NEAR
+	EXTRN truncatef:NEAR
+	EXTRN xfcb:NEAR
+
+	PUBLIC	check_fcb1
+	PUBLIC	check_fcb3
+	PUBLIC	checkwrite
+	PUBLIC	chk_olist
+	PUBLIC	chk_wild
+	PUBLIC  chk_wild0
+	PUBLIC	ckrofile
+	PUBLIC	close021
+	PUBLIC	conv_rr
+	PUBLIC	copy_user_no
+	PUBLIC	dblockio
+	PUBLIC	directio
+	PUBLIC	discard_data
+	PUBLIC	flush
+	PUBLIC	flushx
+	PUBLIC	fxi40
+	PUBLIC	get_atts
+	PUBLIC 	init_wzf
+	PUBLIC	lret_eq_ff
+	PUBLIC	openx1a
+	PUBLIC	pack_sdcnt
+	PUBLIC	pc_make_test
+	PUBLIC	rd_pcdir
+	PUBLIC	reset_checksum_fcb
+	PUBLIC	roferror
+	PUBLIC	search_olist
+	PUBLIC 	seek;
+	PUBLIC	setcdr
+	PUBLIC	setenddir
+	PUBLIC	set_aret
+	PUBLIC	set_lret1
+	PUBLIC 	test_lock
+	PUBLIC	tst_olist
+	PUBLIC	update_fat
+	PUBLIC 	wrbuff;
+	PUBLIC	wrdir
+endif
+	
+	org	0000h
+
+	jmp init		;bdos initialization
+	jmp entry		;inter module entry pt.
+
+sysdat		dw	0	;seg address of sysdat
+supervisor	rw	2	;supervisor offset and segment
+
+dev_ver		dw	6	; chk'd by GENSYS
+
+	db	'COPYRIGHT(C)1983,84,'
+	db	'DIGITAL RESEARCH(02/07/84)'
+	db	'XXXX-0000-654321'
+
+;====
+init:		; initialize bdos/xios modules
+;====
+;	entry:	DS = system data area
+
+;	code segment values setup by gensys
+;	mov sysdat,ds
+;	mov ax,supmod
+;	mov cs:supervisor,ax
+;	mov ax,supmod+2
+;	mov cs:supervisor+2,ax
+
+	retf
+
+;*****************************************************
+;*
+;* bdos function table
+;*
+;*****************************************************
+
+	; structure of entry in functab
+
+btab_addr	equ	word ptr 0
+btab_flag	equ	byte ptr (btab_addr + word)
+
+bf_getmx	equ	00001b		;get mxdisk queue
+bf_cshell	equ	00010b		;conditional shell function
+bf_fcb33	equ	00100b		;33 byte fcb flag
+bf_fcb36	equ	01000b		;36 byte fcb flag
+bf_resel	equ	10000b		;disk reselect flag
+
+	; bdos function table
+
+functab dw func13   ! db 00001b  ; fxi13  equ 00h  ;disk reset
+	dw func14   ! db 00001b  ; fxi14  equ 01h  ;select disk
+	dw func15   ! db 10101b  ! fxi15  equ 02h  ;open file
+ftab16	dw func16   ! db 10101b  ! fxi16  equ 03h  ;close file
+	dw func17   ! db 00101b  ! fxi17  equ 04h  ;search first
+	dw func18   ! db 00001b  ! fxi18  equ 05h  ;search next
+	dw func19   ! db 10101b  ! fxi19  equ 06h  ;delete file
+	dw func20   ! db 10111b  ! fxi20  equ 07h  ;read sequential
+	dw func21   ! db 10111b  ! fxi21  equ 08h  ;write sequential
+	dw func22   ! db 00101b  ! fxi22  equ 09h  ;make file
+	dw func23   ! db 10101b  ! fxi23  equ 0Ah  ;rename file
+	dw func24   ! db 00000b  ; fxi24  equ 0Bh  ;return login vector
+	dw func25   ! db 00000b  ; fxi25  equ 0Ch  ;return current disk
+	dw func26   ! db 00000b  ; fxi26  equ 0Dh  ;set dma address
+	dw func27   ! db 00001b  ! fxi27  equ 0Eh  ;get alloc addr
+	dw func28   ! db 00001b  ; fxi28  equ 0Fh  ;write protect disk
+	dw func29   ! db 00000b  ; fxi29  equ 10h  ;get r/o vector
+	dw func30   ! db 00101b  ! fxi30  equ 11h  ;set file attributes
+	dw func31   ! db 00001b  ! fxi31  equ 12h  ;get disk parm addr
+	dw func32   ! db 00000b  ; fxi32  equ 13h  ;set/get user code
+	dw func33   ! db 11011b  ! fxi33  equ 14h  ;read random
+	dw func34   ! db 11011b  ! fxi34  equ 15h  ;write random
+	dw func35   ! db 11001b  ! fxi35  equ 16h  ;compute file size
+	dw func36   ! db 01001b  ; fxi36  equ 17h  ;set random record
+	dw func37   ! db 00001b  ; fxi37  equ 18h  ;reset drive
+	dw func38   ! db 00001b  ; fxi38  equ 19h  ;access drive
+	dw func39   ! db 00001b  ! fxi39  equ 1Ah  ;free drive
+	dw func40   ! db 11011b  ! fxi40  equ 1Bh  ;write random w/zero fill
+	dw func42   ! db 11001b  ! fxi42  equ 1Ch  ;lock record
+	dw func43   ! db 11001b  ! fxi43  equ 1Dh  ;unlock record
+	dw func44   ! db 00000b  ; fxi44  equ 1Eh  ;set multi-sector count
+	dw func45   ! db 00000b  ; fxi45  equ 1Fh  ;set bdos error mode
+	dw func46   ! db 00001b  ; fxi46  equ 20h  ;get disk free space
+	dw func48   ! db 00001b  ! fxi48  equ 21h  ;flush buffers
+	dw func51   ! db 00000b  ; fxi51  equ 22h  ;set dma base
+	dw func52   ! db 00000b  ; fxi52  equ 23h  ;get dma base
+	dw func98   ! db 00001b  ! fxi98  equ 24h  ;reset alloc vector
+	dw func99   ! db 01001b  ! fxi99  equ 25h  ;truncate file
+	dw func100  ! db 00101b  ! fxi100 equ 26h  ;set directory label
+	dw func101  ! db 00001b  ; fxi101 equ 27h  ;return directory label data
+	dw func102  ! db 00101b  ! fxi102 equ 28h  ;read file xfcb
+	dw func103  ! db 00101b  ! fxi103 equ 29h  ;write or update file xfcb
+	dw func104  ! db 00000b  ; fxi104 equ 2Ah  ;set current date and time
+	dw func105  ! db 00000b  ; fxi105 equ 2Bh  ;get current date and time
+	dw func106  ! db 00001b  ; fxi106 equ 2Ch  ;set default password
+	dw func116  ! db 10101b  ; fxi113 equ 2Dh  ;set file date and time
+	dw pr_term  ! db 00001b  ! fxi143 equ 2Eh  ;terminate process
+	dw funcdio  ! db 00001b  ; fxi??? equ 2Fh  ;direct disk I/O
+
+;=====
+entry:		; bdos module entry point
+;=====
+;	entry:	CL = internal bdos function number
+;		DX = argument
+;		DS = system data area
+;		ES = user data area
+;	exit:	AX = BX = return code
+
+	xor ch,ch! mov si,cx
+	shl si,1! add si,cx	; multiply by 3
+	add si,offset functab
+	test cs:btab_flag[si],bf_getmx
+	jz nomx
+	  call getdiskmx
+	  jmps exit
+nomx:
+	xor bx,bx			;initialize return parameter
+	call cs:btab_addr[si]
+exit:
+	mov ax,bx
+	retf
+
+restart:				;restart entry point for media changes
+;-------
+	mov cl,fx_intrn			;CX = internal function #
+	xor ch,ch			;SI = offset of BDOS functab entry
+	mov si,cx
+	shl si,1
+	add si,cx
+	add si,offset functab
+	mov bx,rlr			;BX = PD addr
+	mov dx,info			;DX = argument addr
+	mov es,uda_save			;ES = UDA addr
+	cli
+	jmps setup_stack
+
+getdiskmx:
+;---------
+;	entry:	SI = offset of bdos functab entry
+;		CX = internal bdos function number
+;		DX = argument
+
+	mov bx,rlr
+	mov ax,p_flag[bx] ! and ax,pf_tempkeep
+	push ax				;save tempkeep flag
+	or p_flag[bx],pf_tempkeep	;do not allow ctrl c while in bdos
+
+	push si! push dx! push cx
+	mov cx,f_qread ! mov dx,offset mxdiskqpb
+	call mpmif			;get mxdisk queue
+	pop cx! pop dx! pop si
+	or ax,ax! jz $+5		;was MXQ read successful?
+	  jmp retmonx1			;no
+
+	mov fx_intrn,cl			;save internal bdos func #
+	mov bx,rlr
+	test p_flag[bx],pf_ctlc
+	jz not_ctlc
+	  xor al,al			;AL = no error message to print
+	  mov bx,0ffffh
+	  jmp retmonxa
+not_ctlc:
+	cli				;switch to internal bdos stack
+	mov ss_save,ss
+	mov sp_save,sp
+setup_stack:
+	mov ss,sysdat
+	mov sp,offset bdosstack
+	sti
+
+	mov pdaddr,bx			;BX = rlr
+
+	mov ax,word ptr p_dsk[bx]
+	mov word ptr seldsk,ax		;set default disk and user code
+
+	mov ax,u_wrkseg			;initialize bdos data area for user
+	mov parametersegment,ax
+	mov ax,u_retseg
+	mov returnseg,ax
+	mov u_ioexerr,0FFh		;initialize IOS extended error byte
+
+	push es
+	mov uda_save,es			;save uda segment
+	push si
+	mov ax,ds! mov bx,es		;copy uda bdos vars to local area
+	mov ds,bx! mov es,ax
+	mov si,offset u_dma_ofst
+	mov di,offset dma_ofst
+	mov cx,uda_ovl_len
+	rep movsb
+	mov ds,ax
+
+	mov ax,dma_ofst
+	mov cl,4! shr ax,cl
+	add dma_seg,ax
+	and dma_ofst,000fh
+
+	mov cx,zerolength ! xor al,al	;zero local variables
+	mov di,offset fcbdsk
+	rep stosb
+
+	mov info,dx			;info=dx
+	mov linfo,dl			;linfo = low(info) - don't equ
+	pop si! push si
+	mov ah,cs:btab_flag[si]
+	test ah,bf_fcb33! jz notfcb33	;if 33 byte fcb
+	  call parsave33! jmps notfcb36	; copy 33 bytes to local FCB
+notfcb33:
+	test ah,bf_fcb36! jz notfcb36	;else if 36 byte fcb
+	  call parsave36! call save_rr	; copy 36 bytes to local FCB
+notfcb36:				; and save random record bytes
+	pop si
+	cmp mult_cnt,1 ! je noshell	;if mult_cnt <> 1 and
+	test cs:btab_flag[si],bf_cshell	; func uses mult_cnt then
+	jz noshell
+	  call shell			; use bdos multi sector shell
+	  jmps retmon
+noshell:
+	call call_bdos
+retmon:
+	mov cl,parlg
+	or cl,cl! jz retmon6
+	  xor ch,ch			;copy local FCB back to user segment?
+	  mov si,offset info_fcb
+	  mov di,info
+	  mov es,parametersegment
+	  rep movsb
+retmon6:
+	pop es				;restore uda segment
+	mov si,offset dma_ofst+4 ! mov di,offset u_dma_ofst+4
+	mov cx,uda_ovl_len-4
+	rep movsb
+
+	mov ax,returnseg		;setup return registers
+	mov u_retseg,ax
+	mov bx,aret
+
+	pushf ! pop ax ! cli		;switch back to user's stack
+	mov ss,ss_save
+	mov sp,sp_save
+	push ax ! popf
+
+	mov al,err_type
+retmonxa:
+	push bx				;save return code
+	test al,true
+	jz retmonx
+	  js denied_typ
+	    push parametersegment	;fcb segment
+	    mov bx,0ffffh		;0ffffh => no fcb to print in message
+	    test resel,true
+	    jz no_fcb
+	      mov bx,info		;fcb offset
+no_fcb:
+	    push bx
+	    jmps comn_dat
+denied_typ:
+	  push err_pd_addr		;denied error pd address
+comn_dat:
+	  mov ah,err_drv
+retmonx:
+	push ax				;AL = error message type to print
+	mov cx,f_qwrite ! mov dx,offset mxdiskqpb
+	call mpmif			;release mxdisk queue
+	pop ax
+	test al,0ffh
+	jnz $+5! jmp retmonx1a
+	  push ax
+	  mov bx,offset msg_spb
+	  mov cx,f_sync
+	  call mpmif
+
+	  cmp word ptr err_intercept+2,0  ;check if error interception
+	  je ret_err0			  ; no
+	    callf dword ptr err_intercept ;call intercept routine
+	    jmp free_spb
+ret_err0:
+	  pop ax
+	  add ah,'A'
+	  test al,0ffh
+	  jns $+5! jmp denied_err
+	    push ax
+	    mov dskerr,ah		;set D: field
+	    mov dx,offset dskmsg
+	    call xprint			;print "CP/M Error On D:"
+
+	    pop ax
+	    mov bl,al
+	    xor bh,bh
+	    shl bx,1
+	    mov dx,xerr_list[bx]	;compute extended error message offset
+	    call xprint			;print error message
+
+	    mov al,u_func		;convert func# to character
+	    mov ch,30h
+	    mov bx,offset pr_fx1
+	    cmp al,100! jb ret_err1
+	      mov b[bx],31h
+	      inc bx
+	      sub al,100
+ret_err1:
+	    sub al,10! jb ret_err2
+	      inc ch
+	      jmps ret_err1
+ret_err2:
+	    mov [bx],ch
+	    inc bx
+	    add al,3ah
+	    mov [bx],al
+	    inc bx
+	    mov b[bx],20h
+	    mov bx,offset pr_fcb	;0 = message delimiter
+	    mov b[bx],0
+	    pop si! pop dx		;DX,SI = offset of fcb
+	    inc si			;was reselect called?
+	    jz ret_err3			;no - don't print fcb
+	      mov b[bx],20h		;remove delimiter
+	      mov di,offset pr_fcb1
+	      mov ax,ds! mov bx,es
+	      mov es,ax			;ES = DS
+	      mov ds,dx			;DS = parametersegment
+	      mov cx,4			;move file name to message
+	      rep movsw
+	      mov es:b[di],'.'		;move '.' to message
+	      inc di
+	      mov cl,3			;move file type to message
+	      rep movsb
+	      mov ds,ax! mov es,bx	;restore DS,ES
+ret_err3:
+	    mov dx,offset pr_fx		;print "bdos function = ### "
+	    call xprint			; + "file = ffffffff.ttt"
+	    jmps free_spb
+denied_err:
+	  mov denieddrv,ah
+	  pop si
+	  mov al,p_cns[si]
+	  add al,'0'
+	  mov deniedcns,al
+	  add si,p_name
+	  mov di,offset deniedprc
+	  push es! push ds! pop es	;ES = DS
+	  mov cx,4			;copy process name to message
+	  rep movsw
+	  pop es			;restore ES
+	  mov dx,offset deniedmsg
+	  call xprint
+free_spb:
+	  mov dx,offset crlf_str
+	  call xprint
+	  mov bx,offset msg_spb
+	  mov cx,f_unsync
+	  call mpmif
+retmonx1a:
+	pop bx				;restore retcode
+retmonx1:
+	mov si,rlr
+	pop ax				;restore tempkeep flag
+	or ax,not pf_tempkeep
+	and p_flag[si],ax
+	test p_flag[si],pf_ctlc		;see if control C occured
+	jz mxdiskexit
+	  mov cx,f_terminate! xor dx,dx
+	  push bx! call mpmif! pop bx
+mxdiskexit:
+	ret
+
+call_bdos:
+;---------
+;	entry:	DX = argument
+;		SI = offset of bdos functab entry
+
+	mov save_sp,sp
+	test cs:btab_flag[si],bf_resel
+	jz cbdos1
+	  push si
+	  call reselect
+	  pop si
+cbdos1:
+	call cs:btab_addr[si]
+bdos_return:
+	cmp resel,0
+	je retmon5
+	  cmp comp_fcb_cks,true! jne retmon1
+	    call set_chksum_fcb
+retmon1:
+	  mov al,xfcb_read_only
+	  mov bx,offset info_fcb
+	  or f7[bx],al
+	  mov al,high_ext
+	  cmp al,60h! jne retmon3
+	    or byte ptr f8[bx],80h
+	    jmps retmon4
+retmon3:
+	  or extnum[bx],al
+retmon4:
+	  mov al,actual_rc
+	  or reccnt[bx],al
+	  mov al,fcbdsk
+	  mov drv[bx],al
+retmon5:
+	ret
+
+shell:
+;-----
+;	entry:	SI = offset of functab entry
+
+	mov shell_si,si
+	mov ah,cs:btab_flag[si]
+	mov al,mult_cnt
+mult_io1:
+	MOV MULT_NUM,AL
+	push ax
+	mov si,shell_si
+	mov dx,info
+	call call_bdos
+	mov bl,byte ptr aret
+	or bl,bl
+	pop ax
+	jz no_shell_err
+	  cmp bl,0ffh! je shell04
+	  mov bh,mult_cnt
+	  sub bh,al			;BH = # of successfull records 
+	  jmps shell03
+no_shell_err:
+	test ah,bf_fcb36! jz mult_io2	;AH = entry functab flags
+	  call incr_rr
+mult_io2:
+	add dma_ofst,80h
+	dec al
+	jnz mult_io1
+	xor bx,bx
+shell03:
+	mov aret,bx
+	test info_fcb+modnum,80h
+	jnz shell04
+	test high_ext,80h
+	jz shell04
+	  push ax! push bx
+	  mov si,offset ftab16
+	  or info_fcb+f5,80h
+	  mov aret,0
+	  call call_bdos
+	  pop ax
+	  cmp lret+1,0
+	  jnz shell03b
+	    cmp lret,0
+	    jz shell03a
+	      mov al,11
+shell03a:
+	    mov aret,ax
+shell03b:
+	  pop ax
+shell04:
+	test ah,bf_fcb36! jz parret
+	;jmps reset_rr
+
+reset_rr:
+;--------
+	call save_rr2! jmps save_rr1
+save_rr:
+;-------
+	call save_rr2! xchg bx,dx
+save_rr1:
+	mov cl,3! jmp move
+save_rr2:
+	mov bx,offset info_fcb+ranrec
+	mov dx,offset shell_rr
+	ret
+
+parsave33:	;copy 33 byte length FCB
+;---------
+	mov cl,33
+	jmps parsave
+
+parsave36:	;copy 36 byte length FCB
+;---------
+	mov cl,36
+
+parsave: 	;copy FCB from user segment to bdos segment
+;-------
+;	entry:	CL = length of FCB to save
+
+	mov parlg,cl
+	xor ch,ch
+	mov si,info
+	mov di,offset info_fcb
+	push ds
+	mov ds,parametersegment
+	rep movsb
+	pop ds
+parret:
+	ret
+
+incr_rr:
+;-------
+;	exit:	AX = preserved
+
+	mov bx,offset info_fcb+ranrec
+	inc w[bx]! jnz incr_rr_ret
+	  inc byte ptr 2[bx]
+incr_rr_ret:
+	ret
+
+xprint:		;print message at DX
+;------
+;	entry:	DX = offset of message to print
+
+	push dx
+	mov cx,f_cconattch		;make sure we own console before
+	call mpmif			; attempting to print message
+	pop dx
+	or al,al! jnz parret
+	  mov cx,f_conprint
+	  ;jmps mpmif
+
+	;these functions added for mpm interface
+
+;=====
+mpmif:		;call mpm function
+;=====
+	mov si,rlr
+	push es! mov es,p_uda[si]
+	callf cs:dword ptr supervisor
+	pop es
+	ret
+
+;*****************************************************
+;*
+;*	 bdos - xios interface
+;*
+;*****************************************************
+
+;======		========================
+xiosif:		; xios interface routine
+;======		========================
+;	entry:	AL = function number
+;		CX = argument 1
+;		DX = argument 2
+;	exit:	AX = BX = output
+
+	push es! mov es,uda_save
+	callf dword ptr xiosmod
+	cld! pop es
+	ret
+
+;========	================================
+rwxiosif:	; disk read/write xios interface
+;========	================================
+;	entry:	AL = function number
+;	exit:	AX = BX = output
+
+	mov dx,arecord
+	mov ch,byte ptr arecord+2
+	mov bl,curdsk
+	mov bh,1
+	xchg bh,mult_sec	;BH = multi sector count
+				; stack on entry to the xios
+	push bx			;   +C | DRV  | MCNT |
+	push track		;   +A |    TRACK    |
+	push sector		;   +8 |   SECTOR    |
+	push cur_dma_seg	;   +6 |   DMA_SEG   |
+	push cur_dma		;   +4 |   DMA_OFF   |
+				;   +2 |   RET_SEG   |
+				; SP+0 |   RET_OFF   |
+	mov es,uda_save
+	callf dword ptr xiosmod
+	add sp,10		;remove parameters from stack
+	cld! push ds! pop es
+	ret
+
+;************* end of BDOS interface ****************
+

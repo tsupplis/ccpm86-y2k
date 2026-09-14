@@ -1,0 +1,71 @@
+;*****************************************************
+;*
+;*	Shared Memory Routines
+;*
+;*****************************************************
+
+;===========
+share_entry:		; share memory
+;===========
+;	input:	DX->SPB in u_wrkseg
+;
+;	    +-----+-----+-----+-----+-----+-----+
+;	SPB |    OPD    |    RPD    |   START   |
+;	    +-----+-----+-----+-----+-----+-----+
+;
+
+	; Obtain new MD
+
+	push dx ! call getmd ! pop dx
+	jcxz se_c
+	    jmp se_err2
+se_c:	mov bp,bx			; BP = New MD
+
+	push ds ! mov ds,u_wrkseg
+	mov di,dx ! mov bx,spb_opd[di]	; BX = Owner PD
+	mov si,spb_rpd[di]		; SI = Requestor PD
+	mov dx,spb_start[di]		; DX = start paragraph
+	pop ds
+
+	cmp bx,0 ! jne se_r
+	    mov bx,rlr
+se_r:	cmp si,0 ! jne se_s
+	    mov si,rlr
+se_s:	cmp si,bx ! je se_ge
+
+	    lea di,(p_mem-ms_link)[bx]
+se_go:	    mov di,ms_link[di]
+	    cmp di,0 ! je se_err
+		cmp ms_start[di],dx ! jne se_go
+
+			; DI = Owner MS to share
+			; SI = Requestor PD
+			; DX = Start
+			; BP = New MD
+		    mov bx,bp
+		    mov ms_start[bx],dx
+		    mov ax,ms_length[di] ! mov ms_length[bx],ax
+		    mov ax,ms_flags[di] ! mov ms_flags[bx],ax
+		    mov ax,ms_mau[di] ! mov ms_mau[bx],ax
+		    mov di,bx ! mov bx,ax
+		    push ds ! mov ds,m_start[bx]
+		    sub bx,bx ! mov cl,.0
+se_n:		    cmp cl,0 ! je se_err1
+			add bx,satlen ! dec cl
+			cmp sat_start[bx],dx ! jne se_n
+			    inc sat_nall[bx]
+					; place new MS on RPD p_mem
+			    pop ds ! lea bx,p_mem[si]
+			    mov dx,ms_mau[di]
+se_m:			    mov si,ms_link[bx]
+			    cmp si,0 ! je se_link
+				cmp dx,ms_mau[si] ! je se_link
+				    mov bx,si ! jmps se_m
+se_link:		    mov ms_link[di],si
+			    mov ms_link[bx],di
+			    jmps se_ge
+se_err1:	    pop ds ! mov bx,bp ! call freemd
+se_err:	    mov cx,e_no_memory
+se_err2:    mov bx,0ffffh ! ret
+se_ge:	sub bx,bx ! mov cx,bx ! ret
+

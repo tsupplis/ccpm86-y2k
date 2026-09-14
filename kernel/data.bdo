@@ -1,0 +1,406 @@
+;*****************************************************
+;*
+;*	bdos data area
+;*
+;*****************************************************
+
+CCPMOFF	equ	true
+
+	DSEG
+
+if CCPMOFF
+	org	0800h			;org for CCP/M system
+endif
+if not CCPMOFF
+	org	0C00h			;org for MP/M system
+endif
+
+rlog		dw	0		;removeable logged-in disks
+tlog		dw	0		;removeable disk test login vector
+ntlog		dw	0		;new tlog vector
+rodsk		dw	0		;read only disk vector
+dlog		dw	0		;logged-in disks
+
+open_fnd	db	0		;open file found in srch_olist
+
+;the following variables are set to zero upon entry to file system
+
+fcbdsk		db	0		;disk named in fcb
+parlg		db	0		;length of parameter block copied
+aret		dw	0		;adr value to return
+lret		equ	byte ptr aret	;low(aret)
+resel		db	0		;reselection flag
+rd_dir_flag	db	0		;must read/locate directory record
+comp_fcb_cks	db	0		;compute fcb checksum flag
+search_user0	db	0		;search user 0 for file (open)
+make_xfcb	db	0		;make & search xfcb flag
+find_xfcb	db	0		;search find xfcb flag
+xdcnt		dw	0		;empty directory dcnt
+DIR_CNT		DB	0		;DIRECT I/O COUNT
+MULT_NUM	DB	0		;MULTI-SECTOR COUNT used in bdos
+olap_type	db	0		;record lock overlap type
+ff_flag		db	0		;0ffh xios error return flag
+err_type	db	0		;type of error to print if not zero
+RELOG		DB	0		;AUTOMATIC RELOG SWITCH
+;		rb	3		;reserved bytes
+;
+;	**3.1M**	Record locking patch
+;
+		rb	1
+file_id		dw	0		;address of lock list entry
+;
+;	**3.1M**	End of record locking patch
+;
+zerolength	equ	(offset $)-(offset fcbdsk)
+mult_sec	db	1		;multi sector count passed to xios
+		rb	1		;reserved - not used 1/19/84
+
+BLK_OFF		DB	0		;RECORD OFFSET WITHIN BLOCK
+blk_num		dw	0		;block number
+
+ua_lroot	dw	offset ua0	;unallocated block list root
+
+ua0		dw	offset ua1,0
+		db	0ffh,0
+ua1		dw	offset ua2,0
+		db	0ffh,0
+ua2		dw	offset ua3,0
+		db	0ffh,0
+ua3		dw	offset ua4,0
+		db	0ffh,0
+ua4		dw	offset ua5,0
+		db	0ffh,0
+ua5		dw	0,0
+		db	0ffh,0
+
+HASH		RB	4		;HASH CODE WORK AREA
+HASHL		DB	0		;HASH SEARCH LENGTH
+
+DEBLOCK_FX	DB	0		;DEBLOCK FUNCTION #
+PHY_OFF		DB	0		;RECORD OFFSET WITHIN PHYSICAL RECORD
+CUR_BCBA	DW	0		;CURRENT BCB OFFSET
+ROOT_BCBA	DW	0		;ROOT BCB OFFSET
+EMPTY_BCBA	DW	0		;EMPTY BCB OFFSET
+P_LAST_BCBA	DW	0		;PROCESS'S LAST BCB OFFSET
+P_BCB_CNT	DB	0		;PROCESS BCB COUNT IN BCB LIST
+
+fx_intrn	db	0		;internal BDOS function number
+
+TRACK		DW	0		;BCB RECORD'S TRACK
+SECTOR		DW	0		;BCB RECORD'S SECTOR
+
+;	seldsk,usrcode are initialized as a pair
+seldsk		db	0		;selected disk num
+usrcode		db	0		;curr user num
+
+info		dw	0		;info adr
+searcha		dw	0		;search adr
+
+;the following variable order is critical
+
+;variables copied from uda for mp/m				x
+
+;variables included in fcb checksum for mp/m and cp/m		  x
+
+;variables used to access system lock list for mp/m		    x
+
+dma_ofst	dw	0		;dma offset		1
+dma_seg		dw	0		;dma segment		2
+func		db	0		;bdos function #	3
+searchl		db	0		;search len		4
+searchaofst	dw	0		;search adr ofst	5
+searchabase	dw	0		;search adr base	6
+dcnt		dw	0		;directory counter	7
+extcnt		dw	0		;extent count (used by PC/BDOS) 8
+error_mode	db	0		;bdos error mode	9
+mult_cnt	db	0		;bdos multi-sector cnt 10
+df_password	rb	8		;process default pw    11
+pd_cnt		db	0		;bdos process cnt      12 1
+high_ext	db	0		;fcb high extent bits	  2
+xfcb_read_only	db	0		;xfcb read only flag	  3
+curdsk		db	0ffh		;current disk		  4 1
+packed_dcnt	db	0		;packed dblk+dcnt	    2
+		db	0
+		db	0
+pdaddr		dw	0		;process descriptor addr    3
+
+;	org ((offset $) + 1) and 0fffeh
+		rb	0		;adjust for word alignment
+
+;	curtrka - alloca are set upon disk select
+;	(data must be adjacent)
+
+cdrmaxa		dw	0		;ptr to cur dir max val
+drvlbla		dw	0		;drive label data byte addr
+buffa		dw	0		;ptr to dir dma addr
+dpbaddr		dw	0		;curr disk param block addr
+checka		dw	0		;curr checksum vector addr
+alloca		dw	0		;curr alloc vector addr
+DIR_BCBA	DW	0		;DIRECTORY BUFFER CONTROL BLOCK ADDR
+DAT_BCBA	dw	0		;DATA BUFFER CONTROL BLOCK ADDR
+HASH_SEG	dw	0		;HASH TABLE SEGMENT
+addlist		equ	12		;"$-buffa" = addr list size
+
+;	extended DPB parameters for PCDOS media
+;	(data must be adjacent to CPM DPB)
+
+nfats		dw	0
+nfatrecs	dw	0
+nclstrs		dw	0
+clsize		dw	0
+fatadd		dw	0
+
+;	sectpt - offset obtained from disk parm block at dpbaddr
+;	(data must be adjacent)
+
+sectpt		dw	0		;sectors per track
+blkshf		db	0		;block shift factor
+blkmsk		db	0		;block mask
+extmsk		db	0		;extent mask
+maxall		dw	0		;max alloc num
+dirmax		dw	0		;max dir num
+dirblk		dw	0		;reserved alloc bits for dir
+chksiz		dw	0		;size of checksum vector
+offsetv		dw	0		;offset tracks at beginning
+PHYSHF		DB	0		;PHYSICAL RECORD SHIFT FACTOR
+PHYMSK		DB	0		;PHYSICAL RECORD MASK
+endlist		rs	0		;end of list
+dpblist		equ	(offset endlist)-(offset sectpt)
+pclist		equ	(offset endlist)-(offset nfats)
+
+;	local variables
+
+pc_pre_read	db	0
+		db	0		; - not used -
+media_format	db	0
+
+common_dma	rb	16		;copy of user's dma 1st 16 bytes
+make_flag	db	0		;make function flag
+actual_rc	db	0		;directory ext record count
+save_xfcb	db	0		;search xfcb save flag
+save_mod	db	0		;open_reel module save field
+pw_mode		db	0		;password mode
+attributes	db	0		;fcb interface attributes hold byte
+
+chk_olist_flag	db	0		;check | test olist flag
+lock_sp		dw	0		;lock stack ptr
+lock_shell	db	0		;lock shell flag
+check_fcb_ret	db	0		;check_fcb return switch
+lock_unlock	db	0		;lock | unlock function flag
+incr_pdcnt	db	0		;increment process_cnt flag ??
+free_mode	db	0		;free lock list entries flag ??
+					;1=free entries for curdsk
+					;0=free all entries
+cur_pos		dw	0		;current position in lock list
+prv_pos		dw	0		;previous position in lock list
+
+dont_close	db	0		;inhibit actual close flag
+open_cnt	db	0		;process open file count
+lock_cnt	db	0		;process locked record count
+;
+;	**3.1M**	Record locking patch
+;
+;file_id	dw	0		;address of file' lock list entry
+name_root	dw	0		;root of file names and id's
+;
+;	**3.1M**	End of record lcoking patch
+;		
+set_ro_flag	db	0		;set drive r/o flag
+check_disk	db	0		;disk reset open file check flag
+flushed		db	0		;lock list open file flush flag
+
+;	free_root, lock_max, open_max initialized by sysgen
+
+		dw	offset free_root
+open_root	dw	0		;lock list open file list root
+lock_root	dw	0		;lock list locked record list root
+
+sdcnt		dw	0		;saved dcnt of file's 1st fcb
+sdcnt0		dw	0		;saved dcnt (user 0 pass)
+
+rmf		db	0		;read mode flag for open$reel
+wflag		db	0		;xios/bios write flag
+dirloc		db	0		;directory flag in rename, etc.
+linfo		db	0		;low(info)
+dminx		db	0		;local for diskwrite
+single		db	0		;set true if single byte
+					;alloc map
+rcount		db	0		;record count in curr fcb
+extval		db	0		;extent num and extmsk
+vrecord		db	0		;curr virtual record
+ADRIVE		DB	0		;CURRENT DISK - must preceed arecord
+arecord		dw	0		;curr actual record
+		db	0		;curr actual record high byte
+ARECORD1	dw	0		;curr actual block# * blkmsk
+drec		dw	0		;curr actual directory record
+CUR_dma_seg	DW	0
+CUR_DMA		DW	0
+
+;	local variables for directory access
+
+dptr		db	0		;directory pointer 0,1,2,3
+ldcnt		equ	byte ptr dcnt	;low(dcnt)
+user_zero_pass	db	0		;search user zero flag
+
+;	shell variables
+
+shell_si	dw	0		;bdos command offset
+shell_rr	db	0,0,0		;r0,r1,r2 save area
+
+;	special 8086 variables:
+
+uda_save	dw	0		;user data area saved value
+parametersegment dw	0		;user parameter segment
+returnseg	dw	0		;user return segment
+
+;	error messages
+
+err_drv		db	0
+err_pd_addr	dw	0
+
+dskmsg		db	13,10,'CP/M Error On '
+dskerr		db	' : ',0
+
+permsg		db	'Disk I/O',0
+rodmsg		db	'Read/Only Disk',0
+rofmsg		db	'Read/Only File',0
+selmsg		db	'Invalid Drive',0
+
+xe3		db	'File Opened in Read/Only Mode',0
+
+xe5		db	'File Currently Open',0
+xe6		db	'Close Checksum Error',0
+xe7		db	'Password Error',0
+xe8		db	'File Already Exists',0
+xe9		db	'Illegal ? in FCB',0
+xe10		db	'Open File Limit Exceeded',0
+xe11		db	'No Room in System Lock List',0
+
+crlf_str	db	13,10,0
+pr_fx		db	13,10,'Bdos Function = '
+pr_fx1		db	'   '
+pr_fcb		db	' File = '
+pr_fcb1		rs	12
+		db	0
+
+deniedmsg	db	13,10,'Disk reset denied, Drive '
+denieddrv	db	0,':'
+		db	' Console '
+deniedcns	db	0
+		db	' Program '
+deniedprc	db	'12345678',0
+
+;	bdos stack switch variables and stack
+;	used for all bdos disk functions
+
+;	org	((offset $) + 1) and 0fffeh
+		rb	1		;adjust for word alignment
+
+		; 69 word bdos stack
+
+		dw	0cccch,0cccch,0cccch
+		dw	0cccch,0cccch,0cccch
+		dw	0cccch,0cccch,0cccch
+		dw	0cccch,0cccch,0cccch
+		dw	0cccch,0cccch,0cccch
+		dw	0cccch,0cccch,0cccch
+		dw	0cccch,0cccch,0cccch
+		dw	0cccch,0cccch,0cccch
+		dw	0cccch,0cccch,0cccch
+		dw	0cccch,0cccch,0cccch
+		dw	0cccch,0cccch,0cccch
+		dw	0cccch,0cccch,0cccch
+		dw	0cccch,0cccch,0cccch
+		dw	0cccch,0cccch,0cccch
+		dw	0cccch,0cccch,0cccch
+		dw	0cccch,0cccch,0cccch
+		dw	0cccch,0cccch,0cccch
+		dw	0cccch,0cccch,0cccch
+		dw	0cccch,0cccch,0cccch
+		dw	0cccch,0cccch,0cccch
+		dw	0cccch,0cccch,0cccch
+		dw	0cccch,0cccch,0cccch
+		dw	0cccch,0cccch,0cccch
+bdosstack	rw	0
+
+save_sp		rw	1
+ss_save		rw	1
+sp_save		rw	1
+
+;	local buffer area:
+
+info_fcb	rb	40	;local user FCB
+save_fcb	rb	16	;fcb save area for xfcb search
+
+mxdiskqd	dw	0	;link
+		db	0,0	;net,org
+		dw	qf_keep+qf_mx	;flags (MX queue)
+		db	'MXdisk  '
+		dw	0,1	;msglen,nmsgs
+		dw	0,0	;nq,dq
+		dw	1,0	;msgcnt,out
+		dw	0	;buffer ptr
+
+mxdiskqpb	db	0	;flgs
+		db	0	;net
+		dw	mxdiskqd	;qaddr
+		dw	1	;nmsgs
+		dw	0	;buffer
+		db	'MXdisk  '
+
+;	Error Message sync param block for mutual exclusion
+
+msg_spb		dw	0	;link	Error Message sync parameter block
+		dw	0	;owner
+		dw	0	;wait
+		dw	0	;next
+
+; local variables used by PC_BDOS
+
+bdrwflg		db	0		;bdosrw flags
+blk		dw	0		;bdosrw local variable
+blkcnt		dw	0		;bdosrw local variable
+blkidx		dw	0		;bdosrw local variable
+blkoffset	dw	0		;bdosrw local variable
+cpm_tod		db	0,0,0,0,0	;CP/M date work area
+dirp		dw	0		;directory entry pointer
+lprvblk		dw	0		;bdosrw local variable
+
+mon_days	dw	0,31,59,90,120,151,181,212,243,273,304,334
+
+byteoff		dw	0		;bdosrw local variable
+		dw	0
+pc_tod		db	0,0,0,0,0,0	;PC date work area
+preread		db	0		;bdosrw local variable
+prvblk		dw	0		;bdosrw local variable
+
+update_rc	db	0		;recompute rc flag
+pc_module	db	0		;bdosrw module save byte
+pc_ext		db	0		;bdosrw extent save byte
+pc_cr		db	0		;bdosrw current record save byte
+
+; local variables used by PC_BDOS direct disk I/O module
+
+ddio_op		db	0		;type of operation read/write
+ddio_drive	db	0		;drive number
+ddio_nsectors	db	0		;number of sectors to transfer
+ddio_head	db	0		;head number for INT 13
+ddio_startrec	rw	0		;starting sector number
+					;startrec overlays sector and track
+ddio_sector	db	0		;sector number for INT 13
+ddio_track	db	0		;track number for INT 13
+ddio_dmaoff	dw	0		;DMA offset
+ddio_dmaseg	dw	0		;DMA segment
+ddio_pblen	equ	offset $ - offset ddio_op
+
+;ddio_pd_vector	dw	0,0,0,0,0,0,0,0
+;		dw	0,0,0,0,0,0,0,0
+
+if CCPMOFF
+		org	0bffh
+endif
+if not CCPMOFF
+		org	0fffh
+endif
+		db	0
+                                                                                                                                                                                                                                                 

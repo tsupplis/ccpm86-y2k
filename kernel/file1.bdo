@@ -1,0 +1,1532 @@
+;*****************************************************************
+;*****************************************************************
+;**								**
+;**   b a s i c	   d i s k   o p e r a t i n g	 s y s t e m	**
+;**								**
+;*****************************************************************
+;*****************************************************************
+
+;************ bdos file system part 1 ************
+
+;	error message handlers
+
+pererror:	;report permanent error
+;--------
+	mov ah,1
+	jmps goerr
+
+roderror:	;report read/only disk error
+;--------
+	call discard_dir
+	mov ah,2
+	jmps goerr
+
+roferror:	;report read/only file error
+;--------
+	mov ah,3
+	jmps goerr
+
+selerror:	;report select error
+;--------
+	mov curdsk,0ffh
+	mov ah,4
+goerr:
+;-----
+;	entry:	AH = error type
+
+	mov al,0ffh
+	mov aret,ax			;set aret
+	cmp error_mode,al		;if error_mode = 0ffh then
+	jne report_err			;report error to user
+
+rtn_phy_errs:				;return physical error to user
+
+if BMPM
+	xor al,al
+	xchg lock_shell,al
+	test al,al
+	JZ rtn_phy0
+	  mov sp,lock_sp
+	  ret
+rtn_phy0:
+
+endif
+	mov al,fx_intrn			;if func# = 27,31 then
+	cmp al,fxi27! je rtn_phy1	; aret = 0ffffh
+	cmp al,fxi31! jne goback
+rtn_phy1:
+	  mov aret,0ffffh
+goback:
+	mov sp,save_sp
+	jmp bdos_return
+
+set_lret1:
+;---------
+	mov al,1
+set_lret:
+;--------
+	mov lret,al
+funcret:
+;-------
+	ret
+
+set_aret:
+;--------
+;	entry:	AH = extended error type
+
+	mov al,0ffh
+	mov aret,ax
+	cmp ah,3! jne set_a1
+	  mov ah,12
+set_a1:
+	cmp error_mode,al
+	je goback			;return physical & extended errors
+
+report_err:
+;----------
+;	entry:	AH = error type
+
+	mov err_type,ah
+	mov al,seldsk
+	mov err_drv,al			;error drive
+	cmp error_mode,0feh		;is error mode print &
+					;   return errors?
+	je rtn_phy_errs			;yes
+
+if BMPM
+	mov si,rlr
+	or p_flag[si],pf_ctlc		;set process ^c flag
+endif
+if BCPM
+	push ds! mov ds,rlr
+	or ds:p_flags,pf_ctrlC
+	mov ds:p_ret_code,0FFFDh	;set fatal error termination code
+	pop ds
+endif
+	jmps rtn_phy_errs
+
+
+;-----------------------------------------------------
+
+move:		;block move data
+;----
+;	entry:	CL = length of data to move
+;		DX = source offset
+;		BX = destination offset
+
+	xor ch,ch
+	mov si,dx
+	mov di,bx
+	rep movsb
+	ret
+
+compare:	;compare strings
+;-------
+;	entry:	CL = length of strings
+;		BX,DX = offset of strings
+;	exit:	Z flag set if strings match
+
+	xor ch,ch
+	mov si,bx
+	mov di,dx
+	repe cmps al,al
+	ret
+
+seek:		;seek the track and sector given by arecord
+;----
+	mov ax,arecord			;compute track/sector
+	xor dx,dx
+	mov dl,byte ptr arecord+2
+	mov cl,physhf ! xor ch,ch
+	jcxz seek_media
+seek_shf:
+	  shr dx,1			;convert ARECORD from
+	  rcr ax,1			; logical to physical sectors
+	  loop seek_shf
+seek_media:
+
+if PCMODE
+	cmp media_format,0
+	je seek_cpm
+	  add ax,fatadd ! adc dx,0	;add in record address of FAT
+	  xchg ax,bx			;save AX
+	  mov al,byte ptr nfats
+	  mul byte ptr nfatrecs		;AX = number of FAT records total
+	  add ax,bx ! adc dx,0		;add in number of FAT records
+	  div sectpt			;DX = sector, AX = track
+	  jmps seek_exit
+seek_cpm:
+
+endif
+	div sectpt			;DX = sector, AX = track
+	add ax,offsetv			;add in number of system tracks
+seek_exit:
+	MOV TRACK,ax			;save bios/xios track
+	MOV SECTOR,dx			;save bios/xios sector
+	ret
+
+;	utility functions for file access
+
+atran:		;compute actual record address, assuming index called
+;-----
+	mov cl,blkshf			;shift count to reg al
+	mov ax,arecord
+	mov blk_num,ax			;save for pre read check
+	xor bh,bh
+	mov bl,ah
+	shl ax,cl
+	shl bx,cl
+	MOV ARECORD1,ax			;save shifted block #
+	xchg ax,bx			; for write rand w/zero fill
+	mov al,vrecord
+	and al,blkmsk			;masked value in al
+	mov blk_off,al
+	or bl,al
+	mov arecord,bx			;arecord=bx or
+					;(vrecord and blkmsk)
+	mov byte ptr arecord+2,ah
+	ret
+
+dmposition:	;compute disk map position for vrecord
+;----------
+;	exit:	AL = disk map position of vrecord
+
+	mov cl,blkshf			;shift count to CL
+	mov ch,vrecord			;current virtual record to a
+	shr ch,cl			;CH = shr(vrecord,blkshf)
+					;   = vrecord/2**(sect/block)
+	neg cl
+	add cl,7			;CL = 7 - blkshf
+	mov al,extval			;extent value and extmsk
+					;blkshf = 3,4,5,6,7
+					;CL = 4,3,2,1,0
+					;shift is 4,3,2,1,0
+	shl al,cl			;AL = shl(ext and extmsk,7-blkshf)
+	add al,ch			;add the previous
+					;shr(vrecord,blkshf) value
+					;AL is one of the following
+					;values, depending upon alloc
+					;bks blkshf
+					;1k   3	    v/8 + extval * 16
+					;2k   4	    v/16+ extval * 8
+					;4k   5	    v/32+ extval * 4
+					;8k   6	    v/64+ extval * 2
+					;16k  7	    v/128+extval * 1
+	ret				;with dm$position in a
+
+getdm:		;return disk map value from position given by cx
+;-----
+;	entry:	CX = index into disk map
+;	exit:	BX = disk map value at position CX
+
+	mov bx,offset info_fcb+dskmap
+	add bx,cx			;index by asingle byte value
+	cmp single,0			;single byte/map entry?
+	jz getdmd			;get disk map single byte
+	  mov bl,[bx]
+	  xor bh,bh
+	  ret				;with bx=00bb
+getdmd:
+	add bx,cx			;bx=.fcb(dm+1*2)
+	mov bx,[bx]			;return double precision value
+	ret
+
+index:		;compute disk block number from current fcb
+;-----
+;	exit:	BX = disk map value for vrecord in current fcb
+;		Z flag set according to value in BX
+
+	call dmposition			;0...15 in register al
+	MOV DMINX,AL
+	mov cl,al
+	xor ch,ch
+	call getdm			;value to bx
+	mov arecord,bx
+	or bx,bx
+	ret
+
+get_atts:
+;--------
+;	get interface attributes (f5' - f8') from fcb
+;	zero interface attribute bits in fcb
+;	exit:	AL = attributes f5' - f8' in high nibble
+
+	mov di,offset info_fcb+f8
+	mov cx,4
+	xor dl,dl
+	std				;direction from f8 to f5
+get_atts_loop:
+	mov al,[di]			;get character
+	shl al,1			;attribute bit into carry
+	rcr dl,1			; then into DL
+	shr al,1			;clear attribute bit
+	stosb				; and restore character
+	loop get_atts_loop		;next character
+	cld				;restore direction
+	mov al,dl
+	mov attributes,al		;save attributes
+	ret
+
+get_dir_ext:
+;-----------
+;	compute directory extent from fcb
+;	scan fcb disk map backwards
+;	upon return dminx = 0 if no blocks are in fcb
+;	exit:	AL = directory extent number
+;		BX = .fcb(extnum)
+
+	mov bx,offset info_fcb+nxtrec	;BX = .fcb(vrecord)
+	mov dx,1001h			;DH = disk map position (rel to 1)
+					;DL = no blocks switch
+get_de1:
+	dec dh
+	dec bx				;decrement disk map ptr
+	cmp b[bx],0			;is disk map byte non-zero ?
+	jne get_de2			; yes
+	  or dh,dh			; no - continue scan
+	  jnz get_de1
+	  dec dl			;DL = 0 if no blocks found
+get_de2:
+	mov dminx,dl			;dminx = 0 if no blocks in fcb
+	cmp single,true			;are disk block indexes single byte ?
+	mov al,dh			;al = block offset in disk map
+	jz get_de3			;yes
+	  shr al,1			;divide block offset by 2
+
+;	al = last non-zero block index in fcb (rel to 0)
+;	compute ext offset from last non-zero block index by
+;	shifting block index right 7-blkshf
+
+get_de3:
+	mov cl,7
+	sub cl,blkshf
+	shr al,cl			;al = ext offset
+
+	mov ah,extmsk			;if ext offset > extmsk then
+	cmp ah,al			;  continue scan
+	jb get_de1
+
+;	dir ext = (fcb ext & (~extmsk) & maxext) | ext offset
+
+	mov bx,offset info_fcb+extnum	;bx = .fcb(ext)
+	mov cl,[bx]			;cl = fcb extent value
+	not ah				;ah = ~extmsk
+	and ah,maxext			;ah = ah & maxext
+	and ah,cl			;ah = ah & fcb extent
+	or al,ah			;al = dir ext
+	ret
+
+compext:	;compare extent# in al with that in cl
+;-------
+;	entry:	AL,CL = extent numbers to compare
+;	exit:	Z flag set if extent numbers match
+;		BX,CX,DX = preserved
+
+	push cx				;save cx's original value
+	mov ch,extmsk
+	not ch				;ch has negated form of
+					;extent mask
+	and cl,ch			;low bits removed from cl
+	and al,ch			;low bits removed from al
+	sub al,cl
+	and al,maxext			;set flags
+	pop cx				;restore cx
+	ret
+
+getfcb:		;set local variables from currently addressed fcb
+;------
+	mov al,info_fcb+nxtrec
+	mov vrecord,al			;vrecord=fcb(nxtrec)
+	cmp info_fcb+reccnt,0
+	jne getfcb0
+	  call get_dir_ext
+	  mov cl,al
+	  call set_rc
+getfcb0:
+	mov al,info_fcb+reccnt
+	cmp al,81h! jb getfcb1
+	  mov al,80h
+getfcb1:
+	mov rcount,al			;rcount=fcb(reccnt)
+	mov al,extmsk			;extent mask to a
+	and al,info_fcb+extnum		;fcb(extnum) and extmsk
+	mov extval,al
+	ret
+
+setfcb:		;place local values back into current fcb
+;------
+	xor al,al
+	cmp fx_intrn,fxi22		;if func# < make then
+	jae setfc1
+	  inc al			; AL=1 - sequential i/o
+setfc1:
+	add al,vrecord
+	mov info_fcb+nxtrec,al		;fcb(nxtrec)=vrecord+seqio
+	cmp info_fcb+reccnt,80h
+	jnb ret41			;dont reset if fcb(rc) > 7fh
+	mov al,rcount
+	mov info_fcb+reccnt,al		;fcb(reccnt)=rcount
+ret41:	ret
+
+cmpec0:		;compute checksum
+;------
+;	entry:	BX = offset of string to checksum
+;		CL = number of bytes to checksum
+;		AL = initial value of checksum
+;	exit:	AL = checksum value
+
+	xor ch,ch
+cmpec2:
+	add al,[bx]
+	inc bx
+	loop cmpec2
+	ret				;with checksum in AL
+
+cmpecs:		;compute checksum for current directory buffer
+;------
+;	exit:	AL = checksum value
+
+	mov bx,buffa			;current directory buffer
+	mov cx,4			;# of directory in buffer
+	xor ah,ah			;clear checksum value
+cmpec1:
+	push cx! xor al,al
+	mov cl,32			;size of directory entry
+	call cmpec0
+	xor ah,al
+	pop cx
+	loop cmpec1
+	xchg al,ah			;AL = checksum value
+	ret
+
+chek_fcb:
+;--------
+;	exit:	Z flag set if valid checksum
+
+	cmp high_ext,01100000b		;does high_ext = 60h
+	jne chksum_fcb			;no
+	  xor al,al
+	  mov info_fcb,al		;yes - set fcb(0) to zero
+	  ;jmps chksum_fcb
+
+chksum_fcb:	;compute checksum for fcb
+;----------
+;	add 1st 12 bytes of fcb + curdsk + high_ext + xfcb_readonly + bbh
+;	exit:	Z flag set if valid checksum
+
+if BMPM
+	sub al,al
+	mov bx,offset pd_cnt
+	mov cl,4
+	call cmpec0
+	add al,0bbh			;add bias
+	mov bx,offset info_fcb		;add 1st 12 bytes of fcb
+	mov cl,12
+	call cmpec0
+	inc bx				;skip extent
+	add al,[bx]			;add s1
+	add bx,3			;skip modnum & reccnt
+	mov cl,16			;checksum disk map
+	call cmpec0
+	mov bx,drvlbla
+	add al,2[bx]			;add in login sequence number
+	or al,al			;zero flag set if checksum valid
+endif
+if BCPM
+	mov bx,drvlbla
+	mov al,info_fcb+chksum
+	cmp 2[bx],al
+endif
+
+ret42:	ret
+
+if BMPM
+
+get_cmp_mode:
+;------------
+;	exit:	AL = process compatability mode
+;		BX = preserved
+
+	mov si,pdaddr
+	mov al,p_cmod[si]
+	ret
+
+cond_check_fcb:
+;--------------
+	call get_cmp_mode
+	and al,10h! jnz chek_fcb	;if f4' set dont check fcb
+	;jmp check_fcb
+
+endif
+
+check_fcb:
+;---------
+
+if BMPM
+	mov check_fcb_ret,false
+check_fcb1:
+
+endif
+
+	call chek_fcb			;compute fcb checksum
+	jz ret42			;valid if zero
+
+if BCPM
+	mov dx,rlog
+	call test_vector
+	jz ret42
+endif
+if BMPM
+	and al,0fh			;is mod(chksum,16) = 0 ?
+	jnz check_fcb3			;no - invalid checksum
+	cmp pd_cnt,0			;is pd_cnt = 0 ?
+	jz check_fcb3			;yes - invalid checksum
+
+if PCMODE
+	cmp media_format,0
+	je $+5
+	jmp chk_pcfcb
+endif
+
+	  mov byte ptr sdcnt+1,0ffh
+	  call chk_inv_fcb
+	  jne check_fcb2		;is invalid fcb
+	    call search_name		; yes - search for directory fcb
+	    jmps check_fcb25
+check_fcb2:
+	  mov dont_close,true
+	  call close1			; no - attempt partial close
+check_fcb25:
+	  mov bx,offset lret
+	  inc b[bx]
+	  jz check_fcb3			;partial close or search failed
+	    mov b[bx],0			;zero lret
+	    call pack_sdcnt		;look for file in lock list
+	    mov ch,5
+	    call search_olist
+	    jnz check_fcb3		;not found - invalid checksum
+	      ret			;found - checksum ok
+endif
+
+check_fcb3:
+	pop bx				;discard return address
+
+if BMPM
+	test check_fcb_ret,true
+	jnz ret45
+endif
+
+chk_media2:
+	mov al,10			;10 = checksum error
+	jmp set_lret
+
+if BMPM
+
+set_chksum_fcb:	;validate fcb checksum
+;--------------
+	call chksum_fcb			;compute fcb checksum
+	jz ret45			;return if valid
+	sub al,info_fcb+chksum		;subtract from checksum value
+	neg al				;negate result
+	mov info_fcb+chksum,al		;restore s1
+ret45:	ret
+
+reset_checksum_fcb:	;invalidate fcb checksum
+;------------------
+	mov comp_fcb_cks,0
+	call chksum_fcb			;compute fcb checksum
+	jnz ret45			;return if invalid
+	inc byte ptr info_fcb+chksum	;invalidate s1
+	ret
+
+endif
+if BCPM
+
+SET_LSN:
+;-------
+	MOV BX,DRVLBLA
+	MOV CL,2[BX]
+	mov info_fcb+chksum,cl
+	RET
+endif
+
+setcdisk:	;set a "1" value in curdsk position of [bx]
+;--------
+;	entry:	BX = offset of vector to set
+
+	mov cl,curdsk
+
+set_cdisk1:	;set a "1" value in cl position of [bx]
+;----------
+;	entry:	BX = offset of vector to set
+;		CL = position in vector to set
+;	exit:	AX = bit set in position CL
+
+	mov ax,1			;number to shift
+	shl ax,cl			;ax = mask to integrate
+	or [bx],ax			;[bx] = mask or rol(1,curdsk)
+	ret
+
+nowrite:	;check if disk is marked read/only
+;-------
+;	exit:	Z flag reset if disk is read/only
+
+	mov dx,rodsk
+
+test_vector:	;test current disk bit in vector
+;-----------
+;	entry:	DX = vector to test
+;	exit:	DL = curdsk vector bit (in low order bit)
+;		Z flag reset if bit is on
+
+	mov cl,curdsk
+test_vector1:
+	shr dx,cl
+	and dx,1
+	ret				;non zero if nowrite
+
+get_dptra:
+;---------
+; compute the address of a directory element at
+;  positon dptr in the buffer
+;	exit:	BX = buffa + dptr
+;		CX = preserved
+
+	mov bl,dptr
+	xor bh,bh
+	add bx,buffa		;bx = buffa + dptr
+	ret
+
+ro_test:
+;-------
+;	entry:	BX = offset of fcb to test
+;	exit:	BX = .fcb(9)
+;		C flag set if file is read/only
+
+	add bx,rofile			;offset to r/o bit
+	mov al,[bx]
+	rcl al,1
+ret5:	ret
+
+ckrodir:	;check current directory element for read/only status
+;-------
+	call get_dptra			;address of element
+
+ckrofile:	;check current buff(dptr) or fcb(0) for r/o status
+;--------
+;	entry:	BX = offset of fcb to test
+
+	call ro_test
+	jnc ret5			;rnc
+	jmp roferror
+
+checkwrite:	;check for write protected disk
+;----------
+	call nowrite
+	jz ret5				;rz
+	jmp roderror
+
+getmodnum:
+;---------
+;	compute the address of the module number
+;	bring module number to accumulator
+;	high order bit is fwf (file write flag)
+;	exit:	BX = offset fcb(modnum)
+;		AL = fcb(modnum)
+
+	mov bx,offset info_fcb+modnum
+	mov al,[bx]
+	ret				;al=fcb(modnum)
+
+clrmodnum:	;clear the module number field for user open/make
+;---------
+	mov info_fcb+modnum,0		;fcb(modnum)=0
+	ret
+
+clr_ext:
+;-------
+	and info_fcb+extnum,1fh
+	ret
+
+setfwf:		;set file write flag
+;------
+;	exit:	BX = .fcb(modnum)
+;		AL = fcb(modnum)
+
+	call getmodnum			;bx=.fcb(modnum),
+					;al=fcb(modnum)
+					;set fwf(file write flag) to 1
+
+	or al,fwfmsk
+	mov [bx],al			;fcb(modnum)=fcb(modnum) + 80h
+					;also returns non zero
+					;in accumulator
+	ret
+
+chk_inv_fcb:	;check for invalid fcb
+;-----------
+	mov bx,offset info_fcb+dskmap
+	jmps test_ffff
+
+tst_inv_fcb:	;test for invalid fcb
+;-----------
+	call chk_inv_fcb
+	jnz ret8
+	pop bx
+	mov al,9
+	jmp set_lret
+
+endofdir:	;check if end of directory (dcnt = 0ffffh)
+;--------
+;	exit:	Z flag set if at end of directory
+
+	mov bx,offset dcnt
+
+test_ffff:
+;---------
+	cmp w[bx],0ffffh
+ret8:	ret
+
+setenddir:	;set dcnt to the end of directory (dcnt = 0ffffh)
+;---------
+	mov dcnt,enddir
+	ret
+
+set_dcnt:
+;--------
+	mov ax,xdcnt
+	and al,0fch
+	dec ax
+	mov dcnt,ax
+	ret
+
+compcdr:	;return cy if cdrmax > dcnt
+;-------
+;	exit:	C flag set if current dir max > dir count
+;		BX = .cdrmax
+;		DX = dcnt
+
+	mov dx,dcnt			;dx = directory counter
+	mov bx,cdrmaxa			;bx=.cdrmax
+	cmp dx,[bx]
+					;condition dcnt - cdrmax
+ret6:	ret				;produces cy if cdrmax>dcnt
+
+setcdr:		;if not (cdrmax > dcnt) then cdrmax = dcnt+1
+;------
+	call compcdr
+	jb ret6				;return if cdrmax > dcnt
+					;otherwise, bx = .cdrmax+1,
+					;dx = dcnt
+	inc dx
+	mov [bx],dx
+	ret
+
+TST_LOG_FXS:
+;-----------
+;	exit:	Z flag set if removable and func# = 15,17,19,etc.
+
+	TEST BYTE PTR CHKSIZ+1,80H	;IS DRIVE PERMANENT?
+	JNZ RET6			;YES - RET WITH Z FLAG RESET
+	MOV DI,OFFSET LOG_FXS		;RETURN WITH Z FLAG SET
+tst_log_01:
+	mov cl,cs:[di]			;CS over ride on table in const area
+	inc di! xor ch,ch
+	MOV AL,fx_intrn			;IF func# = 15,17,19,etc.
+	push cs ! pop es
+	repne scas al			;ES = CS for table in const area
+	push ds ! pop es
+	RET
+
+chk_exit_fxs:
+;------------
+	mov bx,offset goback
+	push bx				;setup for error return
+	mov di,offset rw_fxs
+	call tst_log_01			;does fx = read or write ?
+	jnz $+5				; and is drive removable ?
+	  jmp chk_media2
+	mov di,offset sc_fxs
+	call tst_log_01			;does fx = searchn or close ?
+	jnz $+5				; and is drive removable ?
+	  jmp lret_eq_ff
+	pop bx				;remove error return address
+	ret
+
+TST_RELOG:
+;---------
+	xor al,al
+	xchg relog,al
+	test al,al			;IF RELOG ~= 0 THEN RELOG
+	JZ RET6				;CURRENT DRIVE
+	call curselect
+	jmp restart
+
+drv_relog:
+;---------
+	CALL curselect
+	xor ax,ax
+	MOV DCNT,ax			;SET DCNT & DPTR TO ZERO TO
+	MOV DPTR,al			;FORCE SEARCHES TO BEGINNING
+	RET				;OF DIRECTORY
+
+if PCMODE
+
+directio:
+;--------
+;	Entry:	CL = true if reading
+;		AX = number of physical records
+
+	mov mult_sec,al
+	push cx
+	call setdata
+	call seek
+	pop cx
+	or cl,cl ! jz wrbuff
+	  jmps rdbuff
+endif
+
+wrbuff:		;write buffer and check condition
+;------
+;	entry:	CL = wrtype = 0 - normal write operation
+;		     wrtype = 1 => directory write operation
+;		     wrtype = 2 => start of new block
+
+	mov al,io_write
+	call rwxiosif			;current drive, track, ...
+	mov ah,true			;mark as a write operation
+	jmps diocomp			;check for i/o errors
+
+rdbuff:		;read buffer and check if ok
+;------
+	mov al,io_read
+	call rwxiosif			;current drive, track,....
+diocomp0:
+	mov ah,false			;not a write operation
+
+diocomp:	;check for disk errors
+;-------
+;	entry:	AL = xios return code
+;		AH = true if coming a from write operation
+
+	or al,al! jnz dioc
+	  mov ff_flag,true
+	  ret
+dioc:
+	push ax ! push bx		;save write flag
+	cmp al,0ffh! je dioc01		;has media changed
+	  mov al,adrive			;if operation is on different drive
+	  cmp al,seldsk			; treat error as media change
+	  je dioc2			;  no same drive, report error
+dioc01:
+	cmp chksiz,8000h		;is drive removable or
+	je dioc2			; checksummed ?
+	  mov dx,dlog			;  yes
+	  call test_vector		;in initialize ?
+	  jz dioc2			; yes - treat as perm error
+	  call media_change
+	  cmp fx_intrn,fxi48		;does func# = flush buffer
+	  je dioc0			; yes
+	  mov al,adrive			;is operation on
+	  cmp al,seldsk			; different drive?
+	  je dioc1			;  no
+	    mov relog,0			;no relog for different drive
+dioc0:
+	    pop bx ! pop ax
+	    ret
+dioc1:
+	  call chk_exit_fxs
+	  test ff_flag,true		;if not first disk operation
+	  jz dioc15
+	    call lret_eq_ff		; yes - return error = 0ffh
+	    jmp goback
+dioc15:
+	  pop bx ! pop ax		;restore write flag
+	  or ah,ah! jnz dioc3		; if write treat as r/o error
+	  ret
+dioc2:
+	pop bx ! pop ax			;discard write flag
+
+if PCMODE
+	push es ! mov es,uda_save
+	mov u_ioexerr,bh		;save extended error in UDA
+	pop es
+endif
+
+	cmp al,2! je dioc3		;is error read/only
+	  jmp pererror			; no
+dioc3:
+	jmp roderror
+
+discard_data:
+;------------
+	mov bx,dat_bcba
+	mov cl,4
+	jmps discard0
+
+discard_dir:	;discard matching dir bcb's
+;-----------
+	mov bx,dir_bcba
+
+DISCARD:				;DISCARD BCB'S MATCHING
+;-------
+	MOV CL,1			;ADRIVE FOR CL BYTES
+
+DISCARD0:
+;--------
+;	entry:	BX = bcb root address
+;		CL = length of bytes to match
+
+	or bx,bx			;no entries in bcb list
+	JZ RET7A			;RET IF ZERO
+	MOV BX,[BX]
+DISCARD1:
+	PUSH CX
+	MOV DX,OFFSET ADRIVE		;COMPARE BCB TO ADRIVE FOR
+	CALL COMPARE			;CL BYTES
+	POP CX
+	JNZ DISCARD2
+	  MOV B[BX],0FFH		;DISCARD BCB
+DISCARD2:
+	MOV BX,12[BX]			;ADVANCE TO NEXT BCB
+	or bx,bx			;IS IT LAST BCB?
+	JNZ DISCARD1			;NO
+RET7A:	RET
+
+DEACTIVATE:	;deactivate bcb's in list
+;----------
+;	entry:	BX = bcb root address
+
+	or bx,bx			;DEACTIVATE BCB'S IN LIST BX
+	JZ RET7A			;BELONGING TO CURRENT PROCESS
+	MOV BX,[BX]			;AND DRIVE
+DEACT1:
+	MOV AL,[BX]			;IS BCB FOR CURRENT DRIVE?
+	CMP AL,ADRIVE
+	JNZ DEACT2			;NO
+	  MOV AX,14[BX]			;DOES CURRENT PROCESS OWN BCB?
+	  CMP AX,RLR
+	  JNZ DEACT2			;NO
+	    MOV WORD PTR 14[BX],0	;DEACTIVATE BCB
+	    mov al,fx_intrn
+	    cmp al,fxi48! je deact11	;IS func# = flush or free drive ?
+	    cmp al,fxi39! jne deact2
+deact11:
+	      MOV B[BX],0FFH		;yes - DISCARD BCB
+DEACT2:
+	MOV BX,12[BX]		;ADVANCE TO NEXT BCB
+	or bx,bx
+	JNZ DEACT1
+	RET
+
+;	BLOCKING/DEBLOCKING BUFFER CONTROL BLOCK (BCB) FORMAT
+
+;	    +-------+-------+-------+-------+-------+-------+
+;	00h |  DRV  |        RECORD         | PEND  |  SEQ  |
+;	    +-------+-------+-------+-------+-------+-------+
+;	06h |     TRACK     |    SECTOR     |  BUFFER_ADDR  |
+;	    +-------+-------+-------+-------+-------+-------+
+;	0Ch |     LINK      |  PROCESS_OFF  |
+;	    +-------+-------+-------+-------+
+
+GET_BCBA:	; get buffer control block address
+;--------
+;	entry:	BX = .bcb list root
+;	exit:	BX = .bcb	SEQ,LINK,PD fields updated
+
+	MOV ROOT_BCBA,BX
+	mov di,bx
+	sub di,12			;DI = last bcb (previous curbcb)
+	mov bx,[bx]			;BX = 1st curbcb
+	cmp word ptr 12[bx],0		;IS THERE ONLY 1 BCB IN BCB LIST?
+	jnz $+5				;YES
+	  jmp get_bcb35
+	xor ax,ax
+	MOV EMPTY_BCBA,ax
+	mov p_last_bcba,ax
+	MOV P_BCB_CNT,al
+GET_BCB1:
+	CMP B[BX],0FFH			;IS CURBCB DISCARDED?
+	je get_bcb10			;yes
+	  mov ax,14[bx]
+	  or ax,ax			;IS BCB INACTIVE?
+	  JNZ get_bcb11			;NO
+	  MOV SI,EMPTY_BCBA
+	  OR SI,SI			;IS EMPTY_BCBA = 0?
+	  JZ get_bcb10			;YES - SAVE INACTIVE BCB ADDR
+	    MOV SI,12[SI]
+	    CMP B[SI],0FFH		;is empty_bcb a discarded bcb?
+	    JZ get_bcb12		;yes - DONT SAVE INACTIVE BCB ADDR
+GET_BCB10:
+	MOV EMPTY_BCBA,di		;EMPTY_BCBA = LAST_BCBA
+	mov byte ptr 5[bx],0		;reset sequence counter
+	JMPS get_bcb12
+
+GET_BCB11:
+	CMP AX,RLR			;DOES CURRENT PROCESS OWN BCB?
+	jne get_bcb12			;NO
+	  INC P_BCB_CNT			;P_BCB_CNT = P_BCB_CNT + 1
+	  MOV P_LAST_BCBA,di
+GET_BCB12:
+	MOV CUR_BCBA,BX
+	push di
+	CALL DEBLOCK9			;BX=CURBCBA, DX=.ADRIVE, CL=4
+	CALL COMPARE			;DOES CURBCB(0-3) = ADRIVE || ARECORD
+	pop di
+	mov bx,cur_bcba
+	JNZ get_bcb15			;NO
+	  mov al,5[bx]
+	  cmp al,0ffh! je get_bcb14	;does bcb(5) = 0ffh? (not seq)
+	    mov ah,phy_off
+	    CMP al,ah! JZ GET_BCB14	;DOES BCB(5) = PHY_OFF? (same record)
+	      INC al			;INCR BCB SEQUENCE
+	      CMP AL,ah! JZ GET_BCB13	;DOES BCB(5)+1 = PHY_OFF? (next record)
+		mov al,0ffh		;no - mark bcb as not seg
+GET_BCB13:
+	      mov 5[bx],al
+GET_BCB14:
+	  JMP GET_BCB3			;MOVE CUR BCB TO HEAD OF BCB LIST
+
+GET_BCB15:
+	mov ax,14[bx]
+	cmp ax,rlr			;DOES CURRENT PROCESS OWN BCB?
+	JNZ GET_BCB17			;NO
+	  mov al,adrive
+	  cmp al,[bx]! jne get_bcb17	;does the drive match?
+	  MOV AL,phymsk
+	  or al,al! jz get_bcb17	;does phymsk = 0?
+	  CMP AL,5[bx]			;DOES BCB(5) = PHYMSK?
+	  jne GET_BCB17			;NO
+	    MOV byte ptr 5[BX],0	;yes - seq bcb - bcb(5) = 0
+					;  move bcb to end of list
+	    cmp word ptr 12[bx],0	;IS CUR BCB ALREADY AT END OF LIST?
+	    JZ GET_BCB2			;YES
+
+	    DEC P_BCB_CNT
+	    xor ax,ax			;BCB(LINK) = 0
+	    xchg ax,12[bx]		;remove cur bcb from bcb list
+	    mov 12[di],ax
+	    xchg ax,bx			;place cur bcb at end of bcb list
+GET_BCB16:
+	    mov si,bx
+	    mov bx,12[si]
+	    or bx,bx! jnz get_bcb16
+	    mov 12[si],ax
+	    jmps get_bcb18
+
+GET_BCB17:
+	cmp word ptr 12[bx],0		;is bcb at end of list
+	je get_bcb2			; yes
+	  mov di,bx			;DI = new last bcb
+GET_BCB18:
+	  mov bx,12[di]			;BX = new cur bcb
+	  JMP GET_BCB1
+
+GET_BCB2:				;END OF BCB SCAN - NO MATCH
+	  MOV si,EMPTY_BCBA		;WAS A DISCARDED OR INACTIVE BCB
+	  or si,si			;FOUND?
+	  jz GET_BCB25			;NO
+	    mov di,si			;LAST_BCBA = EMPTY_BCBA
+GET_BCB25:
+	  MOV SI,ROOT_BCBA		;IS THE NUMBER OF BCB'S OWNED
+	  MOV AL,P_BCB_CNT		;BY THIS PROCESS GREATER THAN
+	  CMP AL,2[SI]			;THE MAXIMUM SET BY GENSYS?
+	  JC GET_BCB26			;NO
+	    MOV di,P_LAST_BCBA		;USE THE LAST BCB OWNED BY THE
+GET_BCB26:				;CURRENT PROCESS
+	  mov bx,12[di]
+	  mov al,phy_off
+	  mov 5[bx],al			;sequence field = phy_off
+GET_BCB3:
+	MOV SI,ROOT_BCBA		;PUT CURBCB ON HEAD OF BCB LIST
+	MOV AX,[SI]
+	cmp ax,bx			;is cur bcb at head of bcb list
+	je get_bcb35			;yes
+	  xchg ax,12[bx]
+	  mov 12[di],ax
+	  MOV [SI],BX
+GET_BCB35:
+	MOV AX,RLR			;SET THE BCB PROCESS FIELD
+	MOV 14[BX],AX
+	RET
+
+;
+;	unallocated block entry structure
+;
+;	+-----+-----+-----+-----+-----+-----+
+;	|    LINK   |   BLOCK   | DRV | HWM |
+;	+-----+-----+-----+-----+-----+-----+
+;
+;	LINK  - link to next entry or 0 if end of list
+;	BLOCK - allocation block number
+;	DRV   - drive number or 0FFh if not valid
+;	HWM   - high water mark of sectors written to block
+;
+ua_link		equ	word ptr 0
+ua_block	equ	word ptr 2
+ua_drv		equ	byte ptr 4
+ua_hwm		equ	byte ptr 5
+
+
+ua_setup:	;set up unallocated block entry in list
+;--------
+;	entry:	DX = block number
+;	exit:	DX = block number
+
+	mov bx,offset ua_lroot	;get unallocated list root
+ua_in1:
+	mov di,bx		;save last entry address
+	mov bx,ua_link[bx]
+	cmp ua_link[bx],0	;loop to end of list
+	jne ua_in1
+
+	mov al,adrive		;initialize entry values
+	mov ua_drv[bx],al
+	mov ua_block[bx],dx
+	xor ax,ax
+	mov ua_hwm[bx],al
+
+	mov ua_link[di],ax	;zero link of last entry
+	mov ax,bx
+	xchg ua_lroot,ax	;place entry at beginning of list
+	mov ua_link[bx],ax
+	ret
+
+ua_discard:	;invalidates entrys for the current disk
+;----------
+;	entry:	none
+
+	mov al,adrive		;get current disk
+	mov bx,offset ua_lroot
+ua_fl1:
+	mov bx,ua_link[bx]
+	cmp ua_drv[bx],al
+	jne ua_fl2
+	  mov ua_drv[bx],0ffh
+ua_fl2:
+	cmp ua_link[bx],0	;loop to end of list
+	jne ua_fl1
+	ret
+
+ua_preread:	;check if pre read is required
+;----------
+;	entry:	CL = vrecord number & blkmsk
+;	exit:	C flag set if pre read required
+
+if PCMODE
+	test media_format,0FFh
+	jz ua_cpm		;if media format is PCDOS
+	  cmp pc_pre_read,1	; and PC_PRE_READ is non-zero
+	  cmc			; set carry flag (pre read is required)
+	  ret
+ua_cpm:
+
+endif
+	mov al,adrive
+	mov bx,offset ua_lroot
+	mov dx,blk_num		;DX = block number
+ua_pr0:
+	mov bx,ua_link[bx]
+	cmp ua_drv[bx],al	;if ua_drv = curdsk
+	jne ua_pr2		; and ua_block = block# then
+	cmp ua_block[bx],dx	; check high water mark
+	jne ua_pr2
+	  cmp cl,ua_hwm[bx]	;if ua_hwm <= cl then
+	  jb ua_pr1
+	    mov al,phymsk
+	    mov ah,al! not ah
+	    and cl,ah! inc al	; compute next physical offset
+	    add al,cl		; save new high water mark
+	    mov ua_hwm[bx],al	; and return with carry reset
+ua_pr1:
+	    ret			; else return with carry set
+ua_pr2:
+	cmp ua_link[bx],0
+	jne ua_pr0
+	stc			;return with carry set
+	ret
+
+DEBLOCK_IO:
+;----------
+;	entry:	AL = 0 -> SEEK ONLY
+;		   = 1 -> WRITE
+;		   = 2 -> READ
+
+	PUSH AX
+	CALL SEEK
+	POP AX
+	DEC AL
+	JS deblk_io2
+	  JNZ deblk_io1
+	    mov cl,1
+	    JMP WRBUFF
+deblk_io1:
+	  CALL RDBUFF
+deblk_io2:
+	mov si,offset track
+	mov di,cur_bcba
+	add di,6			;MOVE TRACK & SECTOR
+	mov cx,2			;TO BCB
+	rep movsw
+	ret
+
+if PCMODE
+
+dblockio:
+;--------
+;	Entry:	CL = true if reading
+;		CH = true if preread is required on write
+
+	mov ah,1
+	test cl,cl ! jnz dblockio_1
+	  inc ah
+dblockio_1:				;AH = 1 - reading, 2 - writing
+	mov pc_pre_read,ch		;setup pre read condition
+	jmp deblock_dta
+endif
+
+READ_DEBLOCK:
+;------------
+	mov ah,1			;AH = 1
+	CALL DEBLOCK_DTA
+	JMP SETFCB
+
+DEBLOCK_DIR:
+;-----------
+	MOV CUR_dma_seg,DS		;BUFFERS IN SYSTEM DATA AREA
+	MOV BX,DIR_BCBA
+	CMP AH,5			;IS FX = DIRECTORY UPDATE?
+	JNZ DEBLOCK			;NO
+	MOV BX,CUR_BCBA			;YES - CUR_BCBA KNOWN FROM
+	jmps DEBLOCK			;PREVIOUS LOCATE CALL
+
+DEBLOCK_DTA:
+;-----------
+	MOV BX,DAT_BCBA
+	MOV CUR_dma_seg,0		;get segment from BCB
+	CMP AH,4			;IS FX = FLUSH?
+	JNZ DEBLOCK			;NO
+
+DEBLOCK_FLUSH:
+;-------------
+	MOV BX,[BX]
+	MOV TRACK,0FFFFH
+DEBLOCK_FLUSH0:
+	MOV AL,ADRIVE
+	CMP AL,[BX]			;DOES BCB(0) = ADRIVE?
+	JNZ DEBLOCK_FLUSH1		;NO
+
+	TEST BYTE PTR 4[BX],0FFH	;IS BUFFER WRITE PENDING?
+	JZ DEBLOCK_FLUSH1		;NO
+	  MOV ax,14[BX]			;IS BCB OWNED BY CALLING PROCESS?
+	  CMP ax,RLR
+	  JNZ DEBLOCK_FLUSH1		;NO
+	    MOV AX,6[BX]		;IS BCB(6) < TRACK?
+	    CMP AX,TRACK
+	    JNC DEBLOCK_FLUSH1		;NO
+
+	      MOV TRACK,AX		;YES - TRACK = BCB(6)
+	      MOV SECTOR,BX		;SECTOR = .BCB
+
+DEBLOCK_FLUSH1:
+	mov bx,12[bx]
+	or bx,bx
+	JNZ DEBLOCK_FLUSH0
+
+	CMP TRACK,0FFFFH		;WAS A DIRTY BCB FOUND?
+	JNZ $+3				;YES
+	  RET
+	MOV BX,SECTOR			;FLUSH THE BCB'S BUFFER
+	xor al,al			;set z flag
+	MOV AH,4
+	mov cur_dma_seg,0		;get segment from BCB
+	CALL DEBLOCK
+
+	MOV BX,DAT_BCBA
+	jmps DEBLOCK_FLUSH
+
+DEBLOCK:	;BDOS BLOCKING/DEBLOCKING ROUTINE
+;-------
+;	entry:	Z flag reset -> get new BCB address
+;		AH = 1 -> READ COMMAND
+;		   = 2 -> WRITE COMMAND
+;		   = 3 -> LOCATE COMMAND
+;		   = 4 -> FLUSH COMMAND
+;		   = 5 -> DIRECTORY UPDATE
+
+	MOV DEBLOCK_FX,AH		;SAVE DEBLOCK FX
+	lahf				;save Z flag
+	mov cl,phymsk			;CL = PHYMSK
+	MOV AL,BYTE PTR ARECORD
+	AND AL,cl
+	MOV PHY_OFF,AL			;PHY_OFF = LOW(ARECORD) & PHYMSK
+	not cl				;CL = ~PHYMSK
+	and BYTE PTR ARECORD,cl		;LOW(ARECORD) = LOW(ARECORD) & ~PHYMSK
+	sahf
+	JZ $+5				;IF DEBLOCK CALLED WITH Z FLAG RESET
+	  CALL GET_BCBA			;THEN GET BCB ADDRESS
+	MOV CUR_BCBA,BX
+	MOV ax,10[BX]			;dma address field - offset/segment
+	cmp cur_dma_seg,0		;if cur_dma_seg <> 0, deblocking is
+	jne deblock0			; for dir buf and addr is offset
+	  mov cur_dma_seg,ax		;else deblocking data buffer and
+	  xor ax,ax			; addr is segment, offset = 0
+deblock0:
+	MOV CUR_DMA,ax			;save current buffer address
+	mov al,deblock_fx
+	cmp al,3! jne deblock01		;if (deblock func = locate)
+	  xor ah,ah			; and (must read dir = true)
+	  xchg rd_dir_flag,ah		; force sector read from disk
+	  test ah,0f0h			; to verify media has not changed
+	  jnz deblock25
+deblock01:
+	CALL DEBLOCK9			;BX=CUR_BCBA, DX=.ADRIVE, CL=4
+	cmp b[bx],0ffh! je deblock2
+	  CMP al,4			;IS DEBLOCK_FX >=4?
+	  JNC DEBLOCK1			;YES
+	    CALL COMPARE		;DOES BCB(0-3) = ADRIVE || ARECORD?
+	    JZ DEBLOCK45		;YES
+DEBLOCK1:
+	  CMP al,5			;IS DEBLOCK_FX = DIR UPDATE?
+	  JZ DEBLOCK15			;YES
+	    TEST BYTE PTR 4[BX],0FFH	;IS BCB(4) WRITE PENDING FLAG SET?
+	    JZ DEBLOCK2			;NO
+DEBLOCK15:
+	  MOV BYTE PTR 4[BX],0		;WRITE BCB BUFFER
+	  PUSH WORD PTR ADRIVE		;SAVE ADRIVE & ARECORD(0)
+	  PUSH WORD PTR ARECORD+1	;SAVE ARECORD(1,2)
+	  mov ax,2[bx]
+	  mov word ptr arecord+1,ax
+	  mov ax,[bx]
+	  mov word ptr adrive,ax	;ADRIVE || ARECORD = CURBCB(0-3)
+	  MOV BYTE PTR [BX],0FFH	;DISCARD BUFFER IN CASE WRITE FAILS
+	  cmp curdsk,al
+	  je $+5
+	    call disk_select1
+	  mov al,1
+	  jnz $+5
+	    CALL DEBLOCK_IO		;write buffer if drive logged in
+	  CALL DEBLOCK9			;RESTORE BCB PREFIX
+	  CALL MOVE
+	  POP WORD PTR ARECORD+1	;RESTORE ARECORD(1,2)
+	  POP WORD PTR ADRIVE		;RESTORE ADRIVE & ARECORD(0)
+	  CALL CURSELECT
+DEBLOCK2:
+	MOV al,DEBLOCK_FX		;DOES DEBLOCK_FX = DIR UPDATE OR FLUSH
+	CMP al,4
+	JC $+3
+	  RET				;YES
+	CMP al,2			;DOES DEBLOCK_FX = WRITE?
+	JNZ DEBLOCK25			;NO
+	  MOV cl,BLK_OFF
+	  call ua_preread		;is preread required?
+	  jc DEBLOCK25			; yes
+	    XOR AL,AL
+	    CALL DEBLOCK_IO		;SEEK ONLY
+	    JMPS DEBLOCK4
+DEBLOCK25:
+	mov bx,cur_bcba
+	mov b[bx],0ffh			;discard in case of error
+	MOV AL,2
+	CALL DEBLOCK_IO			;READ PHYSICAL RECORD
+DEBLOCK4:
+	CALL DEBLOCK9			;BX=CUR_BCBA, DX=.ADRIVE, CL=4
+	CALL MOVE
+	MOV B[DI],0			;CUR_BCBA->BCB(4) = 0
+DEBLOCK45:
+	xor al,al
+	MOV ah,PHY_OFF
+	shr ax,1			;AX = phy_off * 080h
+	MOV SI,CUR_DMA
+	ADD SI,AX			;SI = CUR_DMA + PHY_OFF*80H
+	MOV al,DEBLOCK_FX
+	CMP al,3			;IS DEBLOCK_FX = LOCATE?
+	JNZ DEBLOCK6			;NO
+	  MOV BUFFA,SI			;YES
+	  RET
+DEBLOCK6:
+	MOV CX,40H			;transfer 40h words
+	MOV DI,dma_ofst
+	CMP al,1			;IS DEBLOCK_FX = READ?
+	mov ax,dma_seg
+	mov dx,cur_dma_seg
+	push ds! push es
+	je DEBLOCK7			; yes
+	  MOV BYTE PTR 4[BX],0FFH	; no - write
+	  xchg di,si			;exchange dma offsets
+	  xchg ax,dx			;exchange dma segments
+DEBLOCK7:
+	mov ds,dx			;setup source segment
+	mov es,ax			;setup destination segment
+	rep movsw			;transfer data
+	pop es! pop ds
+	RET
+
+DEBLOCK9:				;SETUP FOR MOVE OR COMPARE
+	MOV BX,CUR_BCBA
+	MOV DX,OFFSET ADRIVE
+	MOV CL,4
+RETD1:
+	RET
+
+read_dir:
+;--------
+	call rdir
+	test relog,0ffh
+	jz retd1
+	call chk_exit_fxs
+	CALL TST_RELOG			;RELOG IN DRIVE
+	;JMP RDDIR			;READ DIR REC ZERO & RET
+
+rddir:		;read the current directory record
+;-----
+	MOV ax,DCNT			;seek the record containing
+	MOV CL,DSKSHF! SHR ax,CL	; the current dir entry
+	mov drec,ax
+	MOV ARECORD,ax			;ARECORD = SHR(DCNT,DSKSHF)
+	MOV BYTE PTR ARECORD+2,0
+	MOV AH,3			;LOCATE COMMAND
+	JMPS WRDIR0
+
+if PCMODE
+
+rd_pcdir:
+;--------
+;	Exit:	AX = offset of directory entry
+;		   = 0 if end of directory
+
+	call read_dir
+	call endofdir
+	jnz rd_pcdir1
+	  xor ax,ax
+	  ret
+rd_pcdir1:
+	call get_dptra
+	mov ax,bx
+	ret
+endif
+
+wrdir:		;write the current directory entry, set checksum
+;-----
+	call checkwrite			;verify disk is read/write
+	MOV AH,5			;DIRECTORY UPDATE CODE
+	CALL WRDIR0
+	mov cl,true
+	JMP CHECKSUM			;initialize entry
+
+WRDIR0:
+	CALL DEBLOCK_DIR
+	;JMPS SETDATA
+
+setdata:	;set data dma address
+;-------
+	MOV ax,dma_seg
+	MOV CUR_dma_seg,ax
+	MOV ax,dma_ofst
+	MOV CUR_DMA,ax
+	RET
+
+rdir:		;read next directory entry
+;----
+;	entry:	CL = true if initializing
+
+	mov dx,dirmax			;in preparation for subtract
+	mov bx,dcnt
+	inc bx
+	mov dcnt,bx			;dcnt=dcnt+1
+					;continue while dirmax >= dcnt
+					;(dirmax-dcnt no cy)
+	sub dx,bx
+	jnb $+5				; no
+	  jmp setenddir			; yes, set dcnt to end
+					; of directory
+;	not at end of directory, seek next element
+					;cl=initialization flag
+	mov al,ldcnt
+	and al,dskmsk			;low(dcnt) and dskmsk
+	push cx
+	mov cl,fcbshf			;to multiply by fcb size
+	shl al,cl
+	pop cx
+					;a = (low(dcnt) and dskmsk)
+					;shl fcbshf
+	mov dptr,al			;ready for next dir operation
+	test rd_dir_flag,true		;if must read or locate dir
+	jnz rddir2			; read next directory record
+	  or al,al			;else
+	  jnz ret71			; return if not a new record
+RDDIR2:
+	push cx				;save initialization flag cl
+	call rddir			;read the directory record
+	pop cx				;recall initialization flag
+	test relog,0ffh
+	jnz ret71 
+	;jmps checksum			;checksum the directory element
+
+checksum:
+;--------
+;	compute current checksum record and update the
+;	directory element if cl=true, or check for = if not
+;	drec < chksiz?
+;	entry:	CL = true update checksum
+;		   = false if check for equal
+
+	mov dx,drec
+	mov bx,chksiz
+	and bh,7fh			;remove permanent drive bit
+	sub dx,bx
+	jae ret7			;skip checksum if past
+					;checksum vector size
+					;drec < chksiz, so continue
+	push cx				;save init flag
+	call cmpecs			;check sum value to al
+	mov bx,drec			;value of arecord
+	add bx,checka			;bx=.check(arecord)
+	pop cx				;recall true or false to cl
+	inc cl				;true produces zero flag
+	jz initcs
+
+if BMPM
+	  inc cl			;0feh produces zero flag
+	  jz test_dir_cs
+endif
+					;not initializing, compare
+	    cmp al,[bx]			;compute$cs=check(arecord)?
+	    jz ret7				;no message if ok
+	    CALL NOWRITE
+	    JNZ RET7			;RETURN IF ALREADY READ/ONLY
+
+media_change:
+	    mov bx,dat_bcba
+	    call discard
+
+if BMPM
+	    call flush_file0		;flush files
+endif
+
+	    mov al,0ffh
+	    MOV RELOG,al
+	    mov hashl,al
+	    mov bx,offset rlog
+	    call setcdisk
+;	    mov cl,curdsk		;ax is setup in setcdisk
+;	    mov ax,1
+;	    shl ax,cl
+	    jmp reset_37x
+
+if BMPM
+
+test_dir_cs:
+	  cmp al,[bx]			;compute_cs=check(arecord)
+	  jz ret7
+	  jmp flush_files
+endif
+
+initcs:
+					;initializing the checksum
+	mov [bx],al
+ret7:	ret
+
+
+;********** end bdos file system part 1 **********
+

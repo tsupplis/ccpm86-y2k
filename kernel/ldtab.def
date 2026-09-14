@@ -1,0 +1,18 @@
+
+;*****************************************************
+;*
+;*	Format of Load Table Used by Load Program
+;*
+;*****************************************************
+
+ldt_start	equ	word ptr 0
+ldt_min		equ	word ptr ldt_start + word
+ldt_max		equ	word ptr ldt_min + word
+ldt_pd		equ	word ptr ldt_max + word
+ldt_atr		equ	word ptr ldt_pd + word
+ldt_fstrt	equ	word ptr ldt_atr + word
+ldt_flen	equ	word ptr ldt_fstrt + word
+ldt_type	equ	byte ptr ldt_flen + word
+ldt_id		equ	word ptr ldt_type + byte
+ldtlen		equ	ldt_id + word
+

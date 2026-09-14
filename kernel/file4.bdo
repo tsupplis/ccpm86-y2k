@@ -1,0 +1,1845 @@
+
+;************ bdos file system part 4 ************
+
+;	individual function handlers
+;-----------------------------------------------------
+
+func13:	       ;reset disk system
+;======
+;	test all drives, not just logged in drives, because
+;	some drives may be in tlog state.
+
+	mov ax,0ffffh
+	mov info,ax
+
+if BMPM
+	call diskreset
+	jz reset_all
+	  call reset_37
+	  jmps func13_cont
+reset_all:
+
+endif
+if BCPM
+	call reset_37a
+endif
+if BMPM
+	xor ax,ax
+	mov rodsk,ax
+	mov dlog,ax
+
+	mov rlog,ax
+	mov tlog,ax
+func13_cont:
+
+endif
+	xor al,al
+	call func14a			;set default disk to A:
+	dec al
+	mov curdsk,al
+if BMPM
+	push ds! mov ds,uda_save
+	mov ds:u_dma_ofst,080h		;set dma offset to 80h
+	pop ds
+endif
+if BCPM
+	push ds! mov ds,rlr
+	mov ds:p_dma_off,080h		;set dma offset to 80h
+	pop ds
+endif
+	jmp func48			;flush buffers
+
+func14:		;select disk info
+;======
+	call tmp_select
+	mov al,seldsk
+func14a:
+
+if BMPM
+	mov bx,rlr
+	mov p_dsk[bx],al
+endif
+if BCPM
+	push ds! mov ds,rlr
+	mov ds:p_dsk,al
+	pop ds
+endif
+
+	ret
+
+func15:	       ;open file
+;======
+	call copy_dma_in_8
+	call clrmodnum			;clear the module number
+
+if PCMODE
+	cmp media_format,0		;is media CP/M format
+	je $+5				;yes
+	jmp openf			;no - PC format
+endif
+
+if BMPM
+	mov make_flag,false
+	mov byte ptr sdcnt+1,0ffh	;initialize sdcnt
+	mov bx,offset open_file		;check_fcb1 returns to open_file
+	push bx				;if checksum invalid
+	mov check_fcb_ret,true
+	call check_fcb1			;returns normally if fcb chksum valid
+	pop bx
+	cmp high_ext,60h		;is file open in read/only-user 0 mode?
+	jne open_file			;no
+	  call setenddir
+	  jmps open_user_zero
+open_file:
+	mov al,usrcode
+	mov info_fcb,al
+	mov xfcb_read_only,0		;clear in case set by calling process
+	mov byte ptr sdcnt+1,0ffh	;initialize sdcnt
+	call reset_checksum_fcb		;invalidate fcb chksum
+endif
+
+	call check_wild			;check for ?s in fcb
+
+if BMPM
+	call get_atts			;get & clear atts f5'-f8'
+	and al,0c0h			;1st 2 specify open mode
+	cmp al,0c0h			;if both on default to read/only
+	jne att_ok
+	  and al,40h			;remove unlocked mode bit
+att_ok:
+	mov high_ext,al			;save open mode
+	mov ah,al			;define attributes
+	shr ah,1			;bit 0 on = locked mode
+	jnz att_set			;bit 1 on = unlocked mode
+	  mov ah,80h			;bit 2 on = read/only mode
+att_set:
+	mov attributes,ah
+	and al,80h			;is open mode unlocked?
+	jnz call_open			;yes
+endif
+
+	cmp usrcode,0			;is user 0
+	je call_open			;yes
+	  mov al,0feh			;initialize search switches to
+	  mov byte ptr xdcnt+1,al	;flag presence of file under user
+	  inc al			;zero if file nor present under
+	  mov search_user0,al		;current user #
+
+if BMPM
+	  mov byte ptr sdcnt0+1,al	;initialize user 0 sdcnt
+endif
+
+call_open:
+	call open			;attempt to open fcb
+	call openx			;returns if unsuccessful
+	xor al,al
+	xchg search_user0,al		;search_user0 = false
+	test al,al			;is search_user0 true?
+	jnz $+3				;yes
+ret30:	  ret 				;no - open failed
+	cmp byte ptr xdcnt+1,0feh	;does file exist under user 0?
+	je ret30			;no
+
+if BMPM
+	call swap			;swap sdcnt & sdcnt0
+endif
+
+	call set_dcnt			;reset dcnt
+	mov high_ext,60h		;set open mode to read/on-user 0
+open_user_zero:
+	xor al,al			;fcb(0) = user 0
+	mov info_fcb,al
+	mov cl,namlen			;attempt to locate fcb under user zero
+	call searchi
+	call searchn
+	call open1
+	call openx			;openx returns if search unsuccessful
+	ret
+
+openx:
+;-----
+	call endofdir			;was open successful
+	jz ret30			;no
+	mov bx,offset info_fcb+nxtrec
+	cmp b[bx],0ffh
+	jne openxa
+	  mov al,info_fcb+chksum
+	  mov [bx],al
+openxa:
+	pop bx				;discard return address
+	mov al,high_ext			;is open mode read/only - user 0?
+	cmp al,60h
+
+if BCPM
+	jne openx0			;no
+endif
+if BMPM
+	je openx00			;yes
+	  or al,al			;is open mode locked?
+	  jnz openx0			;no
+	  mov bx,offset info_fcb	;set BX for ro_test
+	  call ro_test			;is file read/only attribute set?
+	  jnc openx0			;no
+	  mov attributes,20h
+	  jmps openx0
+openx00:
+	  mov attributes,20h		;open file in read/only-user 0 mode
+endif
+
+	  mov al,info_fcb+sysfil	;if fcb has system attribute set
+	  and al,80h
+	  jnz openx0			;system attribute set
+	    mov high_ext,al		;open failed - system attribute reset
+	    jmp lret_eq_ff
+
+openx0:
+
+if BMPM
+	call reset_checksum_fcb		;invalidate checksum
+endif
+if BCPM
+	call set_lsn
+endif
+
+	call get_dir_mode		;al = dir label data byte
+	TEST AL,80H			;ARE PASSWORDS ACTIVE?
+	JZ OPENX1A			;NO
+	  CALL QDIRFCB1			;IS FCB IN 1ST DIR FCB?
+	  JNZ OPENX0A			;NO
+	  call get_dtba8
+	  OR AL,AL			;DOES SFCB EXIST?
+	  JNZ OPENX0A			;NO
+	    TEST B[BX],0C0H		;IS PASSWORD MODE READ OR WRITE?
+	    JZ OPENX1A			;NO
+	    call xdcnt_eq_dcnt
+	    call get_xfcb		;does xfcb exist
+	    jnz openx0b			; yes
+	    call restore_dir_fcb
+	    jz ret32
+	    call get_dtba		;does sfcb still exist
+	    or al,al! jnz openx1a	; no - (error)
+	    mov [bx],al			;sfcb.pwmode = 0
+	    call nowrite		;update sfcb
+	    jnz openx1a
+	    call wrdir
+	    jmps openx1a
+OPENX0A:
+	  CALL XDCNT_EQ_DCNT		;SAVE DCNT
+	  call get_xfcb
+	  and al,0c0h			;is pw mode read(0) or write(1)?
+	  jz openx1			;no - don't chk password
+openx0b:
+	    call cmp_pw			;check passwords
+	    jz openx1			;jump if password checks
+	    call chk_pw_error
+	    mov al,pw_mode
+	    and al,0c0h
+	    jz openx1
+	    test al,80h			;is pw mode read(1)?
+	    jz $+5			; yes
+	      jmp pw_error		;password error
+	    mov xfcb_read_only,80h	;prohibit any writes to file
+openx1:
+	  CALL RESTORE_DIR_FCB
+	  JNZ OPENX1A
+RET32:	    RET				; error
+
+OPENX1A:
+
+if BMPM
+	call pack_sdcnt
+
+;	set open mode to r/o if in default mode and
+;	if compatibility attribute f1' is set.
+
+	test attributes,0a0h
+	jz openx101
+	  call get_cmp_mode
+	  rol al,1! jnb openx101
+	    mov olap_type,80h		;set f1' locked overlap switch
+	    mov attributes,20h
+openx101:
+	mov ch,3
+	call search_olist! jz openx04	;is this file currently open?
+openx01:
+	  cmp free_root,0
+	  jne openx03			;no - is olist full?
+openx02:
+	    mov ah,11
+	    jmp set_aret		; yes - error
+openx03:
+	  call count_opens		;has process exceeded
+	  jb openx035			; open file maximum?
+openx034:
+	    mov ah,10
+	    jmp set_aret		; yes - error
+openx035:
+	  call create_olist_item	;create new olist element
+	  jmps openx08
+openx04:
+	cmp word ptr 8[bx],0ffffh	;if file has extended lock,
+	jne openx041			; allow change in open mode
+	  call compare_pds
+	  jne openx06
+	  call create_olist_item1
+	  jmps openx08
+openx041:
+	test attributes,80h		;is open mode locked?
+	jz openx042			;no
+	  test byte ptr 5[bx],80h	;does ll.item indicate f1' env?
+	  jz openx042			;no
+	    mov xfcb_read_only,80h	;treat as write password error
+	    mov attributes,20h		;change open mode to read/only
+	    mov olap_type,80h		;set locked overlap switch
+openx042:
+	mov al,attributes! or al,2[bx]
+	cmp al,2[bx]! jnz openx06	;do file attributes match?
+	  and al,80h! jnz openx07	; yes - is open mode locked?
+	  mov bx,prv_pos		; no
+	  mov cur_pos,bx		;has this file been
+	  mov ch,5			; opened by this process?
+	  call searchn_list! jnz openx01
+openx05:
+	  inc word ptr 8[bx]		; yes - increment open file count
+	  jmps openx08
+openx06:
+;	error - file opened by another process in
+;		incompatible mode
+
+	mov ah,5
+	jmp set_aret
+
+openx07:	;does this olist item belong to this process?
+	call compare_pds
+	jnz openx06		; no - error
+	jmps openx05		; yes
+openx08:	;open successful was file opened in unlocked mode?
+	test attributes,40h
+	jz openx09		; no
+
+;
+;	**3.1M**	Record locking patch
+;
+	mov	bx,cur_pos	; Has file been opened before
+	cmp	word ptr 8[bx],0
+	jne	ma1		;yes
+	mov	di,free_root	; We need 2 lock list items for this
+	or	di,di		; is item available ?
+	jnz	$+5		; if nz then OK
+	jmp	openx02		; error branch for full lock list
+	mov	si,[di]		; next link
+	or	si,si		; is something there
+	jnz	$+5		; if nz then OK
+	jmp	openx02		; only one item available
+	mov	ax,[si]		; next link, from second item
+	mov	free_root,ax	; new free_root
+;
+;	set item_1 = .item_2(2) | .olist(20) | chdblk(2) | curdsk(1) | name(3)
+;	di = .item_1
+;
+	mov	2[di],bx	; .olist = cur_pos
+;	mov	ax,chdblk
+;	mov	4[di],ax	;not filled in for CP/M only BDOS
+	mov	al,curdsk
+	mov	6[di],al
+	push	si		; .item_2
+	mov	ax,name_root	; old name_root
+	mov	name_root,di	;new name_root = .item_1
+	mov	cx,3
+	lea	di,7[di]	;
+	mov	si,offset info_fcb+1
+	rep	movsb		;first 3 chars of name
+;
+;	set item_2 = .next_item_1(2) | name + 3(8)
+;
+	pop	di		;recover .item_2
+	stosw			;next item is old name_root
+	mov	cx,4		;4 words = 8 chars
+	mov	si,offset info_fcb+4
+	rep	movsw
+ma1:
+;
+;	**3.1M**	End of Record locking patch
+;
+	  mov ax,cur_pos	;return .olist_item in ranrec field of fcb
+	  mov word ptr info_fcb+ranrec,ax
+	  mov parlg,35		;copy 35 bytes back to user fcb
+openx09:
+	test attributes,20h	;is open mode read/only?
+	jz openx09b		;no
+	  test olap_type,80h 	;f1' locked overlap case?
+	  jz openx09b		;no
+	    mov ax,offset open_root	;set f1' env bit in all
+	    mov cur_pos,ax		;lock items for file
+openx09a:
+	    mov ch,3
+	    call searchn_list! jnz openx09b
+	      or byte ptr 5[bx],80h	;set f1' env bit
+	      jmp openx09a
+openx09b:
+	mov comp_fcb_cks,true
+	test make_flag,true
+	jnz ret34
+endif
+if BCPM
+	mov comp_fcb_cks,true
+endif
+
+	MOV CL,40H			;is access stamping requested
+openx2:					; on drive
+	CALL QSTAMP
+	JNZ RET34			; no - stamping requested
+	JMP STAMP1
+
+func16:		;close file
+;======
+
+if BMPM
+	call get_atts			;al = interface attributes
+	mov bx,offset close00		;check_fcb1 goes to close00 if
+	push bx				;a chksum error is detected
+	mov check_fcb_ret,true
+	call check_fcb1
+	pop bx				;chksum ok
+close000:
+
+if PCMODE
+	cmp media_format,0		;is media CP/M format
+	je $+5				;yes
+	jmp closef			;no - PC format
+endif
+
+	mov byte ptr sdcnt+1,0ffh	;initializes sdcnt
+	mov al,info_fcb+modnum		;perform partial close if
+	and al,80h			;fcb(modnum) & 80h = 80h
+	jnz close01
+	  call close			;perform full close
+	  jmps close02
+close00:
+
+;	if comp att f3' = 0 then report close checksum error
+;	otherwise allow close to proceed by jumping to close000
+
+	  call get_cmp_mode
+	  and al,20h
+	  jnz close000
+
+	  mov ah,6			;checksum error
+	  jmp set_aret
+close01:
+	mov dont_close,true		;perform close but don't update
+	call close1			;directory fcb
+close02:
+
+endif
+if BCPM
+	call set_lsn
+	call chek_fcb			;sets fcb to user 0 if high_ext = 060h
+	call close			;close file
+endif
+
+	cmp lret,0ffh
+	jne $+3
+ret34:	  ret				;error on close
+	call flush			;flush blocking/deblocking buffers
+
+close021:				;entered from PC/BDOS closef
+
+if BMPM
+	test attributes,80h		;is this a partial close
+	jnz ret34			;yes - return
+	call pack_sdcnt
+	;find olist item for this process and file
+	mov ch,5
+	call search_olist! jnz close03
+	  ;decrement open count
+
+;	default to partial close if comp att f2' = 1
+;	if permanent close, don't delete lock list item
+;	if interface attribute f6' = 1
+
+	  call get_cmp_mode
+	  and al,40h! jnz close03
+	  dec word ptr 8[bx]
+	  cmp byte ptr 9[bx],0ffh
+	  jnz close03
+	    mov byte ptr 8[bx],0ffh
+	    push bx! call reset_checksum_fcb! pop bx
+	    mov file_id,bx
+	    mov al,high_ext		;is file open in locked mode?
+	    or al,al! jnz close025	;no
+	      test byte ptr 5[bx],80h	;is file in F1' compatibility env?
+	      jnz close025		;yes
+	        mov al,attributes	;did process request extended lock?
+	        and al,40h! jnz close03 ;yes
+close025:
+	    call delete_item		;permanently close file
+	    test high_ext,80h
+	    jz close03			;if unlocked file,
+	      mov bx,file_id		; remove file's locktbl entries
+	      call remove_locks
+close03:
+
+endif
+
+	RET
+
+func17:		;search for first occurrence of a file
+;======
+	mov ax,parametersegment		;save user segment & fcb offset
+	mov searchabase,ax
+	mov ax,info
+	mov searchaofst,ax
+
+	xor al,al
+csearch:
+	pushf				;z flag = 1 for search, 0 for searchn
+	cmp info_fcb,'?'		;does fcb(0) = '?'
+	jne csearch1			;no
+	  call curselect		;current selected disk is searched
+	  call noselect0
+	  xor cl,cl			;return first or next fcb
+	  jmps csearch3			;all fcbs match
+csearch1:
+	call reselectx			;fcb(0) may specify drive
+	mov cl,extnum
+	mov bx,offset info_fcb+extnum	;does fcb(ext) = '?'
+	cmp b[bx],'?'! je csearch3	;yes
+	  call clr_ext			;clear high 3 bits of fcb(ext)
+	  call clrmodnum		;fcb(modnum) = 0
+	  mov cl,namlen
+csearch3:
+	or rd_dir_flag,0fh		;force access of directory buffer
+
+if PCMODE
+	cmp media_format,0		;is media CP/M format
+	je $+5				;yes
+	jmp pcsearch			;no - PC format
+endif
+
+	popf
+	jnz csearch5
+	  call search
+	  jmps dir_to_user
+csearch5:
+	mov cl,searchl
+	call searchi
+	call searchn
+	;jmps dir_to_user
+
+dir_to_user:
+;-----------
+;	copy the directory entry to the user buffer
+;	after call to search or searchn by user code
+
+	cmp lret,0ffh
+	je ret35
+	mov ax,dcnt
+	and al,dskmsk
+	mov lret,al
+
+	mov dx,buffa			;source is directory buffer
+	mov bx,dma_ofst			;destination is user dma addr.
+	mov cl,recsiz			;copy entire record
+	push es				;move to user segment
+	mov es,dma_seg
+	call move
+	pop es
+ret35:	ret
+
+
+func18:		;search for next occurrence of a file name
+;======
+	mov ax,searchabase		;2.1 fix - search next without
+	or ax,searchaofst		; search first crashes the system
+	jz ret35
+
+	mov ax,searchabase		;set search parameters
+	mov parametersegment,ax
+	mov ax,searchaofst
+	mov info,ax
+	call parsave33
+	mov searcha,offset info_fcb
+	or al,1
+	jmp csearch
+	;ret
+
+func19:		;delete a file
+;======
+	call copy_dma_in_8
+
+if PCMODE
+	cmp media_format,0		;is media CP/M format
+	je $+5				;yes
+	jmp deletef			;no - PC format
+endif
+
+	jmp delet
+	;ret
+
+func20:		;read a file
+;======
+
+if BMPM					;if comp att f4' = 1 then
+	call cond_check_fcb		; don't call check_fcb
+endif
+if BCPM
+	call check_fcb
+endif
+
+if PCMODE
+	cmp media_format,0		;is media CP/M format
+	je $+7				;yes
+	mov cl,1			
+	jmp bdosrw			;no - PC format
+endif
+
+	jmp diskread
+	;ret
+
+func21:		;write a file
+;======
+
+if BMPM					;if comp att f4' = 1 then
+	call cond_check_fcb		; don't call check_fcb
+endif
+if BCPM
+	call check_fcb
+endif
+
+if PCMODE
+	cmp media_format,0		;is media CP/M format
+	je $+7				;yes
+	mov cl,0			
+	jmp bdosrw			;no - PC format
+endif
+
+	jmp diskwrite
+	;ret
+
+func22:		;make a file
+;======
+	mov cl,9
+	call copy_dma_in
+	call clr_ext			;clear high 3 bits of fcb(ext)
+	call clrmodnum
+	call reselectx
+
+if BMPM
+	call reset_checksum_fcb
+endif
+
+	mov dl,1			;check fcb for '?', '[', and ']'
+	call check_wild0		;verify no wild chars exist in fcb
+	mov xdcnt,0ffffh		;init xdcnt for open,make
+
+if BMPM
+	mov byte ptr sdcnt+1,0ffh
+endif
+
+if PCMODE
+	cmp media_format,0		;is media CP/M format
+	je $+5				;yes
+	jmp makef			;no - PC format
+endif
+
+	call get_atts			;get and clear interface atts
+
+	call open			;attempt to open fcb
+
+if BMPM
+	call reset_checksum_fcb		;invalidate fcb chksum in case file
+endif					;already exists
+
+	call endofdir			;does file exist?
+	jz make0a
+	  call get_dir_ext
+	  cmp al,[bx]! jc make0a
+	    mov ah,8			; yes - extended error file exists
+	    jmp set_aret		;set error return code
+make0a:
+	pushf
+
+	call make_test
+
+	call qdirfcb1			;is fcb 1st fcb for file?
+	jz makex04			; yes
+	call get_dir_mode		;does dir lbl require passwords?
+	and al,80h
+	jz makex04			; no
+	call get_xfcb			;does xfcb exist with mode 1 or 2
+	and al,0c0h			;password?
+	jz makex04			; no
+	call chk_xfcb_password1		;check password
+	jz makex04
+	call chk_pw_error		;verify password error
+	test pw_mode,0c0h
+	jz makex04
+	  jmp pw_error
+makex04:
+	popf
+	jc $+5
+	  call make			;make fcb
+
+if BMPM
+	call reset_checksum_fcb		;invalidate fcb chksum in case
+endif					;make fails
+
+	call endofdir			;did make fail?
+	jnz $+3				;no
+ret36:	  ret				;yes - no room in directory
+
+if BCPM
+	call set_lsn
+endif
+
+	call get_dir_mode		;get dir lbl data byte
+	TEST AL,80H			;ARE PASSWORDS ACTIVATED?
+	JZ MAKE3A			;NO
+	TEST ATTRIBUTES,40H		;HAS USER SUPPLIED A PASSWORD?
+	JZ MAKE3A			;NO
+	CALL QDIRFCB1			;IS FCB IN 1ST DIR FCB?
+	JNZ MAKE3A			;NO
+	  CALL XDCNT_EQ_DCNT
+	  CALL GET_XFCB			;DOES XFCB EXIST FOR FILE?
+	  JNZ MAKE00			;YES
+	    mov make_xfcb,true		;attempt to make xfcb
+	    call make
+	    jnz make00			;make succeeded
+	    call search_name		;delete the fcb that was created
+	    CALL DELETE10		;above
+	    jmp lret_eq_ff		;return no room in dir error
+make00:
+	  call init_xfcb		;initialize xfcb
+	  mov si,offset common_dma	;pick up password mode from 9th
+	  add si,8			;byte of dma
+	  lods al
+	  and al,0e0h			;has password mode been specified?
+	  jnz make2			;yes
+	    mov al,80h			;default to read mode
+make2:
+	  MOV pw_mode,AL		;SAVE PASSWORD MODE
+	  push ax
+	  call get_xfcb1		;bx = .dirbuff xfcb(ext)
+	  pop ax
+	  mov [bx],al			;xfcb(ext) = password mode
+	  mov si,offset common_dma
+	  call set_pw			;xfcb(s1) = password sum
+	  CALL SDL3			;FIX HASH AND UPDATE DIRECTORY
+	  CALL RESTORE_DIR_FCB		;RETURN TO FCB THAT WAS MADE ABOVE
+	  JZ RET36			;THIS ERROR SHOULD NOT OCCUR
+	  call get_dtba8		;GET SFCB ADDR
+	  OR AL,AL
+	  JNZ MAKE3A			;SFCB DOESNT EXIST
+	    MOV AL,pw_mode
+	    MOV [BX],AL			;STORE PASSWORD MODE IN SFCB
+	    CALL wrdir			;UPDATE SFCB
+MAKE3A:
+	MOV CL,050h
+	call openx2			;place create or access stamp in SFCB
+	mov cl,20h			;is update stamp requested
+	call qstamp			; on drive
+	jnz make3b			; no
+	  call stamp2			;set update stamp in sfcb
+	  or info_fcb+modnum,40h	;set file write flag, update stamp made
+make3b:
+
+if BMPM
+	mov al,make_flag		;set attributes to open attributes
+	mov attributes,al
+	and al,40h
+	shl al,1
+	mov high_ext,al			;high_ext = shl(attributes,1)
+
+	cmp byte ptr sdcnt+1,0ffh
+	jne makexx02
+	  mov ax,dcnt
+	  mov sdcnt,ax
+	  call pack_sdcnt
+	  jmp openx03
+makexx02:
+	call fix_olist_item
+	jmp openx1a
+endif
+
+if BCPM
+	ret
+endif
+
+make_test:
+
+if BMPM
+	mov al,attributes
+	and al,80h
+	shr al,1! jnz makex00
+	  mov al,80h
+
+pc_make_test:
+makex00:
+
+;	set the open mode to r/o if in default mode and
+;	attribute f1' is set.
+
+	mov ch,al
+	rol al,1! jnc makex001
+	  call get_cmp_mode
+	  rol al,1! jnc makex001
+	    mov ch,20h
+makex001:
+	mov make_flag,ch
+
+	cmp byte ptr sdcnt+1,0ffh
+	jz makex01
+	  call pack_sdcnt
+	  mov ch,3
+	  call search_olist! jz makex02
+makex01:
+	cmp free_root,0
+	jne makex03
+	  jmp openx02
+
+makex02:
+	mov al,make_flag
+	and al,2[bx]
+	jnz $+5
+makex025:
+	  jmp openx06
+	call compare_pds! jz makex03
+	  test make_flag,80h
+	  jnz makex025
+makex03:
+
+endif
+	ret
+
+func23:		;rename a file
+;======
+	call copy_dma_in_8
+	;jmp rename
+
+rename:
+;------
+;	rename the file described by the first half of
+;	the currently addressed file control block. the
+;	new name is contained in the last half of the
+;	currently addressed file conrol block. the file
+;	name and type are changed, but the reel number
+;	is ignored.  the user number is identical.
+
+if BMPM
+	call get_atts
+endif
+
+	call check_wild			;check for ?s in 1st filename
+
+if PCMODE
+	cmp media_format,0		;is media CP/M format
+	je $+5				;yes
+	jmp renamef			;no - PC format
+endif
+
+	call chk_password		;check password
+	jz $+5
+	  call chk_pw_error
+	call init_xfcb_search
+
+	call copy_user_no		;fcb(16) = fcb(0)
+	mov searcha,bx
+	mov dl,1
+	call chk_wild0			;check 2nd filename for '?','[' and ']'
+	mov ah,9			;extended error ? in filename
+	jz renam_err
+	mov cl,extnum			;check to see if new filename
+	call searchi1			;already exist on drive
+	call search1
+	jz renam1
+	  mov ah,8			;error - file exists
+renam_err:
+	  mov parlg,0			;dont copy fcb back to user
+	  add info,dskmap		;info -> fcb(16) for error message
+	  jmp set_aret			;set error return code
+renam1:
+	call does_xfcb_exist		;delete xfcb if present
+	jz $+5
+	  call delete11
+	call copy_user_no		;fcb(16) = fcb(0) again
+	call init_xfcb_search
+					;search up to the extent field
+	call search_ext
+	jnz $+3
+	  ret
+	call ckrodir			;check for read/only file
+
+if BMPM
+	call chk_olist
+endif
+
+renam0:
+	mov cl,dskmap			;not end of directory,
+	mov dl,extnum			;rename next element
+	call copy_dir
+	CALL FIX_HASH
+
+					;element renamed, move to next
+	call searchn
+	jnz renam0
+	call does_xfcb_exist		;rename xfcb if present
+	jnz $+5
+	  jmp cpydirloc
+	call copy_user_no		;xfcb(16) = xfcb(0)
+	jmps renam0
+
+func27:		;return the allocation vector address
+;======
+	call curselect
+	mov returnseg,ds
+	mov bx,alloca
+	jmps sthlret
+	;ret
+
+func28:		;write protect current disk
+;======
+
+if BMPM
+	mov set_ro_flag,1
+	mov cl,seldsk
+	mov bx,1
+	shl bx,cl			;form drive vector from seldsk
+	call intrnl_disk_reset		;verify no other process has files open
+endif
+
+	mov bx,offset rodsk		;set selected disk to read only
+	mov cl,seldsk
+	call set_cdisk1			;sets bit to 1
+					;high water mark in directory
+	mov dx,dirmax			;goes to max
+	inc dx
+	mov bx,cdrmaxa			;bx = .cdrmax
+	mov [bx],dx			;cdrmax = dirmax
+	ret
+
+func30:		;set file indicators
+;======
+	call copy_dma_in_8
+	call check_wild
+	call reselectx
+
+if PCMODE
+	cmp media_format,0		;is media CP/M format
+	je $+5				;yes
+	jmp setattsf			;no - PC format
+endif
+
+	call chk_password
+	jz $+5
+	  call chk_pw_error
+
+;	set file indicators for current fcb
+
+	call get_atts
+	call search_ext			;through file type
+	jz ret37
+
+if BMPM
+	call chk_olist
+endif
+
+indic0:
+	mov cl,0			;not end of directory,
+	mov dl,extnum			;continue to change
+	call copy_dir2			;copy name
+	call move			;BX -> directory fcb(0)
+	TEST ATTRIBUTES,40H		;IS ATT F6' SET?
+	JZ INDIC1			;NO
+	  mov al,info_fcb+nxtrec	;DIR FCB(S1) = FCB(CR)
+	  mov chksum[bx],al
+INDIC1:
+	call wrdir
+	call searchn
+	jnz indic0
+	jmp cpydirloc			;lret=dirloc
+	;ret
+
+func31:		;return address of disk parameter block
+;======
+	call curselect
+	mov returnseg,ds
+	mov bx,dpbaddr
+sthlret:
+	mov aret,bx
+ret37:	ret
+
+func33:		;random disk read operation
+;======
+
+if BMPM					;if comp att f4' = 1 then
+	call cond_check_fcb		; don't call check_fcb
+endif
+if BCPM
+	call check_fcb
+endif
+
+if PCMODE
+	cmp media_format,0		;is media CP/M format
+	je $+7				;yes
+	mov cl,3
+	jmp bdosrw			;no - PC format
+endif
+
+	mov cl,true			;marked as read operation
+	call rseek
+	jnz ret37
+	jmp diskread			;if seek successful
+
+func34:		;random disk write operation
+;======
+
+if BMPM					;if comp att f4' = 1 then
+	call cond_check_fcb		; don't call check_fcb
+endif
+if BCPM
+	call check_fcb
+endif
+
+if PCMODE
+	cmp media_format,0		;is media CP/M format
+	je $+7				;yes
+	mov cl,2
+	jmp bdosrw			;no - PC format
+endif
+
+	mov cl,false			;marked as write operation
+	call rseek
+	jnz ret37
+	jmp diskwrite			;if seek successful
+
+func35:		;return file size (0-65536)
+;======
+;	compute logical file size for current fcb
+
+if PCMODE
+	cmp media_format,0		;is media CP/M format
+	je $+5				;yes
+	jmp compfs			;no - PC format
+endif
+
+	mov bx,offset info_fcb+ranrec	;zero receiving ranrec field
+	xor ax,ax
+	mov [bx],ax
+	mov 2[bx],al
+	call search_ext
+	jz setsize
+getsize:
+	  call get_dptra		;current fcb addressed by dptr
+	  mov dx,reccnt			;ready for compute size
+	  call compute_rr
+					;al=0000 0?mm,
+					;cx = mmmm eeee errr rrrr
+					;compare with memory, larger?
+	  call compare_rr
+	  jb getnextsize		;for another try
+					;fcb is less or equal,
+					;fill from directory
+	    mov 2[bx],al
+	    mov [bx],cx
+getnextsize:
+	  call searchn
+	  mov lret,0
+	  jnz getsize
+setsize:
+	ret
+
+func36:		;set random record
+;======
+;	set random record from the current fcb
+
+	mov bx,offset info_fcb
+	mov dx,nxtrec			;ready params for computesize
+	call compute_rr			;dx=.info_fcb, al=cy,
+					;cx=mmmm eeee errr rrrr
+	mov ranrec[bx],cx		;store in ranrec field
+	mov ranrec+2[bx],al
+	ret
+
+func37:		;reset drive
+;======
+
+if BMPM
+	call diskreset
+reset_37:
+	mov ax,info
+endif
+
+reset_37a:
+
+if BCPM
+	call chk_reset			;check for drives to not be reset
+	push ax
+	and ax,info			;Z flag reset if drives bits conflict
+	jz reset6
+	  and ax,rlog			;set media flag for removable drives
+	  mov dl,16			; that are logged in with a conflict
+;	  mov dh,curdsk			;save current disk
+reset2:
+	  dec dl
+	  shl ax,1! jnc reset5
+	    push ax! push dx
+	    call tmp_select		;select drive in DL
+	    mov bx,drvlbla
+	    mov byte ptr 1[bx],0ffh	;set media flag for selected drive
+	    mov media_flag,0ffh		;set global media/door open flag
+	    pop dx! pop ax
+reset5:
+	  or ax,ax! jnz reset2
+
+;	  mov dl,dh
+;	  call tmp_select		;restore current disk
+reset6:
+	pop ax
+	not ax! and ax,info		;AX = drives to be reset (no conflict)
+endif
+
+reset_37x:
+	not ax
+	and dlog,ax
+	and rodsk,ax
+	and rlog,ax
+;	mov cl,curdsk			;if curdsk reset, set to 0ffh
+;	mov dx,dlog
+;	call test_vector1
+;	jnz ret38
+	  mov curdsk,0ffh
+ret38:	ret
+
+if BMPM
+
+func38:		;access drive
+;======
+	mov word ptr packed_dcnt,0ffffh
+	mov byte ptr packed_dcnt+2,0
+	xor al,al
+acc_drv0:
+	shl dx,1! adc al,0
+	or dx,dx! jnz acc_drv0
+	or al,al! jz ret38		;al = # of open items to create
+	mov dl,al! dec al
+	push ax
+	call acc_drv02
+	pop ax
+	jmp openx02
+
+acc_drv02:
+;---------
+	call check_free0! pop bx	;discard return address
+	call count_opens! pop bx	;restore # of open items requested
+	add bl,open_cnt! jb acc_drv3
+	sub bl,open_max! jae acc_drv3
+	  mov bx,info
+	  mov al,curdsk! push ax
+	  mov al,16
+acc_drv1:
+	  dec al
+	  shl bx,1! jnc acc_drv15
+	    push ax! push bx
+	    mov curdsk,al
+	    call create_olist_item
+	    pop bx! pop ax
+acc_drv15:
+	  or al,al! jnz acc_drv1
+	  pop ax! mov curdsk,al
+	  ret
+acc_drv3:
+	jmp openx034
+
+func39:		;free drive
+;======
+	test open_root,0ffffh
+	JZ FREE_DRV35
+	  mov incr_pdcnt,false
+	  mov bx,info
+	  cmp bx,0ffffh! jnz free_drv1
+	    mov free_mode,0
+	    call free_files
+	    jmps free_drv3
+free_drv1:
+	  mov free_mode,1
+	  mov al,curdsk! push ax
+	  mov al,16
+free_drv2:
+	  dec al
+	  shl bx,1! jnc free_drv25
+	    push ax! push bx
+	    mov curdsk,al
+	    call free_files
+	    pop bx! pop ax
+free_drv25:
+	  or al,al! jnz free_drv2
+	  pop ax! mov curdsk,al
+free_drv3:
+	  cmp incr_pdcnt,true
+	  JNZ FREE_DRV35
+	    CALL INC_PDCNT
+FREE_DRV35:
+	jmps FUNC48
+endif
+if BCPM
+
+func38	equ	funcret		;access drive
+;=====
+func39	equ	funcret		;free drive
+;=====
+
+endif
+
+func40:		;write random with zero fill
+;======
+;	random disk write with zero fill of unallocated block
+
+if BMPM					;if comp att f4' = 1 then
+	call cond_check_fcb		; don't call check_fcb
+endif
+if BCPM
+	call check_fcb
+endif
+
+if PCMODE
+	cmp media_format,0		;is media CP/M format
+	je $+7				;yes
+	mov cl,2
+	jmp bdosrw			;no - PC format
+endif
+
+	mov cl,false
+	call rseek	
+	jz func40a
+	  ret
+func40a:
+	jmp diskwrite
+	;ret
+
+if BMPM
+
+func42:		;lock record
+;======
+	mov lock_unlock,true
+	jmp lock
+
+func43:		;unlock record
+;======
+	mov lock_unlock,false
+	jmp lock
+
+endif
+if BCPM
+
+func42	equ	funcret		;lock record
+;=====
+func43	equ	funcret		;unlock record
+;=====
+
+endif
+
+func46:		;get disk free space
+;======
+	call tmp_select			;perform temporary select of
+					;specified drive
+if PCMODE
+	cmp media_format,0		;is media CP/M format
+	je $+5				;yes
+	jmp getspace			;no - PC format
+endif
+
+	mov si,alloca			;si = allocation vector addr
+	call get_nalbs			;bx = # of allocation vector bytes
+	xor cx,cx			;cx = true bit counter
+
+	;count # of true bits in allocation vector
+
+gsp1:	lods al				;increments si
+gsp2:	or al,al
+	jz gsp4
+gsp3:	  shr al,1
+	  jnc gsp3
+	  inc cx
+	  jmps gsp2
+gsp4:	dec bx
+	jnz gsp1
+
+;	bx = 0 when allocation vector scanned
+;	compute maxall + 1 - bc
+
+	mov bx,maxall
+	inc bx
+	sub bx,cx			;bx = # of available blocks on drive
+	mov cl,blkshf			;convert # of blocks to # of records
+	xor ch,ch
+	mov al,bh
+	xor ah,ah
+	shl bx,cl
+	shl ax,cl			;ah,bh,bl = # of available records
+	mov di,dma_ofst			;store # of records in 1st 3 bytes
+	push ds				;of user's dma address
+	mov ds,dma_seg
+	mov [di],bx
+	mov 2[di],ah
+	pop ds
+	ret
+
+func48:		;flush buffers
+;======
+	CMP fx_intrn,fxi39		;DONT MAKE BIOS FLUSH CALL
+	JE flush0			;IF func# <> free drive
+	  mov al,io_flush		; flush additional
+	  CALL xiosif			; blocking/deblocking buffers
+	  CALL DIOCOMP0
+flush0:
+	MOV BX,DLOG			;DO I = 15 TO 0 BY -1
+	MOV dl,16
+FLUSH1:
+	DEC dl
+	shl bx,1			;IS DRIVE I LOGGED IN?
+	jc flush11			; yes
+flush10:
+	  OR BX,BX			;ARE THERE ANY ADDITIONAL LOGGED-IN
+	  JNZ FLUSH1			;DRIVES? - YES
+	  RET
+flush11:
+	PUSH BX! push dx
+	call tmp_select			;select drive in DL
+	cmp fx_intrn,fxi98		;does func# = reset allocation
+	jne flush1b			; no
+
+if BMPM
+	  mov ch,1
+	  call search_olist		;any open files on drive
+	  jz flush1a			; yes - dont copy ALV
+endif
+if BCPM
+	  call chk_drv			;chk drv for active files being written
+	  jz flush1a			; yes - dont copy ALV
+endif
+
+	    call copy_alv		;Z reset - copy 2nd ALV to 1st
+	    jmps flush4
+flush1a:
+	  mov lret,0ffh
+	  jmps flush4
+flush1b:
+	CMP fx_intrn,fxi39		;DONT FLUSH IF func# = free drive
+	JE FLUSH3			;JUST DISCARD BCB'S
+	  CMP fx_intrn,fxi143		;IS func# = TERMINATE PROCESS?
+	  JE FLUSH2			; YES
+	    CALL FLUSHX			;FLUSH DISK I
+	    CMP LINFO,0FFH		;WAS FLUSH CALLED WITH DL = 0FFH?
+	    JNE FLUSH4			;NO
+	    JMPS FLUSH35		;YES - DISCARD PROCESS'S DATA BUFFERS
+flush2:
+
+if BMPM
+	  mov ch,1
+	  call search_olist		;any open files on drive
+	  jz flush3			; yes - dont copy ALV
+endif
+if BCPM
+	  push ds! mov ds,rlr
+	  mov ds:p_alc_vec,0		;zero current processes alloc vector
+	  pop ds
+	  call chk_drv			;chk drv for active files being written
+	  jz flush3			; yes - dont copy ALV
+endif
+	    call copy_alv		;Z reset - copy 2nd ALV to 1st
+FLUSH3:
+	MOV BX,DIR_BCBA			;DEACTIVATE BCB'S IF func# = free drv
+	CALL DEACTIVATE			;OR TERMINATE PROCESS
+FLUSH35:
+	MOV BX,DAT_BCBA
+	CALL DEACTIVATE			;DEACTIVATE DISCARDS IF func# = 48,39
+FLUSH4:
+	pop dx! POP BX
+	jmp flush10
+
+FLUSH:
+;-----
+	mov al,io_flush			;flush additional
+	CALL xiosif			; blocking/deblocking buffers
+	CALL DIOCOMP0
+FLUSHX:
+	TEST PHYMSK,0FFH		;IS PHYSICAL RECORD > 128?
+	JNZ $+3
+ret48:	  RET				;NO - RETURN
+	MOV AH,4
+	JMP DEBLOCK_DTA			;FLUSH DATA BUFFERS
+
+if BMPM
+
+func49	equ	funcret		;not implemented
+;=====
+func50	equ	funcret		;direct bios call
+;=====
+
+endif
+
+func98	equ	flush0		;reset allocation vector
+;=====
+
+save_first_dcnt:
+;---------------
+	cmp byte ptr xdcnt+1,0fdh
+	jne ret48
+	jmp save_dcnt_pos
+
+func99:		;truncate file
+;======
+	call copy_dma_in_8
+	call reselectx
+	call check_wild
+
+if PCMODE
+	cmp media_format,0		;is media CP/M format
+	je $+5				;yes
+	jmp truncatef			;no - PC format
+endif
+
+	call chk_password
+	jz $+5
+	  call chk_pw_error
+	call get_atts
+	mov cl,true
+	call rseek
+	jz $+5
+lret_jmp:
+	  jmp lret_eq_ff
+	call wrdir			;needed to check for write
+	call get_dptra
+	mov dx,reccnt
+	call compute_rr			;CX,AL = fcb size
+	call compare_rr			;is dir fcb size <= ranrec
+	jbe lret_jmp			; yes
+	call search_ext			;compute dir fcb size
+	jz lret_jmp
+	call ckrodir			;may be r/o file
+if BMPM
+	call chk_olist
+endif
+
+	mov byte ptr xdcnt+1,0fdh
+trunc1:
+	call get_dptra			;compare module and extent
+	add bx,extnum
+	mov si,offset info_fcb+extnum
+	mov al,2[si]			;AL = info_fcb(mod)
+	and al,3fh
+	cmp 2[bx],al			;is dirfcb(mod) ~= infofcb(mod)?
+	jne trunc12
+	  mov al,[bx]			;AL = dirfcb(ext)
+	  mov cl,[si]			;CL = infofcb(ext)
+	  call compext
+	  jz trunc12			;dirfcb(ext) = infofcb(ext)
+	    mov al,[bx]
+	    cmp al,cl
+trunc12:
+	jnb trunc13			;is dirfcb < infofcb?
+	  call save_first_dcnt
+	  jmps trunc2
+trunc13:
+	pushf				; no
+	mov cl,0			;remove dirfcb blocks
+	call scndmab			; from allocation vector
+	popf
+	jz trunc3			;is dirfcb = fcb?
+	call get_dptra			; no
+	mov b[bx],empty			;delete dirfcb
+	CALL WRDIR
+	call fix_hash
+trunc2:
+	call searchn
+	jnz trunc1
+	call update_stamp
+if BMPM
+	mov ch,5
+	call search_olist
+	jnz trunc25
+	  mov ax,xdcnt
+	  mov 3[bx],ax			;reset dcnt in olist item
+trunc25:
+
+endif
+	jmp cpydirloc			;return - end of truncate
+
+trunc3:
+	call save_first_dcnt
+	call getfcb
+	call dmposition			;set up to clear dskmap
+	inc al
+	test single,0ffh
+	jnz zero_dm1
+	  shl al,1
+zero_dm1:
+	mov di,offset info_fcb+dskmap
+	xor ah,ah
+	add di,ax
+	mov cl,16
+	sub cl,al
+	mov ch,ah			;CX = count
+	mov al,ah
+	rep stosb			;zero dskmap positions
+	call get_dir_ext
+	cmp al,[bx]			;infofcb(ext) = dirfcb(ext) after
+	mov [bx],al			; blocks removed
+	pushf
+	mov al,info_fcb+nxtrec
+	inc al				;fcb(rc) = fcb(cr) + 1
+	mov si,offset info_fcb+reccnt
+	mov [si],al
+	popf
+	jz $+5				;if dirfcb(ext) < infofcb(ext)
+	  call set_rc3			; rc = 0 or 128
+	test dminx,0ffh
+	jnz $+5				;if no blocks remain in fcb
+	  call set_rc3			; rc = 0
+	call get_dptra
+	add bx,archiv
+	and b[bx],7fh
+	mov al,info_fcb+extnum		;dirfcb(ext) = infofcb(ext)
+	mov 1[bx],al
+	add bx,4
+	mov si,offset info_fcb+reccnt
+	mov di,bx
+	mov cx,17			;dirfcb(rc) and dskmap =
+	rep movsb			; infofcb(rc) and dskmap
+	mov cl,1			;restore non-erased block
+	call scndmab			; indexes in allocation vector
+	CALL WRDIR
+	JMP TRUNC2
+
+func100:	;set directory label
+;=======
+;	dx -> .fcb
+;	drive location
+;	name & type field's user's discretion
+;	extent field definition
+;	bit 7 (80h): enable passwords on drive
+;	bit 6 (40h): enable file access stamping
+;	bit 5 (20h): enable file update stamping
+;	BIT 4 (10H): ENABLE FILE CREATE STAMPING
+;	bit 0 (01h): assign password to dir lbl
+
+	mov cl,16
+	call copy_dma_in
+	call reselectx
+
+if PCMODE
+	cmp media_format,0		;is media CP/M format
+	je $+5				;yes
+	jmp lret_eq_ff			;no - PC format
+endif
+
+	MOV info_fcb,21H		;SEARCH FOR SFCB'S IN DIRECTORY
+	MOV CL,1			;SFCB(0) = 21
+	CALL SEARCH
+	JNZ SDL0			;SFCB FOUND
+	  mov bx,offset info_fcb+extnum	;NO SFCB'S - DID USER REQUEST
+	  TEST B[BX],070H		;DATE & TIME STAMPS?
+	  JZ SDL0			;NO
+	    JMP LRET_EQ_FF		;YES - ERROR
+SDL0:
+	mov info_fcb,20h		;does dir lbl exist on drive?
+	mov cl,1
+	mov xdcnt,0ffffh		;initialized for make
+	call search
+	jnz sdl1			;yes
+	  mov make_xfcb,0ffh		;no - make one
+	  call make
+	  jnz $+3
+	    ret				;no directory space
+	  call init_xfcb
+	  MOV CX,24
+	  CALL STAMP5			;set LABEL create date and time stamp
+	  call stamp1			;SET SFCB CREATE STAMP
+sdl1:
+	MOV CX,28
+	CALL STAMP5			;set LABEL update date and time stamp
+	call stamp2			;SET SFCB UPDATE STAMP
+	call chk_xfcb_password		;verify password
+	jz $+5				;new dir lbl falls through
+	  jmp pw_error
+	xor cx,cx
+	call init_xfcb0			;update dir lbl name
+	mov si,dx			;copy user's dir lbl data byte
+	lods al				;into dir lbl (ex byte)
+	or al,1				;set dir lbl exists flag
+	mov [bx],al
+	mov di,drvlbla			;update drives dir lbl data byte
+	stos al
+sdl2:
+	dec si				;test for assignment of new
+	lods al				;password to dir lbl or xfcb
+	and al,1
+	jz sdl3
+	  mov si,offset common_dma+8	;assign new password
+	  call set_pw			;set password checksum byte
+sdl3:
+	CALL WRDIR			;WRITE DIR LBL OR XFCB TO DIRECTORY
+	JMP FIX_HASH			;FIX DIRECTORY HASH ENTRY
+
+func101:	;return directory label data
+;=======
+	call tmp_select
+
+if PCMODE
+	cmp media_format,0		;is media CP/M format
+	je $+7				;yes
+	mov al,021h
+	jmp set_lret			;no - PC format
+endif
+
+	call get_dir_mode
+	jmp set_lret
+
+func102:	;read file xfcb
+;=======
+	call reselectx
+	call check_wild
+
+if PCMODE
+	cmp media_format,0		;is media CP/M format
+	je $+5				;yes
+	jmp xfcb			;no - PC format
+endif
+
+	CALL search_1_name		;SEARCH FOR FILE'S 1ST FCB
+	JZ ret39			;SEARCH UNSUCCESSFUL
+	MOV CH,0
+	CALL GET_DTBA			;GET SFCB ADDRESS
+	OR AL,AL
+	JNZ RXFCB2			;NO SFCB
+	  PUSH BX
+	  mov di,offset info_fcb+dskmap
+	  MOV CX,8			;ZERO OUT PASSWORD FIELD IN
+	  REP STOSB			;USER'S FCB
+	  pop si
+	  MOV CL,4
+	  rep movsw			;FCB(STAMPS) = SFCB(STAMPS)
+	  LODS AL
+	  MOV info_fcb+extnum,AL	;FCB(EXT) = SFCB(PASSWORD MODE)
+	  RET
+RXFCB2:
+	call get_xfcb			;does xfcb exist for file?
+	mov al,0ffh
+	jnz $+5
+	  jmp set_lret			;no
+	mov bx,offset info_fcb		;yes - copy xfcb to user's fcb
+	mov cl,nxtrec
+	jmp move
+
+func103:	;write or update file xfcb
+;=======
+	mov cl,16
+	call copy_dma_in
+	call reselectx
+
+if PCMODE
+	cmp media_format,0		;is media CP/M format
+	je $+5				;yes
+	jmp lret_eq_ff			;no - PC format
+endif
+
+	call get_dir_mode		;ARE PASSWORDS ACTIVATED ON DRIVE?
+	AND AL,80H
+	jnz $+5
+	  jmp lret_eq_ff		;no
+	call check_wild
+	mov xdcnt,0ffffh		;initialized for make
+	call search_ext			;does file exist?
+	jnz $+3
+ret39:	  ret				;no
+
+if BMPM
+	call tst_olist
+endif
+
+	call get_xfcb			;does xfcb exist for file?
+	jnz wxfcb1			;yes
+	  mov make_xfcb,al		;make xfcb
+	  call make			;does directory space exist for make?
+	  jz ret39			;no
+	  call init_xfcb		;initialize xfcb
+wxfcb1:
+	call chk_xfcb_password		;check password
+	jz $+5
+	  jmp pw_error
+	mov si,offset info_fcb+extnum
+	test b[bx],0ffh			;is current password mode non-zero
+	jnz wxfcb2			;yes
+	  lods al			;is user specifying a new password?
+	  dec si
+	  and al,1
+	  jnz wxfcb2			;yes
+	    CALL SDL3
+	    jmps WXFCB4
+wxfcb2:
+	lods al				;assign new password mode to xfcb
+	and al,0e0h
+	jnz wxfcb3
+	  mov al,80h
+wxfcb3:
+	mov [bx],al
+	CALL SDL2			;check for new password
+WXFCB4:
+	call get_xfcb1
+	and al,0e0h
+	mov pw_mode,al			;UPDATE SFCB WITH NEW PASSWORD MODE
+	push ax
+	CALL search_1_name
+	pop ax
+	mov info_fcb+extnum,al		;set password mode back in user xfcb
+	JZ ret39
+	CALL GET_DTBA8
+	OR AL,AL
+	JNZ ret39
+	MOV AL,pw_mode
+	MOV [BX],AL
+	JMP wrdir
+
+func106:	;set default password
+;=======
+	mov cl,8
+	call parsave
+	mov parlg,0
+	mov si,offset info_fcb
+	mov bx,si
+	mov di,offset df_password+7
+	mov cx,8
+	jmp set_pw0
+
+func116:		;set file date and time stamp
+;=======
+
+if BMPM					;if comp att f4' = 1 then
+	call cond_check_fcb		; don't call check_fcb
+endif
+if BCPM
+	call check_fcb
+endif
+
+	call copy_dma_in_8
+	call checkwrite
+
+if BMPM
+	cmp high_ext,0 ! je file_dt1	;is file opened in locked mode
+	  mov ah,10			;  no - return error
+	  jmp set_aret
+file_dt1:
+
+endif
+
+if PCMODE
+	cmp media_format,0
+	je $+5
+	jmp setstamp
+endif
+
+	mov ah,info_fcb+extnum
+	mov al,info_fcb+modnum		;save extent and module number
+	push ax
+	call search_1_name		;search for file
+	pop ax
+	mov info_fcb+extnum,ah		;restore extent and module number
+	mov info_fcb+modnum,al
+	jz dt_ret
+	mov cl,50h
+	call qstamp			;is create or access stamp enabled
+	jnz file_dt2			; no
+	  mov ch,0
+	  call get_dtba
+	  or al,al ! jnz file_dt2
+	    mov dx,offset common_dma
+	    call stamp45		;set create or access stamp in sfcb
+file_dt2:
+	mov cl,20h
+	call qstamp			;is update stamp enabled
+	jnz dt_ret			; no
+	mov ch,4
+	call get_dtba
+	or al,al ! jnz dt_ret
+	mov dx,offset common_dma+4
+	call stamp45			;set update stamp in sfcb
+	or info_fcb+modnum,40h		;set file write flag, update stamp made
+dt_ret:
+	ret
+
+funcdio:
+;=======
+;	Entry:	DX = offset of parameter block in user data segment
+
+if PCMODE
+	mov si,dx
+	mov di,offset ddio_op
+	push ds ! mov ds,parametersegment
+	mov cx,ddio_pblen
+	rep movsb
+	pop ds
+
+	mov dl,ddio_drive
+	call tmp_select
+
+	call flushx			;flush drives data buffers
+
+	mov ax,ddio_dmaseg
+	mov cur_dma_seg,ax
+	mov ax,ddio_dmaoff
+	mov cur_dma,ax
+
+	mov al,ddio_nsectors
+	mov mult_sec,al			;setup multi sector count
+
+	cmp ddio_op,dio_25_read_op ! jae dio_25or26
+	  xor ah,ah
+	  mov al,ddio_sector
+	  mov sector,ax
+	  mov ah,ddio_head
+	  mov al,ddio_track
+	  mov track,ax
+	  cmp ddio_op,dio_13_write_op
+	  je dio_13_write
+	    mov al,io_int13_read	;INT 13 read operation
+	    call rwxiosif
+	    mov aret,ax			;save return code
+	    ret
+dio_13_write:
+	  call dio_discard		;discard data and directory buffers
+	  mov al,io_int13_write		;INT 13 write operation
+	  call rwxiosif
+	  mov aret,ax			;save return code
+	  ret
+
+dio_25or26:
+	mov ax,ddio_startrec
+	xor dx,dx
+	div sectpt
+	mov track,ax			;setup track and sector
+	mov sector,dx
+
+	cmp ddio_op,dio_26_write_op
+	je dio_write
+	  mov al,io_read		;disk read operation
+	  call rwxiosif
+	  mov aret,ax			;save return code
+	  ret
+dio_write:
+	call dio_discard		;discard data and directory buffers
+	mov al,io_write			;disk write operation
+	call rwxiosif
+	mov aret,ax			;save return code
+	ret
+
+dio_discard:
+;-----------
+	mov bx,offset dat_bcba
+	call discard			;discard drives data buffers
+	call discard_dir		;discard drives directory buffers
+endif
+	ret
+
+;********** end bdos file system part 4 **********
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          

@@ -1,0 +1,123 @@
+;*****************************************************
+;*
+;*	Concurrent CP/M-86 Supervisor Initialization 
+;*
+;*****************************************************
+
+	cseg
+	org	0
+
+	jmp	init		;system initialization
+	jmp	entry		;intermodule entry pt.
+
+				;next 3 words are set by GENSYS
+sysdat		dw	0	;segment
+supervisor	dw	entry	;offset
+		dw	0	;segment
+
+	org	0ch
+dev_ver		db	6	;development system data version
+				;set in sysdat.dat
+
+		db	'COPYRIGHT (C) 1982,1983,1984'
+		db	' DIGITAL RESEARCH '
+		db	'XXXX-0000-'
+serial		db	'654321'
+
+;====
+init:
+;====
+; system initialization
+; DS set to Sysdat Segment by loader
+
+		;make INIT a process:
+		;set up init stack
+
+	cli ! cld				;Loader enters here
+	mov ax,ds				;with interrupts
+	mov ss,ax ! mov sp,offset (init_tos)	;possibly on
+
+		;initialize init uda
+
+	mov bx,offset initpd
+	mov ax,offset inituda
+	mov cl,4 ! shr ax,cl
+	add ax,sysdat ! mov p_uda[bx],ax
+	mov es,ax
+	mov u_wrkseg,ds
+
+		;we now look like we are in the O.S. as usual:
+		;DS=SYSDAT seg, ES=UDA, U_WRKSEG=PD's DS.
+
+		;  set up mpm entry point
+
+	push ds
+	xor ax,ax ! mov ds,ax
+	mov i_os_ip,offset user_entry
+	mov i_os_cs,cs
+	pop ds
+
+                ;initialize ndp owner to default
+
+        mov ax, 0ffffh       ; ffff = no ndp chip present in system
+        mov owner_8087,ax
+
+		;initialize modules
+
+	mov bx,mod_init
+	push bx ! callf dword ptr rtmmod[bx] ! pop bx		; init RTM
+	push bx ! callf dword ptr memmod[bx] ! pop bx		; init MEM
+	test module_map,bdosmod_bit ! jz nbdo
+	    push bx ! callf dword ptr bdosmod[bx] ! pop bx	; init BDOS
+
+nbdo:	test module_map,ciomod_bit ! jz ncio
+	    push bx ! callf dword ptr ciomod[bx] ! pop bx	; init CIO
+
+ncio:	test module_map,xiosmod_bit ! jz nxio
+	    push ds ! push es
+	    callf dword ptr xiosmod[bx] ! pop es ! pop ds	; init XIOS
+
+nxio:
+	;  reset interrupt vectors after XIOS INIT
+
+	mov ax,ds ! sub bx,bx ! mov ds,bx
+	mov i_os_ip,offset user_entry
+	mov i_os_cs,cs
+	mov ds,ax
+
+		; get Character Dev Info from XIOS
+
+;if mpm
+;	mov ax,io_maxconsole ! call xiosif
+;	mov ncondev,bl ! mov nciodev,bl
+;	mov ax,io_maxlist ! call xiosif
+;	mov nlstdev,bl ! add nciodev,bl
+;	mov bx,offset initpd
+;	mov al,ncondev
+;	mov p_lst[bx],al
+;endif
+		; Init CCB and LCB adr in INIT UDA so
+		; child processes will inherit them
+
+	mov cl,f_conattach ! int osint
+	mov cl,f_lstattach ! int osint
+
+		; Start RSPs
+nrsp:					;loop til done
+	mov ds,sysdat			;reset DS
+	mov cx,rspseg ! jcxz rsp_o	;?all done?
+	    mov es,cx			;ES->RSP
+	    mov ax,es:.rsp_link		;save next RSP
+	    mov rspseg,ax
+	    mov es:.rsp_link,ds		;give Sysdat to RSP
+	    mov si,rsp_pd		;get PD
+	    mov ds,cx			;DS = RSP Data Seg
+	    mov p_mem[si],0
+	    mov cl,f_createproc		;Create RSP Process(s)
+	    mov dx,si ! int osint
+	    jmps nrsp			;Do another...
+rsp_o:
+		; terminate init process
+	mov cl,f_terminate
+	mov dl,0ffh ! int osint
+

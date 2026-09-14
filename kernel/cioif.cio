@@ -1,0 +1,91 @@
+;*****************************************************
+;*
+;*	Concurrent CP/M-86 Character I/O Interface
+;*
+;*****************************************************
+
+	CSEG
+	org	0
+
+	jmp init
+	jmp entry
+
+				;3 variables set by GENSYS
+sysdat		dw	0
+supervisor	equ	(offset $)
+		rw	2
+
+	org	0ch
+dev_ver		db	6	;development system data version
+				;set in sysdat.fmt
+
+		db	'COPYRIGHT (C) 1982,1983,1984'
+		db	' DIGITAL RESEARCH '
+		db	'XXXX-0000-'
+serial		db	'654321'
+
+;====
+init:
+;====
+	retf
+
+;*****************************************************
+;*
+;*	CIO function table
+;*
+;*****************************************************
+
+functab	dw	conin_entry	; 0 - Console Input
+	dw	conout_entry	; 1 - Console Output
+	dw	rconin_entry	; 2 - raw console input
+	dw	rconout_entry	; 3 - raw console output
+	dw	listout_entry	; 4 - list output
+	dw	dirio_entry	; 5 - direct console I/O
+	dw	conwrite_entry	; 6 - print string
+	dw	conread_entry	; 7 - read buffer
+	dw	constat_entry	; 8 - console status
+	dw	conattach_entry	; 9 - attach console
+	dw	condetach_entry	; 10- detach console
+	dw	setdefcon_entry	; 11- set default console
+	dw	conassign_entry	; 12- assign console
+	dw	getdefcon_entry	; 13- get default console
+	dw	conprint_entry	; 14- print string (internal)
+	dw	lstattach_entry	; 15- attach list
+	dw	lstdetach_entry ; 16- detach list
+	dw	setdeflst_entry	; 17- set default list
+	dw	clstattch_entry ; 18- cond list attach
+	dw	cconattch_entry ; 19- cond list detach
+	dw	getdeflst_entry ; 20- get default list
+	dw	notimp		; 21
+	dw	notimp		; 22
+	dw	cioterm		; 23- cleanup for term.
+	dw	ciostat		; 24- check status w/out
+				;	changing raw/cooked flag
+	dw	cmode_entry	; 25- get/set console mode word -
+				;	user func 109
+	dw	delim_entry	; 26- get/set delimiter - user func 110
+	dw	pblock_entry	; 27- print block - user func 111
+	dw	lblock_entry	; 28- list block - user func 112
+
+;=====		=================
+entry:		; CIO entry point
+;=====		=================
+	shl cx,1 ! mov si,cx 
+	call cs:functab[si] ! retf
+
+;====		==============
+osif:		; OS interface
+;====		==============
+	callf cs:dword ptr .supervisor ! ret
+
+;======		================
+xiosif:		; XIOS interface
+;======		================
+	callf dword ptr .xiosmod ! ret
+
+;======
+notimp:
+;======
+	mov bx,0ffffh
+	ret
+

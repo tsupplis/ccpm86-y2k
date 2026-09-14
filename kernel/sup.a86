@@ -1,0 +1,43 @@
+	include cpyright.def
+
+;*****************************************************
+;*
+;*	MP/M or CCP/M Supervisor Module
+;*
+;*****************************************************
+	eject ! include system.def
+	eject ! include modfunc.def
+	eject ! include modtab.def
+	eject ! include xioscb.def
+	eject ! include pd.def
+	eject ! include err.def
+	eject ! include qd.def
+	eject ! include fcb.def
+	eject ! include acb.def
+	eject ! include enttab.def
+	eject ! include mem.def
+	eject ! include mpb.def
+	eject ! include clicb.def
+	eject ! include rsp.def
+	eject ! include pcb.def
+	eject ! include cmdh.def
+	eject ! include char.def
+	eject ! include vccb.def
+        eject ! include uda.def
+	eject ! include init.sup
+	eject ! include supif.sup
+	eject ! include sysfunc.sup
+	eject ! include command.sup
+	eject ! include load.sup
+	eject ! include parse.sup
+	eject ! include rpl.sup
+	eject ! include patch.cod
+	eject ! include basep.fmt
+	eject ! include lstk.fmt
+	eject ! include vec.fmt
+	eject ! include uda.fmt
+	eject ! include sysdat.dat
+	eject ! include data.bdo
+	eject ! include xiosdat.fmt
+	eject ! end
+

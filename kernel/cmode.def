@@ -1,0 +1,10 @@
+;
+;		Bit masks for the console mode word
+;
+cm_ctlc		equ	0001H
+cm_ctls		equ	0002H
+cm_rawo		equ	0004H
+cm_rsx1		equ	0100H
+cm_rsx2		equ	0200H
+
+

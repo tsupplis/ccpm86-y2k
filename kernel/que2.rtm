@@ -1,0 +1,225 @@
+;****************************************************************
+;*								*
+;*	Queue system subroutines: Q System must be owned	*
+;*	before calling any of the following routines		*
+;*								*
+;****************************************************************
+
+queverify:		; check QLR for existence of QD address
+;---------		---------------------------------------
+;	entry:	U_WRKSEG:DX = offset of QPB
+;	exit:	CX = 0 if queue is found
+;		CX = E_NO_QUEUE error code, if not
+;		BX=SI=QD offset
+;		ES,DX preserved
+
+	push es				;save UDA
+	mov es,u_wrkseg
+	mov bx,dx			;ES:BX->QPB
+	mov bx,es:qpb_qaddr[bx]		;get QD from user's QPB
+	pop es				;restore UDA
+	lea si,qlr-q_link
+qv_nxt:
+	mov si,q_link[si]		;SI addresses of valid QDs
+	test si,si ! jz qv_nqf
+	    cmp bx,si ! jne qv_nxt
+		xor cx,cx ! ret		;BX=SI=QD offset, return success
+qv_nqf:
+	mov cx,e_no_queue		;couldn't find the queue
+	ret
+
+getqdaddr:
+;----------
+;	entry:	DX = offset of QD in U_WRKSEG
+;	exit:	DI = offset of QD in SYSDAT
+;
+; If QD address is within SYSDAT use it.
+; Else get a QD from QDUL and set QF_TABLE flag.
+; If Q_NMSGS=0 in QD then return error.
+; If 0 length buffer needed, zero the Q_BUF field.
+; If buffer space is within SYSDAT use it.  Else get buffer
+; from QMAU.  Return the QD address within SYSDAT.
+
+	push dx				;save QD offset
+	mov bx,qdlen
+	call sysdat_chk
+	jcxz g_qul			;CX=0 if not within SYSDAT
+	  mov ax,u_wrkseg		;# of paragraphs to U_WRKSEG
+	  mov bx,ds
+	  sub ax,bx			;from SYSDAT
+	  mov cl,4 ! shl ax,cl		;make into # of bytes
+	  pop di			;DI=QD in U_WRKSEG
+	  add di,ax			;make QD relative to SYSDAT
+	  jmps g_qd
+g_qul:
+	  mov di,qul			;get QD from QUL
+	  test di,di			;DI=unused QD
+	  jnz g_gotqd
+	    pop dx
+	    mov cx,e_no_qd		;no QD available
+	    ret
+g_gotqd:
+	  mov ax,q_link[di]
+	  mov qul,ax
+	  pop si			;SI=QD in U_WRKSEG
+	  push di			;save SYSDAT QD
+	  mov cx,qdlen/2
+					; ES=UDA, DS=SYSDAT
+	  mov ax,ds
+	  mov ds,u_wrkseg		; DS:SI = QD in U_WRKSEG
+	  push es ! mov es,ax		; ES:DI = QD in SYSDAT
+	  rep movsw			; copy QD into QD in SYSDAT
+	  mov ax,es ! mov ds,ax
+	  pop es			; ES=UDA, DS=SYSDAT
+	  pop di			; SYSDAT:DI -> New QD
+	  or q_flags[di],qf_table	; Set "from table" flag
+
+g_qd:					;DI=QD in SYSDAT
+	xor cx,cx			;CX=0
+	cmp q_nmsgs[di],cx		;must have one or more msgs
+	jne g_buflen			;or illegal queue
+	  mov cx,e_no_qbuf
+	  jmps g_qdfree
+g_buflen:				;if MX or buffer length is zero
+	test q_flags[di],qf_mx		;0 Q_BUF field and return
+	jnz g_mx			;CX=0 to indicate success
+	  cmp q_msglen[di],cx
+	  jne g_getbuf
+g_mx:
+	    mov q_buf[di],cx
+	    ret
+g_getbuf:				;non 0 length buffer needed
+	cmp q_buf[di],0			;is there a buffer specified?
+	je g_buf
+	  mov ax,q_msglen[di]		;yes make sure it fits in SYSDAT
+	  mul q_nmsgs[di]		;AX=needed buffer space
+	  mov bx,ax
+	  mov dx,q_buf[di]
+	  call sysdat_chk
+	  jcxz g_buf			;CX=0 not within SYSDAT
+	    mov ax,u_wrkseg		;# of paragraphs to U_WRKSEG
+	    mov bx,ds
+	    sub ax,bx			;from SYSDAT
+	    mov cl,4 ! shl ax,cl	;make into # of bytes
+	    add q_buf[di],ax		;make buffer relative to SYSDAT
+	    xor cx,cx			;indicate success
+	    ret
+
+g_buf:					;allocate buffer space to queue
+	  call qspace
+	  jcxz g_ret
+	    mov cx,e_no_qbuf		;no buffer space
+g_qdfree:
+	    mov ax,qul			;error return QD to QUL
+	    mov q_link[di],ax
+	    mov qul,di			;CX = error code
+g_ret:
+	ret
+
+
+sysdat_chk:
+;----------
+;	entry:	DX = offset of data structure to check
+;		relative to U_WRKSEG
+;		BX = length of data structure
+;	exit:	CX <> 0 if within SYSDAT
+;		or wrap around
+;		CX = 0 if not within SYSDAT
+;		SI,DI preserved
+
+;	Check data structure for being within SYSDAT
+;	Also check that data structure doesn't wrap
+;	around at 64K, or 1 megabyte.
+
+	add dx,bx		;find end of data structure
+	jc sc_no		;check for 64K wrap around
+	  add dx,0fh
+	  mov cl,4		;round up to next paragraph
+	  shr dx,cl		;1st paragraph after struct relative
+	  add dx,u_wrkseg	;to U_WRKSEG
+	  jc sc_no		;next paragraph after struct
+				;check for 1 MB wrap around
+	    mov ax,sysdat
+	    cmp dx,ax		;check for below SYSDAT
+	    jb sc_no
+	      add ax,1000h	;check for above SYSDAT
+	      cmp ax,endseg	;must be within 64k and ENDSEG
+	      jb sc_end		;(use the smaller of the 2)
+		mov ax,endseg
+sc_end:
+	      cmp dx,ax		;DX=next paragraph,
+	      ja sc_no
+	        mov cl,1	;indicate within SYSDAT
+		ret
+sc_no:
+	xor cx,cx
+	ret
+
+qspace:
+;------
+;	entry:	DI = QD address
+;	exit:	CX = 0 if ok else error code
+;		DI preserved
+;	Allocate buffer space for QD
+;	The QMAU describes the Memory Allocation Unit
+;	for the queues.  QMAU is set up by GENCCPM or GENSYS.
+
+	mov ax,q_msglen[di]		;compute size of buffer
+	mul q_nmsgs[di]			;AX=size of request
+	xor cx,cx
+	push cx ! push cx ! push ax	;call MALLOC
+	push ax ! push cx		;with MPB on stack
+	mov dx,sp ! mov ax,ss
+	mov ds,ax
+	mov bx,offset qmau
+	push di				;save QD
+	mov cx,f_maualloc		;go through OSIF to
+	call osif			;get U_WRKSEG=SS
+	pop di				;DI=QD
+	mov ds,sysdat
+	cmp cx,0 ! jne qspace_ret
+	  mov bp,sp
+	  mov ax,mpb_start[bp]
+	  mov q_buf[di],ax		;address of buffer
+
+qspace_ret:
+	add sp,10			;pop MPB from stack
+	ret
+
+remqd:
+;-----
+; Place QD on queue unused list
+;	entry: DS:DI = QD address
+;	exit: none
+
+	mov ax,q_flags[di]
+	and ax,qf_table ! jz rqd_exit
+	    mov ax,qul ! mov q_link[di],ax
+	    mov qul,di
+	    jmps qrelease
+rqd_exit:
+	ret
+
+
+qrelease:
+;--------
+;	entry:	DI = QD address
+;	exit :  none
+;
+;	Release buffer space for QD.
+;	If the released space is ajacent to another
+;	free area, they are joined in the SAT table.
+;	The QMAU describes the Memory Allocation Unit
+;	for the queues.  QMAU is set up by GENCCPM or GENSYS.
+
+
+	mov ax,q_buf[di]
+	mov cx,offset qmau
+	push ax ! push ax ! push cx		;MFPB on stack
+	mov cx,f_maufree
+	mov dx,sp ! mov ax,ss ! mov ds,ax
+	call osif
+	add sp,6				;pop MFPB from stack
+	mov ds,cs:sysdat			;DS=SYSDAT
+	ret
+

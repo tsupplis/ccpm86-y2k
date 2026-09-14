@@ -1,0 +1,250 @@
+;*****************************************************
+;*
+;*	Process Routines
+;*
+;*****************************************************
+
+;======		=========================
+freepd:		; Free Process Descriptor
+;======		=========================
+;	entry:	SI = PD address
+
+; Assumes no memory and on no list except thread.
+; Called only from TERM_ACT in the dispatcher
+
+	mov di,(offset thrdrt)-p_thread
+freepd_npd:
+	mov bx,p_thread[di]	;find pd on thread
+	cmp bx,si ! je freepd_trd
+	    mov di,bx ! jmps freepd_npd
+freepd_trd:
+	mov ax,p_thread[si] ! mov p_thread[di],ax
+	mov ax,p_flag[si] ! and ax,pf_table
+	cmp ax,0 ! jz freepd_exit
+	    mov bx,pul ! mov p_link[si],bx
+	    mov pul,si
+freepd_exit:
+	ret
+
+;==========		================
+proc_creat:		; Create Process
+;==========		================
+;		DX = pd address in u_wrkseg
+
+	cmp dx,0 ! jne cp_doit
+	    sub bx,bx ! ret
+cp_doit:
+	call getpdadr		;si->pdaddr in rtm
+	jcxz cp_gpd
+	    mov bx,0ffffh ! ret
+cp_gpd:
+	mov dx,p_link[si]
+	push dx ! push si
+		; init uda fields
+cp_uda:
+		;set Parent
+
+	mov bx,rlr
+	mov p_parent[si],bx
+	mov p_conmode[si],0		;console mode - not inherited
+					;unless RSX which aren't yet
+					;implemented
+	mov p_tkcnt[si],0		;temp keep count
+	and p_flag[bx],not (pf_childabort + pf_resource)
+	mov al,p_lst[si]
+	;cmp al,nlstdev ! jb cp_slst    ;removed for network, 1/5/84 FMB
+	 ;   mov al,0			;make sure its a legal list device
+cp_slst:
+;if mpm
+;	add al,ncondev
+;endif
+	mov p_lst[si],al		;list device is relative to 0 in
+					;CCP/M
+
+                ;set up p_userdisp for callf in dispatcher
+        mov word ptr p_userdisp[si],offset def_emultr
+        mov word ptr p_userdisp+2[si],cs
+
+		;share memory
+
+	cmp p_mem[bx],0 ! je cp_nm
+	    cmp p_mem[si],0 ! jne cp_nm
+		lea di,p_mem[bx]
+cp_mnxt:	mov di,ms_link[di]
+		cmp di,0 ! je cp_nm
+		    push di
+		    push ms_start[di] ! push si ! push bx
+		    mov cx,f_share ! mov dx,sp
+		    push ds ! mov ax,ss ! mov ds,ax
+		    call osif ! pop ds
+		    pop bx ! pop si ! pop ax ! pop di
+		    jmps cp_mnxt
+cp_nm:
+		;set physical UDA segment
+
+	mov ax,u_wrkseg
+	mov dx,p_uda[si] ! add dx,ax
+	mov p_uda[si],dx
+
+		;inherit password
+
+	push es ! push ds
+	mov cx,es ! mov es,dx ! mov ds,cx
+	mov si,offset u_df_password ! mov di,si
+	mov cx,4 ! rep movsw
+
+		;set initial segment values
+
+	mov ds,dx ! xor dx,dx
+	cmp ds:u_initcs,dx ! jne cp_uda1
+	    mov ds:u_initcs,ax
+cp_uda1:cmp ds:u_initds,dx ! jne cp_uda2	;DX=0
+	    mov ds:u_initds,ax
+cp_uda2:cmp ds:u_initss,dx ! jne cp_uda3	;DX=0
+	    mov ds:u_initss,ax
+cp_uda3:cmp ds:u_inites,dx ! jne cp_uda4	;DX=0
+	    mov ds:u_inites,ax
+cp_uda4:
+
+		;Interrupt vector save areas:
+		;Get parent's interrupt vectors 0,1,3,4,224,225
+		;into child's UDA, if the
+		;interrupt vector is not initialized in the
+		;child's UDA.
+
+	mov ds,dx			;DX,DS=0,ES=child's UDA
+	mov si,dx			;divide error vector, #0
+	mov di,offset u_ivectors
+	call cp_icopy
+	call cp_icopy			;single step, #1
+	add si,4 ! add di,4		;skip NMI, #2
+	call cp_icopy			;1-byte, #3
+	call cp_icopy			;overflow, #4
+	mov si,offset i_os_ip
+	mov di,offset u_os_ip
+	call cp_icopy			;O.S. entry, #224
+	call cp_icopy			;debugger entry, #225
+
+		; set user's stack
+
+	push es ! pop ds
+	mov ax,ds:u_initss
+	mov ds:u_ss,ax
+	mov ax,ds:u_stack_sp
+	mov ds:u_sp,ax
+
+		; set other uda values
+
+	xor dx,dx
+	mov ds:u_delim,'$'			;console mode init
+	mov ds:u_error_mode,dl
+	mov ds:u_pd_cnt,dl
+	mov ds:u_mult_cnt,1
+	mov ds:u_in_int,true
+	;mov ds:u_insys,dl			;don't set insys
+	mov bx,ds:u_initds
+	mov ds:u_ds_sav,bx
+	mov ds:u_dma_seg,bx
+	mov ax,ds:u_inites
+	mov ds:u_es_sav,ax
+	mov ds:u_dparam,dx
+	mov ds:u_flag_sav,dx
+	mov ds:u_conccb,dx
+	mov ds:u_lstccb,dx
+
+		; setup user stack for iret
+
+	mov ds,ds:u_ss
+	mov di,u_sp			;sp->offset
+	mov ax,u_initcs
+	mov 2[di],ax			;  ->segment
+	mov word ptr 4[di],0200h	;  ->flags, interrupts on
+	pop ds ! pop es			; DS=SYSDAT, ES=UDA
+
+		; put on thread list
+
+	pop si ! pushf ! cli		; don't need SYNC here
+	mov dx,thrdrt			; but this code cannot
+	mov p_thread[si],dx		; be reentrant
+	mov thrdrt,si
+
+		; put on dispatcher ready list
+
+	mov dx,drl ! mov p_link[si],dx
+	mov drl,si ! popf
+
+		; do the next process
+
+	pop dx ! jmp proc_creat
+
+
+
+cp_icopy:
+;--------
+;	Entry:	ES:DI = UDA ivector location to store
+;		DS:SI = ivector to copy
+;		DX = 0
+;	Exit:
+;		DI,SI = incremented by 4
+
+	cmp es:word ptr 0[di],dx	;DX=0, DI=UDA ivector to copy
+	jne cp_nocopy			;don't copy interrupt vector
+	  cmp es:word ptr 2[di],dx	;if it is <> 0 in the UDA
+	  jne cp_nocopy
+	     mov cx,2			;move two words
+	     rep movsw			;copy to UDA
+	     ret
+cp_nocopy:
+	add si,4 ! add di,4
+	ret
+
+
+getpdadr:
+;--------
+;	entry:	DX = PD address in U_WRKSEG
+;	exit:	CX = 0 successful 
+;		SI = PD address in SYSDAT if success
+;		CX = 
+;	Make sure PD address is in SYSDAT.  If not, copy into
+;	one in PD table.  Make address relative to SYSDAT
+
+	push dx			;save PD in U_WRKSEG
+	mov bx,pdlen
+	call sysdat_chk
+	jcxz gpd_bad
+	  mov ax,u_wrkseg	;PD is within SYSDAT
+	  mov bx,ds
+	  sub ax,bx		;U_WRKSEG-SYSDAT
+	  mov cl,4 ! shl ax,cl	;make into bytes
+	  pop si		;SI relative to U_WRKSEG
+	  add si,ax		;SI->PD relative to SYSDAT
+	  jmps gpd_done
+
+gpd_bad:
+	pop si				;U_WRKSEG:SI->PD to copy
+	pushf ! cli			;turn off interrupts while
+	mov di,pul			;changing the PUL
+	test di,di
+	jnz gpd_have
+	  mov cx,e_no_pd		;no free PDs left
+	  popf ! ret
+gpd_have:				;DI->PD in SYSDAT
+	mov ax,p_link[di]
+	mov pul,ax			;update PUL
+	popf				;allow interrupts
+	push di				;save address of PD in SYSDAT
+	push es				;save UDA
+	push ds				;SYSDAT
+	mov ds,u_wrkseg			;DS=U_WRKSEG
+	pop es				;ES=SYSDAT
+	mov cx,pdlen/2
+	rep movsw			;copy PD into SYSDAT PD
+	push es ! pop ds		;DS=SYSDAT
+	pop es				;ES=UDA
+	pop si				;SI=PD in SYSDAT
+	or p_flag[si],pf_table		;got it from PD table
+
+gpd_done:
+	  xor cx,cx
+	  ret
+

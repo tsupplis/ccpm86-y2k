@@ -1,0 +1,689 @@
+;*****************************************************
+;*
+;*	Dispatch Routines
+;*
+;*****************************************************
+
+;=====
+fdisp:
+;=====
+; This entry point used by interrupt routines in XIOS
+; Note: if the XIOS is performing memory protection interrupt
+; handlers must enable O.S. memory before calling the O.S.
+
+	cli
+	push ds ! mov ds,sysdat
+	cmp indisp,true ! je nodisp		;if indisp=true then we are
+	    mov ax_sav,ax			;in the dispatcher and
+ 	    mov al,true ! mov indisp,al		;this code is skipped
+	    mov ax,es ! mov es_sav,ax
+	    mov ax,rlr ! xchg ax,bx ! mov bx_sav,ax
+	    mov es,p_uda[bx]
+	    mov al,true ! mov u_in_int,al
+	    pop ax ! mov u_ds_sav,ax
+	    mov al,p_stat[bx]
+	    mov u_stat_sav,al
+	    mov p_stat[bx],ps_run
+	    mov ax,es_sav
+	    mov u_es_sav,ax
+
+				; AX in AX_SAV
+				; BX in BX_SAV
+				; ES in U_ES_SAV
+				; DS in U_DS_SAV
+				; p_stat in U_STAT_SAV
+	    jmp intdisp
+		;dispatcher will jump to here if
+		; u_in_int = true.
+
+int_disp_exit:					;interrupts are off
+
+				; AX in AX
+				; BX in BX
+				; ES in U_ES_SAV
+				; DS in U_DS_SAV
+				; p_stat in U_STAT_SAV
+
+	    mov ax_sav,ax
+	    mov ax,bx ! mov bx_sav,ax
+						;check for
+	    cmp drl,0 ! jnz intdisp		;interrupt occurence
+						;on dispatcher exit
+
+		mov al,false ! mov u_in_int,al
+		mov ax,rlr ! mov bx,ax
+		mov al,u_stat_sav
+		mov p_stat[bx],al
+		mov ax,bx_sav ! mov bx,ax
+		mov ax,ax_sav
+		mov indisp,false
+		mov ds,u_ds_sav
+		mov es,u_es_sav
+		iret
+
+nodisp:	pop ds
+	iret
+
+
+;========
+farpdisp:
+;========
+; Intermodule pdisp (non-interrupt)
+
+	call pdisp ! retf
+
+;=====
+pdisp:
+;=====
+; Call dispatcher with no special action
+
+	push bx ! mov bx,rlr
+	mov p_stat[bx],ps_run ! pop bx
+	;jmp dsptch
+
+;======
+dsptch:
+;======
+;	The dispatch function looks like a noop to the
+;	caller. All flags and registers are maintained.
+;	No levels of user stack is used.
+;	(jmp dispatch = ret)
+;	Interrupt routines enter through fdisp.
+;
+;	Dispatch has two (2) arguments:
+;	1. the p_stat field of the  process  descriptor
+;	    determines the type of  action  to  perform
+;	    for this process.
+;	2. the dparam field of the uda is  an  argument
+;	    to the action.
+;	The main part of the dispatch routine takes the
+;	currently running process off  the  Ready  list
+;	and jmps to a routine which will put it on some
+;	other list depending on  the  p_stat  argument.
+;	The subsequent routine will then  jump  to  the
+;	scheduler which will do polling of devices  and
+;	move processes off the dispatch ready list onto
+;	the Ready list.  The Ready List  is  maintained
+;	in priority order with  round-robin  scheduling
+;	of processes with equivalent  priorities.   The
+;	first process on the ready list  will  then  be
+;	switched in.
+
+		; set indisp flag
+	pushf ! cli
+	cmp indisp,true ! jne dispin
+	    popf ! ret
+dispin:	mov indisp,true
+	pop u_flag_sav
+
+		; assumming bx=RLR:
+		; if PLR=0 and DRL=0 then
+		;    if p_stat[bx]=PS_RUN then
+		;      if p_link[bx]=0 or
+		;	  p_prior[p_link[bx]]<>p_prior[bx] then
+		;	    don't do dispatch
+
+	mov ax_sav,ax
+	mov ax,bx ! mov bx_sav,bx
+intdisp:
+	cmp plr,0 ! jne dcont			;if Poll list = 0 and
+	  cmp drl,0 ! jne dcont			;Dsptch Ready list = 0 and
+	    mov ax,rlr ! mov bx,ax		;(RLR can never be 0 here)
+	    cmp p_stat[bx],ps_run ! jne dcont	;our status is run and
+	      cmp p_link[bx],0 ! je no_disp2    ;other PD to ready to run
+		mov al,p_prior[bx]		;with an equal priority
+		mov bx,p_link[bx]		;THEN skip the dispatch
+		cmp al,p_prior[bx] ! je dcont
+no_disp2:
+		    mov ax,bx_sav ! mov bx,ax
+		    mov ax,ax_sav
+		    jmp dext
+
+dcont:	
+	mov u_ss,ss ! mov u_sp,sp
+	mov ss,sysdat ! mov sp,offset dsptchtos
+	mov ax,bx_sav ! mov bx,ax
+	mov ax,ax_sav
+	sti
+	cld
+		; save registers
+		; NOTE: We will use DS instead of ES
+		;  No segment overrides...
+
+	push es ! pop ds
+	mov ds:u_ax,ax
+	mov ax,bx ! mov ds:u_bx,ax
+	mov ax,cx ! mov ds:u_cx,ax
+	mov ax,dx ! mov ds:u_dx,ax
+	mov ax,di ! mov ds:u_di,ax 
+	mov ax,si ! mov ds:u_si,ax
+	mov ax,bp ! mov ds:u_bp,ax
+
+;	Save interrupt vectors 0,1,3,4 not INT 2 which is NMI
+;	MP/M-86, CCP/M-86 1.0 on the IBM PC saved NMI
+;	Block move first 2
+
+	xor bx,bx ! mov ds,bx
+	mov si,bx ! mov di,offset u_ivectors
+	mov dx,4
+	mov cx,dx ! rep movsw
+	mov cx,dx ! add si,dx		;get next 2
+	add di,dx			;skip INT 2 location documented
+	rep movsw			;now as reserved word in UDA
+		; block move osint,debugint
+
+	mov si,offset i_os_ip ! mov di,offset u_os_ip
+	mov cx,dx ! rep movsw
+        mov ds, sysdat
+           
+                ; if 8087 emulator user,swap extra vectors
+        mov bx,rlr
+        test p_sflag[bx],psf_em87
+          jz u_disp                      ; not an emulator user
+        push es ! mov ax,ds              ; save segment registers
+        push cx! push di 
+        mov cx, em_seg                   ; move 14 vectors from
+        mov si, em_offs                  ; low memory to uda extension
+        mov di, offset u_8087
+        mov es, p_uda[bx]
+        mov ds,cx       
+        mov cx, tot_emvecs/2
+        rep movsw
+        pop di ! pop cx
+        pop es ! mov ds,ax               ; restore segment registers
+        
+                ; swap out userdisp vectors.
+                ; acts like a nop to non-userdisp processes
+u_disp:
+        mov si,rlr
+        mov ax,user_save
+        callf p_userdisp[si]
+        jmps dcont1
+def_emultr:     ; this is the default routine for non-userdisp proc's
+        retf
+
+dcont1:		                        ; take current process off RLR.
+					;disable memory for the process
+					;we are taking out of context
+					;turn off interrupts ?	
+;dsp_disabled:
+	nop
+	mov ax,rlr ! mov si,ax
+	mov ax,p_link[si] ! mov rlr,ax
+	mov p_link[si],0
+		; We are now in NO-MAN's land
+		; From now until the end of the
+		; switch routine, There is no
+		; process in context.
+		; SI -> PD just taken out of context.
+		; jump to routine for given status
+	xor bh,bh ! mov bl,p_stat[si] ! shl bx,1
+	jmp cs:dsp_table[bx]
+
+		org ((offset $)+1) AND 0fffeh
+
+dsp_table	dw	disp_act	;00 - run
+		dw	disp_act	;01 - (nop)-poll device
+		dw	delay_act	;02 - delay
+		dw	disp_act	;03 - (nop)-swap
+		dw	term_act	;04 - terminate
+		dw	sleep_act	;05 - sleep
+		dw	disp_act	;06 - (nop)-dq
+		dw	disp_act	;07 - (nop)-nq
+		dw	flag_act	;08 - flag wait
+		dw	disp_act	;09 - (nop)-ciowait
+		dw	disp_act	;10 - (nop)-sync
+
+sleep_act:
+;---------
+; insert running process into list specified by
+; u_dparam and set p_stat from p_scratch
+; Note: we cannot sleep on the DLR since interrupts are on
+; here, and flag_set can change the DLR
+
+	mov ax,u_dparam
+	mov bx,ax
+	push si ! call insert_process
+	pop si ! or p_flag[si],pf_resource
+	mov al,p_scratch[si] ! mov p_stat[si],al
+	jmp schedule
+
+delay_act:
+;---------
+; Put the running process on the Delay List.  The
+; delay list is built such that any process's
+; remaining delay time is the additive of the delay
+; times of all processes ahead of it plus the # of
+; ticks in it's own p_wait field.  At each clock tick
+; the p_wait field of the top process in the list
+; is decremented.  If it reaches zero (0), all
+; processes with a zero in the p_wait field are
+; placed on the dispatch ready list.
+;	input:	SI=pd address
+
+	cli				;keep flag set from changing
+;if mpm					;TICK, and changing DLR
+;	push si ! mov al,io_strtclk
+;	call xiosif ! pop si
+;endif
+
+;if ccpm
+	mov tick,true
+;endif
+
+	mov bx,(offset dlr)-p_link
+	mov cx,u_dparam ! inc cx
+	cmp cx,0 ! jne del_lp
+	    dec cx
+del_lp:	mov di,p_link[bx]
+	cmp di,0 ! je del_o
+	    mov ax,p_wait[di]
+	    cmp ax,cx ! ja del_o
+		sub cx,ax ! mov bx,di ! jmps del_lp
+del_o:	mov p_link[si],di ! mov p_link[bx],si
+	mov p_wait[si],cx
+	cmp di,0 ! je del_e
+	    sub p_wait[di],cx
+del_e:	jmp schedule
+
+flag_act:
+;--------
+; place running process in flag table to wait
+; for next flag. Note, flag may have been set...
+;	input:  SI=pd address
+;		U_DPARAM=address of Flag entry
+
+	mov ax,u_dparam ! mov bx,ax
+	cli				;protect from flag set
+	cmp flg_pd[bx],flag_on ! je gflagon
+	    mov flg_pd[bx],si ! mov p_link[si],0
+	    jmp schedule
+gflagon:				; Flag set since wait check
+	mov flg_pd[bx],flag_off
+	sti
+	jmps disp_act
+
+term_act:
+;--------
+; Terminate the running process, free memory, free pd, free sync
+; structures.  Can only be called by TERMINATE_ENTRY.
+
+;	input:	SI=pd address
+;		MEM_SYNC owned by calling process
+
+		; place PD on rlr for now.
+	mov ax,rlr
+	mov p_link[si],ax
+	mov rlr,si
+
+		; clean up consoles
+	mov cx,f_cioterm ! call osif
+
+		; clean up memory
+		; (we own the MXmemory queue)
+free_nxt:
+	mov ax,rlr ! mov si,ax
+	mov si,p_mem[si]
+	test si,si ! jz end_free
+	    push ds ! xor cx,cx ! push cx
+	    push ms_start[si]
+	    mov ax,ss ! mov ds,ax ! mov dx,sp
+	    mov cx,f_memfree ! call osif
+	    pop bx ! pop cx ! pop ds
+	    jmps free_nxt
+end_free:
+
+					;release any sync structures
+					;after releasing memory
+	mov mem_cnt,0			;and MEM_CNT=1
+					;on entry, also own THRD_SYNC
+					;so it is safe to call
+					;FREEPD below,
+					;ASSIGN_SYNC cannot be called
+					;with the THRD_SPB
+					;SI=terminating process
+	mov bx,offset slr - sy_link	;release any sync structures
+t_nsync:				;owned by terminating PD
+	mov bx,sy_link[bx]
+	test bx,bx			;end of syncs?
+	jz t_sync_done
+	  push bx			;PD cannot be allowed to
+	  call unsync_entry		;abort if in SY.NEXT
+	  pop bx
+	  jmps t_nsync
+
+t_sync_done:
+
+		; take off RLR
+	mov si,rlr
+	mov ax,p_link[si]
+	mov rlr,ax
+	mov p_link[si],0
+
+	cmp si,owner_8087		;release 8087 if we owned it
+	jne t_end ! mov owner_8087,0
+t_end:
+		; free up PD
+	call freepd ! jmp schedule 
+
+disp_act:
+;--------
+; 	place process on RLR
+;	input:	SI=pd address
+
+	mov p_stat[si],ps_run
+	mov bx,(offset rlr)-p_link
+	call insert_process ! jmp schedule
+
+;==============
+insert_process:
+;==============
+;
+; put PD# in list ordered by priority
+;
+;	entry:	BX = list root
+;		SI = pd number
+;	exit:   SI   is preserved
+;		interrupt state as on entry
+
+	 mov cx,pflag[si] ! and cx,pf_resource
+						;if a process was waiting
+ins_npd: mov di,p_link[bx]			;on a resource, insert
+	 test di,di ! jz ins_out		;it ahead of equal priority
+	    mov al,p_prior[di]			;process
+	    cmp al,p_prior[si]
+	    ja ins_out				;lowest priority first
+		jb ins_nxt			;higher - keep going down list
+		    jcxz ins_nxt		;equal and not resource
+			jmps ins_out		;equal & resource
+ins_nxt:	mov bx,di ! jmp ins_npd
+ins_out: jcxz ins_exit
+	   and p_flag[si],not pf_resource
+ins_exit:
+	 mov p_link[si],di ! mov p_link[bx],si ! ret
+
+;========
+schedule:
+;========
+; poll all required devices and place any ready
+; processes on the Ready List
+
+		;we can enable interrupts now.
+		;there MUST be a process on the RLR
+		;at this point, ie. IDLE...
+	sti
+		;go through the Poll List
+	mov di,(offset plr)-p_link
+		;get the next PD on list.
+		;DI is the last one which
+		;has already been checked.
+polld_another:
+	mov si,p_link[di]
+		;SI is the next PD to check
+	test si,si ! jz drltorlr
+		;SI is valid PD, poll it.
+
+		;If top PD on the PLR has a worse
+		;priority compared to top PD on the RLR,
+		;there is no reason to call the XIOS
+		;and poll the device, this time through
+		;the dispatcher.  We must poll on equal
+		;priority to keep a compute bound
+		;process and the CLOCK from locking
+		;out a polling process.
+		;Note, we stop polling after
+		;the first process that has polled
+		;successfully, or we get to the end of
+		;the PLR.  The process is placed on
+		;the RLR.
+
+	    mov bx,rlr ! test bx,bx		;if RLR=0: poll
+	    jz poll_it
+	      mov al,p_prior[si]		;priority of 1st poll PD
+	      cmp al,p_prior[bx] ! jbe poll_it	;poll if equal or better
+		jmps drltorlr			;priority than head of RLR
+poll_it:
+	    push di
+;if mpm
+;	    mov cx,p_wait[si]
+;endif
+;if ccpm
+	    mov dx,p_wait[si]
+;endif
+	    mov al,io_polldev ! call xiosif
+	    pop di ! mov si,p_link[di]
+		;if AL=0, device not ready.
+	    cmp al,0 ! je polld_next
+			;device ready,
+			;move SI from PLR to RLR
+		mov ax,p_link[si] ! mov p_link[di],ax
+		mov bx,(offset rlr)-p_link
+		mov p_stat[si],ps_run
+		call insert_process		;got one ready to run:
+		jmps drltorlr			;stop polling
+			;p_link[SI]=next PD to check
+polld_next:		;SI has been checked
+	    mov di,si ! jmps polld_another
+
+drltorlr:
+;--------
+; Pull all processes on the dispatch ready list and
+; place them on the Ready List.
+
+		;We must disable interrupts while
+		;playing with DRL since interrupts
+		;doing a Flag_set may also.
+		;We must competely drain the DRL since
+		;it is in no particular order.
+
+	cli ! mov si,drl		;protect DRL from flag set
+	test si,si ! jz switch
+	    mov ax,p_link[si] ! mov drl,ax
+;	    test ax,ax			;is this the last PD on DRL?
+;	      jnz drl_noi 		;yes - don't turn on interrupts
+	    sti				;interrupts off guarentees
+;drl_noi:				;the last DRL PD with the
+	    mov p_stat[si],ps_run	;best priority will run
+	    mov bx,(offset rlr)-p_link	;next and at least until
+	    call insert_process		;it turns on interrupts
+	    jmps drltorlr
+
+switch:
+;------
+; switch to the first process on the Ready List 
+
+	sti
+	mov bx,rlr
+		; if no next process, go back		;
+		; to schedule.  Gives more immediate	;
+		; response to polled and interrupt	;
+		; driven devices			;
+switch0:
+	test bx,bx ! jnz switch1			;
+	    jmp schedule				;
+
+        ; Suspendable processes: in order to be suspended, a process
+        ; must be flagged as suspendable, it must be in the background,
+        ; and it must not be in the system (e.g.,owning a system queue).
+        ; It must also not be coming into context to terminate.
+switch1:						
+              
+        cli                             ;check if process should suspend
+        mov ax,p_sflag[bx]
+        test ax,psf_suspend 
+           jz switch2                   ;no, not at all
+
+          mov al,p_cns[bx]              ;Check vccb's state word
+          xor ah,ah ! xor di,di
+          mov di,ccblen ! mul di
+          mov di,ccb ! add di,ax
+          mov ax,c_state[di]
+
+          test ax,csm_background        ;Has it gone into background ?
+            jz switch2                  ;no, don't need to suspend
+
+          push es
+          mov es,p_uda[bx]
+          mov al,u_insys                ;Is it in the system? If so, don't
+          test al,al                    ;suspend.
+          pop es  
+            jne switch2
+     
+          test p_flag[bx],pf_ctlc       ;Is it terminating ?
+            jnz switch2                 ;Yes, don't put it back on list.
+
+          mov ax,p_link[bx]             ;All conditions apply; take it off
+          mov rlr,ax                    ;the RLR.
+          mov ax,splr                   ;Get the suspend list
+          mov p_link[bx],ax             ;link up and
+          mov splr,bx                   ;place on top of suspend list.
+          mov p_stat[bx],ps_ciowait     ;change its status
+
+          mov ax,c_state[di]		;Turn on suspend if process was
+          test ax,csm_suspend		;created in the background.
+            jnz do_dparam
+          or c_state[di],csm_suspend
+do_dparam:
+          push es                       ;Put list root into u_dparam
+          mov es,p_uda[bx]              ;for terminate's pd search.
+          mov u_dparam, offset splr
+          pop es
+
+          mov bx,rlr                    ;BX = RLR
+          sti
+
+            jmp switch0                 ;make sure next process isn't suspendable
+
+					;enable memory for this process
+					;turn on interrupts ?
+;
+;	;Save and restore the 8087 environment if process to run
+;	;uses the 8087 and is not the owner.  Interrupts
+;	;must be on.  Code from Intel Ap. Note. 113 page 29
+;
+;	;This code shouldn't be added unless interrupt windows in
+;	;switch are allowed or the 8087 restore is separated
+;	;from the 8086/8088 restore.  The switch code without this
+;	;commented out 8087 code,
+;	;creates an interrupt window approx. 100 to 200 micro
+;	;secs on 5 to 4 meg CPU.
+
+;	;Allowing interrupt windows in switch
+;	;means we must check on leaving the dispatcher
+;	;for an interrupt awakened process (DRL again <> 0)
+;	;and call the
+;	;dispatcher again to prevent a 16 milli second wakeup time
+;	;for a PD doing a flagwait after the interrupt service routine.
+;	;Calling the dispatcher at the end of the dispatch
+;	;(see commented out code at end of dispatcher and at
+;	;INT_DISP_EXIT:)
+;	;creates contention problems between PDs waiting for a resource
+;	;and PDs waking up from interrupts.  It cannot be guarenteed
+;	;who will run next.  An interrupt awakened process can
+;	;get a just freed resource is should have waited for.
+;	;The RTM ASSIGN_SYNC_ENTRY is an untested solution
+;	;for allowing interrupts in the dispatcher switch code.
+
+switch2:
+	sti                             ;BX=PD to run next
+	test p_flag[bx],pf_8087		;does this process use the NDP?
+	jz try_em87                     ;if not, see if it emulates 8087
+	  cmp bx,owner_8087		;do we already own it
+	  je done8087
+          mov dx,ds                     ;DX = DS = SYSDAT
+          fwait                         ;wait until other process is done
+	    xchg bx,owner_8087		;new owner, also set by terminate
+            test bx,bx ! jz get8087	;no one owns it if BX=0
+	      mov ds,p_uda[bx]		;old owner's UDA
+	      fstcw ds:u_8087		;save IEM bit status
+	      nop			;delay while 8087 busy saves control reg
+	      fdisi			;disable 8087 busy signal
+	      mov ax,ds:u_8087		;get original control word
+	      fsave ds:u_8087		;save NPX context
+	      fwait			;IEM=1.wait for save to finish
+	      mov ds:u_8087,ax		;save original control word
+              mov ds,dx                 ;DS = SYSDAT
+              mov es,p_uda[bx]          ;swap out and save this user's
+              mov di,offset u_ivec87_of ;ndp interrupt vector
+              mov si,iofs_87            ;DS:SI = system's vector address
+              mov ds,iseg_87            ;ES:DI = user's UDA save area
+              mov cx,2! rep movsw
+              mov ds,dx                 ;restore DS to SYSDAT
+get8087:
+	    mov bx,rlr
+	    mov ds,p_uda[bx]		;PD to run next
+
+            frstor ds:u_8087		;copy in its 8087 environment frsure
+            push ds			;DS=UDA . UDA on stack.
+
+restore87_int:
+        mov ds,dx
+        les di,dword ptr iofs_87        ;restore interrupt vectors
+        mov ds, p_uda[bx]               ;for 8087 user
+        mov si, offset u_ivec87_of
+        mov cx, 2 ! rep movsw           
+        jmps restore        
+
+try_em87:                               ;8087 emulator has special vector
+        test p_sflag[bx],psf_em87       ;set that must be swapped
+          jz done8087
+        mov ax,ds                       ;save DS
+        mov cx,em_seg                   ;move 14 vectors from uda extension
+        mov di,em_offs                  ;to low memory
+        mov si,offset u_8087            ;u_8087 -> user save area in uda
+        mov ds,p_uda[bx]
+        mov es,cx
+        mov cx,tot_emvecs/2
+        rep movsw
+        mov ds,ax                       ;restore DS
+
+done8087:				;no more 8087 or emulator business...
+                                        ;BX=PD to run next
+	mov dx,p_uda[bx] ! mov ds,dx	;DS=UDA
+	push dx				;UDA on stack
+
+restore:
+        mov es, sysdat                  ;Restore userdisp vectors.
+        mov ax, es:user_restore         ;Acts like a nop to non-userdisp
+        mov si, es:rlr                  ;processes.
+        callf es:p_userdisp[si]         ;Default routine does a retf.
+
+	xor ax,ax ! mov es,ax ! mov di,ax
+	mov si,offset u_ivectors
+	mov dx,4
+	mov cx,dx ! rep movsw		;restore interrupt vectors 0,1
+	mov cx,dx ! add di,dx		;don't touch NMI
+	add si,dx			;skip what was NMI
+	rep movsw			;restore interupt vectors 3,4
+
+	mov si,offset u_os_ip		;DS=UDA
+	mov di,offset i_os_ip
+	mov cx,dx ! rep movsw
+
+		; restore registers
+	mov ax,ds:u_bx ! mov bx,ax
+	mov ax,ds:u_cx ! mov cx,ax
+	mov ax,ds:u_dx ! mov dx,ax
+	mov ax,ds:u_si ! mov si,ax
+	mov ax,ds:u_di ! mov di,ax
+	mov ax,ds:u_bp ! mov bp,ax
+	mov ax,ds:u_ax
+		; restore DS and ES and stack
+	pop es				;ES=UDA
+	cli				;turn interrupts off for rest
+	mov ss,u_ss			;of exit
+	mov sp,u_sp
+	mov ds,sysdat
+dext:
+	cmp u_in_int,true ! jne dret
+	    jmp int_disp_exit
+dret:
+	push u_flag_sav
+	mov indisp,false
+	cmp drl,0 ! je dd_ret
+	    popf		; someone is on DRL from interrupt during
+	    jmp pdisp		; switch, dispatch now, no 16ms wait
+dd_ret:
+	popf
+	ret
+

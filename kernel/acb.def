@@ -1,0 +1,12 @@
+;*****************************************************
+;*
+;*	Assign Console Control Block
+;*
+;*****************************************************
+
+acb_cns		equ	byte ptr 0
+acb_match	equ	byte ptr acb_cns + byte
+acb_pd		equ	word ptr acb_match + byte
+acb_name	equ	byte ptr acb_pd + word
+acblen		equ	acb_name + pnamsiz
+

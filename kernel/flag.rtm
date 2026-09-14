@@ -1,0 +1,185 @@
+;*****************************************************
+;*
+;*		Flag Management
+;*
+;* FLAGS-flag table offset      NFLAGS-number of flags
+;*
+;* Format of Flag Table Entry:
+;*	+-------------+------+
+;*	|  flag       |ignore|
+;*	+-------------+------+
+;*	flag -	00000h, flag can be allocated
+;*	flag -	0ffffh, flag is off but is allocated to some
+;*		function.
+;*		0fffeh, flag is set
+;*		0xxxxh, PD that is waiting
+;*	ignore-	0ffh, normal case
+;*		0xxh, number of flags to ignore-1
+;*
+;*	GENSYS initializes the flags reserved by the system
+;*	and the XIOS header to 0ffh's.  The rest of the
+;*	flags are initialized to 0 by GENSYS. 
+;*
+;*****************************************************
+
+;============
+;getfree_flag:
+;============
+
+;	input:	DX = 0 then allocate a flag
+;		else
+;		if DH = 0FFH then release flag number
+;		DL (0 relative)
+;	output:
+;		BX = flag allocated if getting a flag
+;			or 0FFFFH if no flag is available
+;		BX = 0FFFFH if attempting to release a
+;			no existent flag
+;		CX = 0 no error
+;		CX = 4 if illegal flag number
+;		CX = 27H if no more flags to allocate
+;
+;		Flags reserved by CCP/M or MP/M and the XIOS
+;		header, cannot be released.
+;
+;turn off interrupts
+;
+;	test dx,dx ! jz rf_alloc
+;	  inc dh ! jnz rf_enum
+;	    cmp dl,nrsv_flags ! jbe rf_enum
+;	      cmp dl,nflags ! jae rf_enum
+;		xor ax,ax ! mov bx,ax ! mov cx,ax
+;		mov al,dl
+;		add al,dl ! add al,dl
+;		mov si,ax ! mov word ptr flags[si],0
+;		mov byte ptr flags 2[si],0
+;		ret
+
+;rf_alloc:
+;	mov si,flags ! xor ax,ax
+;	mov bx,ax ! mov cx,nflags
+;rf_nxt:
+;	cmp ax,[si] ! je rf_foundone		;got one
+;	  add si,3 ! inc bx
+;	  loop rf_nxt
+;	  mov cx,e_noflags ! jmps rf_err
+;rf_foundone:
+;	mov cx,ax			;0 CX
+;	dec ax
+;	mov [si],ax			;set the 3 bytes to 0ffh
+;	mov 2[si],al
+;	ret
+;rf_enum:
+;	mov cx,e_illflag
+;rf_err:	
+;	mov bx,0ffffh
+;	ret
+
+;==============   ==========================
+flag_set_entry:	; Set Logical Interrupt Flag
+;==============   ==========================
+; NOTE: the flagset routine can (must?) be called from outside
+;	the operating system through an interrupt
+;	routine.  UDA variables cannot be used.  This
+;	is the only function an interrupt routine can
+;	call.
+;
+;	input:	DL = flag number
+;	output:	BX = 0 if okay,0ffffh if error
+;		CX = if error: e_flag_ovrrun
+
+	call flag_valid
+	cmp cl,flag_tick ! jne notick
+	mov bx,dlr
+	test bx,bx ! jz dlr_null		;no process waiting
+	  dec p_wait[bx] ! jnz nxt_tick
+nxt_tpd:
+	    mov si,p_link[bx] ! mov dlr,si	;SI,DLR=next waiting PD 
+		mov p_stat[bx],ps_run		;put PD done waiting
+		mov ax,drl ! mov p_link[bx],ax	;on DRL
+		mov drl,bx
+		test si,si ! jz dlr_null	;SI=next waiting PD
+		    cmp p_wait[si],0 ! jnz nxt_tick
+			mov bx,si ! jmps nxt_tpd;another process was waiting
+						;the same number of ticks
+nxt_tick:	    jmp flag_exit		;wait for next tick
+
+dlr_null:					;DLR is empty turn off
+	mov tick,false ! jmp flag_exit		;XIOS tick flag
+
+no_tick:
+	cmp flg_ignore[si],flag_zig ! je fs_set
+	    dec flg_ignore[si] ! 
+            mov cx,e_flag_ignr ! jmp flag_bexit
+
+fs_set:	cmp bx,flag_on ! jne fs_non
+	    mov cx,e_flag_ovrrun ! jmp flag_bexit
+
+fs_non:	cmp bx,flag_off ! jne fs_noff
+	    mov flg_pd[si],flag_on
+	    jmp flag_exit
+
+fs_noff:mov ax,drl ! mov p_link[bx],ax
+	mov drl,bx ! mov p_stat[bx],ps_run
+	or p_flag[bx],pf_resource		;12/4/83
+	mov flg_pd[si],flag_off
+	jmp flag_exit
+
+;===============   ===============================
+flag_wait_entry: ; Wait for Logical Interrupt Flag
+;===============   ===============================
+;	input:	DL = flag number
+;	output:	BX = 0 if everything okay
+;		BX = 0ffffh if Error
+;		CX = Error Code:0,e_flag_underrun
+
+	call flag_valid
+	cmp bx,flag_on ! jne fw_non
+	    mov flg_pd[si],flag_off
+	    jmp flag_exit
+fw_non:	cmp bx,flag_off ! jne fw_noff
+	    mov bx,rlr
+	    mov p_stat[bx],ps_flagwait
+	    mov u_dparam,si
+	    call dsptch ! jmp flag_exit
+fw_noff:mov cx,e_flag_underrun ! jmp flag_bexit
+
+flag_valid:	; Check validity of flag number
+;----------       -----------------------------
+;	entry:	DL = flag number
+;	output: SI = ptr to flag entry
+;		BX = contents of flag entry
+;		CL = flag number
+;		clear interrupt flag - Flags on stack
+
+	pop ax ! pushf			;AX=return address
+	cmp dl,nflags ! jb flag_good
+flag_bad:
+	    mov cx,e_ill_flag ! jmp flag_bexit	;flags and next return
+flag_good:					;address on stack
+	mov cl,dl				;save flag number
+	xor dh,dh ! push ax ! cli		;return to fset/fwait on stack
+	mov ax,dx				;multiply flag number
+	mov bx,ax				;times 3
+	add ax,ax				;*2
+	add ax,bx				;*3
+	mov si,flags ! add si,ax
+	mov bx,[si]
+	;test bx,bx	;FLAG field cannot be 0
+	;jz flag_bad
+	  ret
+
+flag_exit:	; Successful Exit
+;---------        ---------------
+;	entry:	flags and return from flagset or flagwait on stack
+ 
+	xor bx,bx ! popf ! ret
+
+
+flag_bexit:	; Exit with Error
+;----------       ---------------
+;	entry:	flags and return from flagset or flagwait on stack
+
+	xor bx,bx ! dec bx
+	popf ! ret
+

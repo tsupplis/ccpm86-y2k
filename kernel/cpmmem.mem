@@ -1,0 +1,246 @@
+;*****************************************************
+;*
+;*	MEM Entry Points
+;*
+;*****************************************************
+
+	; Format of Memory Control Block used
+	; in CP/M-86 Memory Calls (53 - 58)
+	;
+	;     +-----------+-----------+-----+
+	; MCB |   Base    |   Length  | ext |
+	;     +-----------+-----------+-----+
+	;
+
+mcb_base	equ	word ptr 0
+mcb_length	equ	word ptr mcb_base + word
+mcb_ext		equ	byte ptr mcb_length + word
+mcblen		equ	mcb_ext + byte
+
+
+;============		=====================
+maxmem_entry:		; 53 - Get Max Memory
+;============		=====================
+;	input:	DX = address of MCB in u_wrkseg
+;	output:	BX = 0ffffh if failure
+;			 0h if success
+;		CX = Error Code
+;		mcb_ext = 0 if no additional mem
+;			  1 if more available
+
+	mov si,dx
+	push ds ! mov ds,u_wrkseg
+	mov dx,mcb_length[si] ! pop ds
+	sub ax,ax ! mov bx,ax
+	call getmemory ! jcxz mm_gm
+	    mov bx,0ffffh ! ret
+mm_gm:	push ds ! mov ds,u_wrkseg
+	mov mcb_length[si],dx
+	mov mcb_base[si],ax
+	mov mcb_ext[si],1
+	pop ds ! sub bx,bx ! ret
+
+;============
+absmax_entry:		; 54 - Get Abs Max Mem
+;============
+; Allocate the largest absolute memory region which
+; is less than or equal mcb_length
+;	input:	DX = address of MCB in u_wrkseg
+;	output:	BX = 0ffffh if failure
+;			 0h if success
+;		CX = Error Code
+
+	mov si,dx
+	push ds ! mov ds,u_wrkseg
+	mov ax,mcb_base[si]
+	mov dx,mcb_length[si] ! pop ds
+	sub bx,bx
+	call getmemory ! jcxz am_gm
+	    mov bx,0ffffh ! ret
+am_gm:	push ds ! mov ds,u_wrkseg
+	mov mcb_length[si],dx
+	mov mcb_base[si],ax
+	pop ds ! sub bx,bx ! ret
+
+;==============
+cpmalloc_entry:		; 55 - Alloc Mem
+;==============
+; Allocate a memory region which is equal to mcb_length
+;
+;	input:	DX = address of MCB in u_wrkseg
+;	output:	BX = 0ffffh if failure
+;			 0h if success
+;		CX = Error Code
+
+	mov si,dx
+	push ds ! mov ds,u_wrkseg
+	sub ax,ax ! mov bx,mcb_length[si]
+	mov dx,bx ! pop ds
+	call getmemory ! jcxz ca_gm
+	    mov bx,0ffffh ! ret
+ca_gm:	push ds ! mov ds,u_wrkseg
+	mov mcb_length[si],dx
+	mov mcb_base[si],ax
+	pop ds ! sub bx,bx ! ret
+
+
+;=============
+cpmabsa_entry:		; 56 - Alloc Abs Mem
+;=============
+; Allocate an absolut memory region which is
+; equal to mcb_length.  Note:  For CP/M-86
+; compatibility, this function must return success
+; if the memory is already allocated because
+; the GET MAX functions allocate memory in MP/M, CCP/M
+; and not in CP/M.
+;
+;	input:	DX = address of MCB in u_wrkseg
+;	output:	BX = 0ffffh if failure
+;			 0h if success
+;		CX = Error Code
+
+	mov si,dx
+	push ds ! mov ds,u_wrkseg
+	mov ax,mcb_base[si]
+	mov bx,mcb_length[si]
+	mov dx,bx ! pop ds
+
+		; See if We already own this memory
+		; SI -> MCB in U_WRKSEG
+		; AX=Base, BX=Length, DX=Length
+
+	xor cx,cx
+	mov di,rlr
+	add di,p_mem-ms_link
+caa_n:	mov di,ms_link[di]
+	cmp di,0 ! je caa_g
+	    cmp ms_start[di],ax ! jne caa_n
+		cmp ms_length[di],bx ! jbe caa_gm
+		    mov cx,e_no_memory
+		    mov bx,0ffffh ! ret
+
+		; SI -> MCB in U_WRKSEG
+		; AX=Base, BX=Length, DX=Length
+caa_g:	call getmemory ! jcxz caa_gm
+	    mov bx,0ffffh ! ret
+
+		; Successful allocation
+caa_gm:	push ds ! mov ds,u_wrkseg
+	mov mcb_length[si],dx
+	mov mcb_base[si],ax
+	pop ds ! sub bx,bx ! ret
+
+getmemory:
+;---------
+;	input:	AX = start
+;		BX = min
+;		DX = max
+;	output:	AX = start
+;		DX = length
+;		CX = error code
+;	  preserve SI
+
+	push si
+	sub cx,cx ! push cx ! push cx ! push dx ! push bx
+	push ax ! mov dx,sp
+	push ds ! mov cx,ss ! mov ds,cx
+	mov cx,f_malloc ! call osif
+	pop ds ! pop ax ! pop dx ! pop bx ! pop bx ! pop bx
+	pop si ! ret
+
+;=============
+cpmfree_entry:		; 57 - Free Mem
+;=============
+; Free memory as specified in MCB
+;	input:	DX = offset of MCB in u_wrkseg
+;		mcb_ext = 0ffh = free all but load mem
+;			else as specified by mcb_base.
+;		mcb_base = seg addr of memory segment
+;			to free.  IF in middle of
+;			existing segment then just free
+;			the end of the segment.
+
+	push ds ! mov ds,u_wrkseg
+	mov si,dx
+	mov al,mcb_ext[si]
+	mov dx,mcb_base[si] ! pop ds
+	cmp al,0ffh ! jne free_memory
+cpmf_root:  mov bx,rlr
+	    add bx,p_mem-ms_link
+cpmf_next:  mov si,ms_link[bx]
+	    cmp si,0 ! jne try_seg
+		sub bx,bx ! mov cx,bx ! ret
+try_seg:    test ms_flags[si],mf_load ! jz free_seg
+		mov bx,si ! jmps cpmf_next
+free_seg:   mov dx,ms_start[si]
+	    push si ! call free_memory ! pop si
+	    jcxz cpmf_root
+		jmps cpmf_next
+
+free_memory:
+;-----------
+;	input:	DX = start
+;	output:	BX = 0,0ffffh (success,fail)
+;		CX = Error Code
+
+	push ds ! push ss ! pop ds
+	sub cx,cx ! push cx ! push dx
+	mov dx,sp
+	mov cx,f_memfree ! call osif
+	pop dx ! pop dx ! pop ds
+	ret
+
+;=============
+freeall_entry:		; 58 - Free All Mem
+;=============
+;  Free all memory except LOAD UDA and LDSTK
+;	If a transient program calls this, it must free up the
+;	all of the perceived memory.  The UDA and LDSTK is not
+;	perceived by CPM compatible programs.  The UDA cannot be
+;	freed, since it is part of the process descriptor, until
+;	termination in the dispatcher.
+
+	mov si,rlr
+	mov ax,p_uda[si]
+	add si,p_mem-ms_link
+fam_n:	mov si,ms_link[si]
+
+		; See if anymore memory to free
+	cmp si,0 ! je fam_e
+	    mov bx,ms_start[si]
+
+			; See if UDA above start
+	    cmp bx,ax ! ja fam_a		;AX=UDA Segment
+		mov cx,bx
+		add cx,ms_length[si]
+
+			; See if below start+len 
+		cmp cx,ax ! jb fam_a
+
+			; WE HAVE A UDA !!!
+			; see if we already trimmed it
+
+		    test ms_flags[si],mf_udaonly
+		    jnz fam_n
+			or ms_flags[si],mf_udaonly
+
+				; trim the memory above the UDA
+                                ; check if it's an 8087 user
+                        mov bx,rlr                      ;get process
+                        test p_flag[bx],pf_8087         ;if not an 8087 user
+                        jz med_uda                      ;try medium uda len
+                           add ax,(lstklen+u8087len)/16 ;else use long uda
+                           jmp done_uda   
+        med_uda:        test p_sflag[bx],psf_em87       ;if not 87 emulator
+                           jz norm_uda                  ;do normal uda len
+                           add ax,(lstklen+em87len)/16  ;else do medium len
+                           jmp done_uda
+	norm_uda:    	add ax,(lstklen+ulen)/16	;CX=# paragraphs
+	done_uda:	mov bx,ax
+
+		; Free the segment or after the UDA+LDSTK
+fam_a:	    mov dx,bx
+	    call free_memory
+	    jmps freeall_entry
+fam_e:	xor bx,bx ! mov cx,bx ! ret
+

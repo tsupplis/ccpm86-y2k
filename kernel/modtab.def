@@ -1,0 +1,11 @@
+
+;*****************************************************
+;*
+;*	Definition of Module Table Entry
+;*
+;*****************************************************
+
+mod_entry	equ	0
+mod_init	equ	mod_entry + dword
+modlen		equ	mod_init + dword
+

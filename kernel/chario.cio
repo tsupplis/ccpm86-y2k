@@ -1,0 +1,767 @@
+;*****************************************************
+;*
+;*	Character I/0 Routines
+;*
+;*****************************************************
+
+;===========
+cmode_entry:	;Get/Set Console Mode
+;===========
+;
+;	entry:	DX = 0FFFFH if returning current value
+;			else DX = new console mode word
+;	return:	BX = console mode if DX = 0FFFFH on entry
+;
+	mov bx,rlr
+	inc dx ! jz cm_get
+	    dec dx
+	    mov p_conmode[bx],dx
+	    xor bx,bx
+	    ret
+cm_get:
+	mov bx,p_conmode[bx]
+	ret
+
+;===========
+conin_entry:	;Function 1:console input
+;===========
+	call coninit
+	call coninf			;char in AL and BL
+	mov dl,al			;PIN handles control chars
+co_notp:
+	call echoc ! jb ciexit		;check nonprint char
+	  call tabout			;echo character - if printable
+ciexit:
+	mov bl,dl ! ret
+
+;============
+conout_entry:	;Function 2:console output - DL = char
+;============
+	call coninit
+	test p_conmode[bx],pcm_rout	;BX=RLR PD
+	jz co_tab
+	  jmp conoutf
+co_tab:
+	jmp tabout
+
+;============			;internal only under CCP/M
+rconin_entry:	; raw console input
+;============
+	call rawinit
+	jmp coninf		;returns char in AL and BL
+
+;=============			;internal only under CCP/M
+rconout_entry:	; raw console output - DL = char
+;=============
+	call rawinit
+rconout:
+	jmp conoutf
+
+;=============
+listout_entry:	; write to list device - DL = char
+;=============
+	mov bx,rlr ! mov dh,p_lst[bx]
+	mov si,u_lstccb
+	push dx ! call lstattach_entry ! pop dx
+	jmp listf
+
+;=============
+constat_entry:        ;check console status
+;=============
+	call coninit			;console mode is made "cooked"
+	call cse_cl
+	test bl,bl ! jz co_r		;BL=1 if char ready
+	    mov di,rlr
+	    test p_conmode[di],pcm_11
+	    jz co_r
+	        call coninf			;read the char
+		cmp al,ctlc ! jne co_nc		;want only control C
+	        mov c_nchar[si],bx              ;all 16 bits
+	        mov bl,1
+co_r:
+	ret				;return BL=0 or 1
+co_nc:
+	xor bl,bl ! ret		;char not a ^C
+
+;=======
+ciostat:		; check status w/out changing pf_raw
+;=======
+	mov bx,rlr
+	mov dh,p_cns[bx]
+	mov si,u_conccb
+	test si,si		;U_CONCCB=0 if no attach yet
+	jz cse_no
+	  cmp bx,c_attach[si]
+	  je cse_cl
+cse_no:
+	    mov cl,f_dispatch ! call osif
+	    mov bl,0 ! ret
+cse_cl:
+	call constf
+	test bl,bl ! jz cse_c2
+	    mov bl,1
+cse_c2:
+	mov al,bl ! ret
+
+;===========
+dirio_entry:				;function 6
+;===========
+; direct console i/o - read if 0ffh
+;	entry:	DL = 0ffh if readif (ret=0 on not ready, else char)
+;		   = 0feh if status (ret=0 not read or 0ffh if ready)
+;		   = 0fdh if input  (wait there is a character)
+;		   = char to output
+;	exit:	BL = 0, 0ffh or character if status or input
+
+	call rawinit
+	cmp dl,0fdh
+	 jb rconout			;output DL
+	   ja diosts
+	     jmp coninf			;DL=0FDh, get char
+diosts:					;some type of status
+	  call constf
+	  cmp dl,0feh ! jne diocin	;DL=0FEh, return status
+dio1:
+	    ret				;BL=0FFh or 0h
+diocin:
+	  test bl,bl ! jz dio1		;DL=0FFh, if char,conin
+	    jmp coninf
+
+;==============
+conwrite_entry:	;write line until delimiter in UDA encountered
+;==============	;user function 9, delimiter set by function 110
+;
+;	input:	DX = buffer addr in u_wrkseg
+
+	push dx
+	call coninit
+	pop bx
+
+cwr1:	push ds ! mov ds,u_wrkseg
+	mov dl,[bx] ! pop ds
+	cmp dl, u_delim ! je cwr_e
+	    push bx
+	    mov bx,rlr
+	    test p_conmode[bx],pcm_rout ! jz cw_tab
+		call conoutf ! jmps cw_notab
+cw_tab:
+	    call tabout
+cw_notab:
+	    pop bx
+	    inc bx ! jmps cwr1
+cwr_e:	ret	
+
+;===========
+delim_entry:	;get/set output delimiter, user function 110
+;===========
+;
+;	entry:	DX = 0FFFFH if returning current delimiter
+;		     else DL = new delimiter
+;	return:	BL = delimiter if DX = 0FFFFH on entry
+
+	cmp dx,0FFFFH ! jz d_get
+	    mov u_delim,dl
+	    ret
+d_get:
+	mov bl,u_delim
+	ret
+
+;=============
+p_block_entry:
+;=============
+;	entry:	DX = CB addr where 1st word is offset,
+;			2nd word is segment, 3rd word
+;			is length
+;	return: None
+
+	push dx
+	call coninit		;BX=PD address
+	pop di
+	xor ax,ax
+	mov bp,p_conmode[bx]
+	jmps block_out
+
+;=============
+l_block_entry:
+;=============
+;	return: None
+;	entry:	DX = CB addr where 1st word is offset,
+;			2nd word is segment, 3rd word
+;			is length
+
+	push dx
+	call lstattach_entry
+	pop di
+	mov bx,rlr ! mov dh,p_lst[bx]
+	mov ax,0ffffh
+	;jmps block_out
+				;SI -> CCB or LCB (in XIOS)
+block_out:			;u_wrkseg:DI -> user's parameter block
+				;DH=list or console device number
+				;AX = 0 if console, 0FFFFH if list
+	push ds ! mov ds,u_wrkseg
+	mov cx,cb_len[di]		;CX = string length
+	mov bx,cb_seg[di]
+	mov di,cb_off[di]		;BX:DI = string start
+	pop ds
+	test cx,cx ! jz b_ret		;test for zero length
+
+b_loop:				;BX:DI -> string to print or list
+				;AX = 0 if to console = 0FFFFH if to list
+				;BP = p_conmode if going to console
+	push ds ! mov ds,bx
+	mov dl,[di]
+	pop ds
+	push bp ! push di ! push cx ! push bx ! push ax
+	test ax,ax ! jz b_con
+	    call listf ! jmps nb_nxt
+b_con:
+	    test bp,pcm_rout ! jnz nb_nt	;raw output mode ?
+	    call tabout ! jmps nb_nxt		;test for ctrlP ?
+nb_nt:
+	call conoutf
+nb_nxt:
+	pop ax ! pop bx ! pop cx ! pop di ! pop bp
+	inc di
+	loop b_loop
+b_ret:
+	ret
+
+
+;==============
+conprint_entry:	;write line until delimiter or max
+;==============	;mask parity, do not check for ctrl chars
+;
+;	input:	DX = address of buffer in u_wrkseg
+;		BH = max characters (0=no max)
+;		BL = delimiter character
+
+	push bx ! push dx
+	call coninit
+	pop bx ! pop ax
+	xor cx,cx
+	and al,07fh
+		; AH=max, AL=delimiter, BX->buffer
+		; CX = count = 0
+cpr1:	cmp ah,0 ! je cpr2
+	cmp ah,cl ! je cpr_e
+cpr2:	    push ds ! mov ds,u_wrkseg
+	    mov dl,[bx] ! pop ds
+	    and dl,07fh
+cpr3:	    cmp dl,al ! je cpr_e
+		push ax ! push cx ! push bx
+		call conoutf
+		call chk_ctrlP
+		pop bx ! pop cx ! pop ax
+		inc cl ! inc bx
+		jmps cpr1
+cpr_e:	ret
+
+;=============
+conread_entry:	;read a buffered console line
+;=============
+; buffer=(max length, current length, buffer)
+
+	push dx
+	call coninit
+	pop bx
+read:	push bx				;[SP] = buffer offset
+	mov al,c_column[si]
+	mov c_strtcol[si],al		;start column = current column
+	xor bx,bx			;BX = character count
+
+		;read next character, CX, BX active
+readnx:	push bx
+readn0:	call coninf	;AX, BX = 16 bit char just read
+	mov dl,al
+	pop bx
+
+		;	Carriage Return
+	cmp dl,cr ! jnz notcr
+eofre:	    jmp readen
+notcr:
+		;	Line Feed
+	cmp dl,lf ! jz eofre
+
+tryh:		;	Backspace
+	cmp dl,ctlh ! jnz noth
+	    or bl,bl ! jz readnx			;if not 1st char
+		dec bl ! mov al,c_column[si]		;decrement char count
+		mov c_btmp[si],al			;temporary hold	
+		or c_flag[si],cf_compc ! jmp linelen
+noth:
+		;	Rubout
+
+	cmp dl,rubout ! jnz notrub
+	    or bl,bl ! jz readnxx			;only if not 1st char
+	        pop di ! push di
+		push ds ! mov ds,u_wrkseg
+		mov dl,1[di+bx] ! pop ds		;make char=last char
+		dec bx					;dec char count
+		jmp rdech1				;echo, read next
+readnxx:    jmp readnx
+notrub:
+		;	Control E
+
+	cmp dl,ctle ! jnz note
+	    push bx
+	    mov dl,cr ! call conoutf
+	    mov dl,lf ! call conoutf
+	    mov c_column[si],0
+	    mov c_strtcol[si],0
+	    jmp readn0
+note:
+		;	Control X
+	cmp dl,ctlx ! jnz notx
+backx:	    mov al,c_strtcol[si]
+	    cmp al,c_column[si] ! jb backxxx
+		xor bx,bx ! jmps readnxx
+backxxx:    mov dl,ctlh ! call conoutf
+	    mov dl,' ' ! call conoutf
+	    mov dl,ctlh ! call conoutf
+	    dec c_column[si] 
+	    jmps backx
+notx:
+		;	Control U
+	cmp dl,ctlu ! jnz notu
+	    call crlfp
+	    pop bx ! jmp read
+notu:
+		;	CONTROL R - redraw line
+	cmp dl,ctlr ! jnz notr
+linelen:    push bx ! call crlfp
+			;print buffer on screen
+	    pop cx ! xor bx,bx
+rep0:	    or cl,cl ! jz rep1
+		pop di ! push di
+		push ds ! mov ds,u_wrkseg
+		inc bx ! dec cl
+		mov dl,1[di+bx] ! pop ds	;DL = nxt char
+		mov ch,bl ! push cx
+		call ctlout
+		pop cx ! mov bh,0 ! mov bl,ch
+	        jmps rep0
+rep1:	    test c_flag[si],cf_compc
+	    push bx ! jz l_22
+		and c_flag[si],not cf_compc
+		mov ah,c_btmp[si] ! mov al,ah
+backsp:	      cmp al,c_column[si]
+	      jb l_22
+		sub al,c_column[si]
+		or al,al ! jz l_22
+		    push ax
+		    mov dl,ctlh ! call conoutf
+		    mov dl,' ' ! call conoutf
+		    mov dl,ctlh ! call conoutf
+		    pop ax ! dec ah ! mov al,ah
+		    jmps backsp
+l_22:	    jmp readn0
+notr:
+		;	All other characters
+rdecho:	    inc bx
+	    pop di ! push di
+	    push ds ! mov ds,u_wrkseg
+	    mov 1[di+bx],dl ! pop ds
+rdech1:	    push bx ! call ctlout ! pop bx
+	    pop di ! push di
+	    push ds ! mov ds,u_wrkseg
+	    cmp bl,[di] ! pop ds ! jae readen
+		push bx ! jmps l_22
+		;	End of Console String
+readen:	pop di
+	push ds ! mov ds,u_wrkseg
+	mov 1[di],bl ! pop ds
+	mov dl,cr ! call conoutf
+	mov c_column[si],0
+	ret
+
+rawinit:
+;-------
+	mov bx,rlr		;turn on raw flag
+	or p_flag[bx],pf_raw
+	jmps ninit
+
+coninit:
+;-------
+;	entry:	DL = char if called by output routine
+;	exit:	DH = console device number
+;		BX = RLR PD - raw flag turned off
+;		SI = CCB owned by calling PD
+
+	mov bx,rlr		;turn off raw flag
+	and p_flag[bx],not pf_raw
+ninit:
+	mov dh,p_cns[bx]
+	mov si,u_conccb
+	test si,si ! jz attach
+	  cmp c_attach[si],bx
+	  jne attach
+	    ret
+
+attach:
+;	exit:	SI=CCB
+;		BX,DX preserved
+
+	    push bx ! push dx
+	    call conattach_entry
+	    pop dx ! pop bx
+	    ret
+
+echoc:
+;-----
+; check if character is graphic
+;	input:	DL = character
+;		DH = console #
+;		SI = CCB address
+;	output: carry set if not graphic
+;		DL,DH,SI pass through
+
+	cmp dl,cr ! je ret0
+	cmp dl,lf ! je ret0
+	cmp dl,tab ! je ret0
+	cmp dl,ctlh ! je ret0
+	cmp dl,' '
+ret0:	ret
+
+prcsmsg:
+;-------
+; print string in Code Segment
+;	input:	DX->null terminated string in CS
+
+	xor bx,bx ! mov ax,cs
+prstr:	push u_wrkseg
+	mov u_wrkseg,ax
+	call conprint_entry
+	pop u_wrkseg ! ret
+
+prname:
+;------
+; print name
+;	input:	DX->8 char name in DS
+
+	mov bh,8 ! mov bl,' '
+	mov ax,ds ! jmps prstr
+
+
+conout:
+;------
+; compute character position/write console
+;	input:	DL = character
+;		DH = console #
+;		SI = ccb address
+;	output:	DL = character
+;		DH = console #
+;		SI = ccb address
+
+		;check if only calculating column position
+	test c_flag[si],cf_compc ! jnz compout
+		;write the character, then compute column.
+	    call conoutf
+	    mov bx,rlr
+	    test p_conmode[bx],pcm_rout
+	    jnz co_np
+	      call chk_ctrlP		;printer echo handling
+co_np:
+
+		;compute column position
+compout:
+	mov al,c_column[si]
+	cmp dl,rubout ! je ccret
+	    inc al
+	    cmp dl,' ' ! jae ccret
+		dec al
+		or al,al ! jz ccret
+		    cmp dl,ctlh ! jnz notbs
+			dec al ! jmps ccret
+notbs:		    cmp dl,cr ! jne ccret
+			mov al,0
+ccret:	mov c_column[si],al
+	ret
+
+
+chk_ctrlP:
+;---------
+;	Entry:	SI=CCB address
+;		DH=console device number
+;		DL=character just sent to console
+;	Exit:	SI,DX preserved
+
+;	Echo the character to the printer if the ctrlP flag is set
+;	in the CCB, and the ctrlO flag is off, and the cf_bufp
+;	flag is off.  Cf_bufp is set when we send a character
+;	to a VOUT process when we are a background buffered
+;	console.  The VOUT process decides whether to send the
+;	character to the screen when it purges the buffered output.
+
+	mov ax,c_state[si]
+	test ax,csm_ctrlP
+	jz cp_ret
+	  test ax,csm_ctrlO
+          jnz cp_ret
+	    mov al,c_flag[si]
+	    test al,cf_bufp
+	    jz cp_listit
+	      and c_flag[si],not cf_bufp	;turn off the flag
+	      jmps cp_ret
+cp_listit:
+	     push dx ! push si
+	     mov dh,c_mimic[si]
+	     cmp dh,0ffh			;mimic = 0ffh if
+	     je cp_no				;PIN turned off ^P
+	       call listf
+cp_no:
+	     pop si ! pop dx
+cp_ret:
+	ret
+
+ctlout:
+;------
+; send CTRL character with possible preceding up-arrow
+;	input:	DL = character
+;		DH = console #
+;		SI = ccb address
+;	output:	DL,DH = character,console
+;		SI = ccb address
+
+	call echoc ! jae tabout
+	    push dx ! mov dl,ctl ! call conout
+	    pop dx ! or dl,40h
+	    ; jmp tabout
+
+tabout:
+;------
+; expand tabs to console
+;	input:	DL = character
+;		DH = console
+;		SI = ccb address
+;	output:	DL,DH = char,console
+;		SI = ccb address
+
+
+	cmp dl,tab ! je tab1
+	  jmp conout
+tab1:
+	    mov dl,' '
+tab0:	    call conout
+	    mov al,c_column[si]
+	    and al,111b ! jnz tab0
+		mov dl,tab
+ret2:		ret
+
+crlf:
+;----
+	push dx ! mov dl,cr ! call conout
+	mov dl,lf ! call conout ! pop dx
+	ret
+crlfp:
+;-----
+; print #, cr, lf for ctlx, ctlu, ctlr functions
+; then print ' ' until we are at strtcol (starting column)
+;	input:	DH = console
+;		SI = ccb address
+;	output: DH = console
+;		SI = ccb address
+
+	mov dl,'#' ! call conout
+	call crlf
+	mov dl,' '
+crlfp0:	mov al,c_column[si]
+	cmp al,c_strtcol[si] ! jae crlfp1
+	    call conout ! jmps crlfp0
+crlfp1:	ret
+
+;
+;	XIOS CHARACTER I/O INTERFACE
+;
+
+
+;	XIOS CONSTAT CALL
+;
+;	entry:	DH = console #
+;		SI = ccb address
+;	returns:DH = console #
+;		SI = ccb address
+;		AX = BX = 0 if no char, = 0FFH if char ready
+
+constf:
+	cmp dh,ncns			;if not VC goto XIOS
+	jb cst_vc
+	  mov al,io_const
+	  jmp goxios
+cst_vc:
+	xor bx,bx
+	cmp c_nchar[si],bx
+	jne cst_true
+	  mov di,c_vinq[si]
+	  cmp q_msgcnt[di],bx		;number of chars in type ahead
+	  je cst_ret			;queue
+cst_true:
+	    mov bl,0ffh			;char ready
+cst_ret:
+	mov al,bl
+	ret
+
+
+;	XIOS CONIN CALL
+;
+;	entry:	DH = console #
+;		SI = ccb address
+;	returns:DH = console #
+;		AL = BL = character
+;		SI = ccb address
+;
+coninf:
+	cmp dh,ncns			;if not VC goto XIOS
+	jb ci_vc
+            mov dl,c_pc[si]             ;io_conin needs physical console #
+	    mov al,io_conin
+	    jmp goxios
+ci_vc:
+	cmp c_nchar[si],0
+	jne ci_gotc
+	    mov cx,f_qread
+	    call csi_readq
+ci_gotc:
+	mov bx,c_nchar[si]
+	mov ax,bx
+	mov c_nchar[si],0
+	ret
+
+csi_readq:
+	push dx ! push si
+	mov ax,c_vinq[si]
+	mov c_qpbqaddr[si],ax
+	lea ax,c_nchar[si]
+	mov c_qpbbuffptr[si],ax
+	lea dx,c_qpbflags[si]
+	call osif
+	pop si ! pop dx
+	ret
+
+
+;	XIOS CONOUT CALL
+;
+;	entry:	DH = console #
+;		DL = character
+;		SI = ccb address
+;	exit:	DH = console #
+;		SI = ccb address
+
+conoutf:
+	cmp dh,ncns			;if not VC goto XIOS
+	jb co_vc
+	    mov al,io_conout		;console number
+	    jmp goxios			;control C could hang up this
+co_vc:					;hardware, should handle similar
+	pushf ! cli			;to virtual screens
+	mov ax,c_state[si]
+	mov bx,ax
+	and ax,not(csm_ctrlP + csm_ctrlO + csm_noswitch + csm_suspend)
+	cmp ax,2			;0=foreground&dynamic, 1=foreground&
+	jbe co_getconout		;buffered, 2=background&dynamic 
+
+	  cmp ax,csm_buffered + csm_background
+	  je co_buffer
+					;sleep on all other states
+	    push dx ! push si		;and wait for the PIN or
+	    lea dx, c_usleep[si]	;VOUT to wake us up
+	    mov bl, ps_ciowait
+	    mov cx, f_sleep
+	    call osif
+	    pop si ! pop dx
+	    popf
+	    jmps co_vc			;start over, state could
+					;have changed
+
+co_buffer:		;Virtual Console is in some type of buffered state
+	popf				;allow interrupts
+	or c_flag[si],cf_vout+cf_bufp	;VOUT we are writing a msg.
+					;If we switch screens, and VOUT
+					;just finishes purging, VOUT
+					;will wait for this message.
+					;Turn on cf_bufp so we don't
+					;echo to the printer if ctrlP is on
+	mov ax,c_voutq[si]	
+	mov c_qpbqaddr[si],ax
+	lea ax,c_qbuff[si]		;points to 2-byte message
+	mov c_qpbbuffptr[si],ax
+	push dx ! push si
+	xor dh,dh			;DL = data, DH = data msg type (0)
+	mov c_qbuff[si],dx
+	lea dx,c_qpbflags[si]
+	mov cx, f_qwrite
+	call osif
+	pop si ! pop dx
+	and  c_flag[si],not cf_vout	;tell VOUT we're done writing
+	ret				;message
+
+co_getconout:
+	test bx,csm_ctrlO		;BX = ccb.state
+	jz co_cbitsget			;famous racehorse
+	  popf ! ret			;ctrl O byte bucket
+co_cbitsget:				;output is going to XIOS,
+					;ensure no other process
+	test c_flag[si],cf_conout	;is in XIOS console output code
+	jz co_gotconout			;for this screen
+
+co_conoutsleep:
+	  push dx ! push si
+	  lea dx, c_cosleep[si]
+	  mov bl, ps_ciowait
+	  mov cx, f_sleep
+	  call osif
+	  pop si ! pop dx
+	  popf
+	  jmp co_vc			;start over, state
+					;could have changed
+co_gotconout:
+	or c_flag[si], cf_conout	;set XIOS conout "ownership" flag
+	popf				;allow interrupts
+	mov bx,rlr
+	push p_flag[bx]			;save flags
+	or p_flag[bx],pf_tempkeep	;don't allow abort
+	push bx
+	mov ax,io_conout		;XIOS function number
+	call goxios
+	and c_flag[si], not cf_conout	;wake any process wanting XIOS
+	cmp c_cosleep[si],0		;test here for faster output
+	je co_nowake
+	    push dx ! push si
+	    mov cx,f_wakeup
+	    mov bl,ps_ciowait
+	    lea dx,c_cosleep[si]
+	    call osif
+	    pop si ! pop dx
+co_nowake:
+	pop bx				;process address
+	test p_flag[bx],pf_ctlc		;was ^C typed ?
+	pop p_flag[bx]			;restore PD flags
+	jz  co_xret
+	    or p_flag[bx],pf_ctlc
+	    push dx ! push si
+	    xor dx,dx
+	    mov cx,f_terminate
+	    call osif			;returns here if keep flg is on
+	    pop si ! pop dx
+co_xret:
+	ret
+
+;	XIOS LIST OUT CALL
+;
+;	entry:	DH = console #
+;		DL = character
+;		SI = ccb address
+;	exit:	DH = console #
+;		SI = ccb address
+
+listf:
+	mov ax,io_list
+	;jmps goxios
+
+goxios:
+	push dx ! push si
+	mov cl,dl ! mov dl,dh		;CL = char, DL = device
+	call xiosif
+	pop si ! pop dx
+	ret
+

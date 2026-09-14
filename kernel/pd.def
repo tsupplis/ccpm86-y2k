@@ -1,0 +1,132 @@
+;*****************************************************
+;*
+;*	Process Descriptor - with the UDA associated
+;*		with the PD, describes the current
+;*		state of a Process under MP/M-CCP/M
+;*
+;*   +-----+-----+-----+-----+-----+-----+-----+-----+
+;* 00|   link    |  thread   |stat |prior|   flag    |
+;*   +-----+-----+-----+-----+-----+-----+-----+-----+
+;* 08|                     Name                      |
+;*   +-----+-----+-----+-----+-----+-----+-----+-----+
+;* 10|    uda    | dsk | user| ldsk|luser|    mem    |
+;*   +-----+-----+-----+-----+-----+-----+-----+-----+
+;* 18| cmod|tkcnt|   wait    | org | net |  parent   |
+;*   +-----+-----+-----+-----+-----+-----+-----+-----+
+;* 20| cns |abort|  conmode  | lst |     |   sflag   |
+;*   +-----+-----+-----+-----+-----+-----+-----+-----+
+;* 28|       userdisp        |   pret    |  scratch  |
+;*   +-----+-----+-----+-----+-----+-----+-----+-----+
+;*
+;*	link	- Used for placement into System Lists
+;*	thread	- link field for Thread List
+;*	stat	- Current Process activity
+;*	prior	- priority
+;*	flag	- process state flags
+;*	name	- name of process
+;*	uda	- Segment Address of User Data Area
+;*	dsk	- Current default disk
+;*	user	- Current default user number
+;*	ldsk	- Disk program loaded from
+;*	luser	- User number loaded from
+;*	mem	- pointer to MD list of memory owned
+;*		  by this process
+;*	cmod	- compatibility mode bits.
+;*		  80 -> F1 bit
+;*		  40 -> F2 bit
+;*		  20 -> F3 bit
+;*		  10 -> F4 bit
+;*	tkcnt	- temp keep count, # times tempkeep has been
+;*		  turned on
+;*	wait	- parameter field while on System Lists
+;*	org 	- Network node that originated this process
+;*	net	- Network node running this process
+;*	parent  - process that created this process
+;*	cns	- default console #
+;*	abort	- abort code
+;*	lst	- default list #
+;*      sflag   - more flags
+;*	conmode - console mode for function 109
+;*	reserved- not currently used
+;*      userdisp- user dispatch swap
+;*	pret	- return code at termination
+;*	scratch - scratch word
+;*
+;*****************************************************
+
+p_link		equ	word ptr 0
+p_thread	equ	word ptr p_link + word
+p_stat		equ	byte ptr p_thread + word
+p_prior		equ	byte ptr p_stat + byte
+p_flag		equ	word ptr p_prior + byte
+p_name		equ	byte ptr p_flag + word    
+p_uda		equ	word ptr p_name + pnamsiz
+p_dsk		equ	byte ptr p_uda + word
+p_user		equ	byte ptr p_dsk + byte
+p_ldsk		equ	byte ptr p_user + byte
+p_luser		equ	byte ptr p_ldsk + byte
+p_mem		equ	word ptr p_luser + byte
+p_cmod		equ	byte ptr p_mem + word
+p_tkcnt		equ	byte ptr p_cmod + byte	
+p_wait		equ	word ptr p_tkcnt + byte
+p_parent	equ	word ptr p_wait + 4
+p_cns		equ	byte ptr p_parent + word
+p_abort		equ	byte ptr p_cns + byte
+p_conmode	equ	word ptr p_abort + byte
+p_lst		equ	byte ptr p_conmode + word
+p_sflag         equ     word ptr p_lst + 2
+p_userdisp      equ     dword ptr p_sflag + word
+p_pret		equ	word ptr p_userdisp + 4
+p_scratch	equ	byte ptr p_pret + word
+p_wscrtch	equ	word ptr p_scratch
+
+;
+;	Process descriptor pd_status values
+;
+
+ps_run		equ	0	; in ready list root
+ps_poll		equ	1	; in poll list
+ps_delay	equ	2	; in delay list
+ps_swap		equ	3	; in swap list
+ps_term		equ	4	; terminating
+ps_sleep	equ	5	; sleep processing
+ps_dq		equ	6	; in dq list
+ps_nq		equ	7	; in nq list
+ps_flagwait	equ	8	; in flag table
+ps_ciowait	equ	9	; waiting for character
+ps_sync		equ	10	; waiting for sync structure
+;
+;	Process descriptor pd_flag bit values
+;
+pf_sys		equ	00001h	; system process
+pf_keep		equ	00002h	; do not terminate
+pf_kernal	equ	00004h	; resident in kernal
+pf_pure		equ	00008h	; pure memory described
+pf_table	equ	00010h	; from pd table
+pf_resource	equ	00020h	; waiting for resource
+pf_raw		equ	00040h	; raw console i/o
+pf_ctlc		equ	00080h	; abort pending
+pf_active	equ	00100h	; active tty
+pf_tempkeep	equ	00200h	; don't terminate yet...
+pf_ctld		equ	00400h	; explicit detach occured
+pf_childabort	equ	00800h	; child terminated abnormally
+pf_noctls	equ	01000h	; control S not allowed
+pf_dskld	equ	02000h	; process was loaded from disk
+pf_nokbd	equ	04000h	; ignore keyboard
+pf_8087		equ	08000h	; process uses 8087
+;
+;	Process descriptor pcm_flag bit values
+;		(console mode set by function 109)
+;
+pcm_11		equ	00001h	; control C status for function 11
+pcm_ctls	equ	00002h	; disable control S-Q
+pcm_rout	equ	00004h	; raw output, no tabs or control P
+pcm_ctlc	equ	00008h	; disable control C
+;pcm_rsrv	equ	00040h	; used by CP/M 3.0
+pcm_ctlo	equ	00080h	; disable control O
+pcm_rsx		equ	00300h	; 2 bits used by RSX for status
+;
+;               Second Flag Values
+psf_suspend     equ     00001h  ; suspend if in background
+psf_em87        equ     00002h  ; using 8087 emulator
+

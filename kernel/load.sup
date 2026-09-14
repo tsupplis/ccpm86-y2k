@@ -1,0 +1,978 @@
+;*****************************************************
+;*
+;*	Program Load
+;*
+;*****************************************************
+;
+;	LDTAB Entry Format:
+; 0           2           4           6           8
+; +-----+-----+-----+-----+-----+-----+-----+-----+
+; |   START   |    MIN    |    MAX    |    PD     |
+; +-----+-----+-----+-----+-----+-----+-----+-----+
+;
+; 8           10(A)       12(C)       14(E)       16(10) 17(11)
+; +-----+-----+-----+-----+-----+-----+-----+-----+-----+
+; |    ATR    |   FSTRT   |   FLEN    | TYPE|    ID     |
+; +-----+-----+-----+-----+-----+-----+-----+-----+-----+
+;
+;
+;	start		Absolute Address requested
+;	min		Min memory wanted
+;	max		Max memory wanted
+;	pd		PD to allocate to
+;	atr		Attributes, Memory Flags
+;	fstrt		Starting paragraph in File
+;	flen		# of paragraphs in file
+;	type		Group type
+;	id		Segment Address of this group
+;
+;	The Load Table contains 9 entries, One for each
+;	potential Group in Command File and One extra
+;	for Independent Memory Allocations.
+
+ldt_start	equ	word ptr 0
+ldt_min		equ	word ptr ldt_start + word
+ldt_max		equ	word ptr ldt_min + word
+ldt_pd		equ	word ptr ldt_max + word
+ldt_atr		equ	word ptr ldt_pd + word
+ldt_fstrt	equ	word ptr ldt_atr + word
+ldt_flen	equ	word ptr ldt_fstrt + word
+ldt_type	equ	byte ptr ldt_flen + word
+ldt_id		equ	word ptr ldt_type + byte
+ldtlen		equ	ldt_id + word
+
+
+;=========
+cload_ent:	; entry point to load for a chain command
+;=========
+;	Assumes UDA is set in passed PD.
+
+	push bx ! mov bx,1
+	jmps load
+
+;========
+load_ent:	; User entry point to load .CMD file for execution
+;========
+;	input:	DX = address of open FCB in u_wrkseg
+;	output:	BX = segment addr of Base Page
+;		   = 0ffffh if error
+;		CX = Error Code
+
+	sub bx,bx
+	;jmp load
+;====
+load:		; Intermodule entry point to load .CMD file
+;====
+;	input:	DX = addr of open FCB in u_wrkseg
+;		BX = addr of unused PD to initialize
+;		     0 - do not init PD
+;		     1 - chain load (PD addr on stack)
+;	output:	BX = seg addr of Base Page
+;		   = 0ffffh if error
+;		CX = Error Code
+
+		; Get MXLoad Queue
+
+	push dx ! push bx
+	mov cx,f_qread ! mov dx,offset mxloadqpb
+	call osif
+	mov lod_chain,false
+	pop lod_pd ! pop si
+	cmp lod_pd,1 ! jne ld_cf
+	    pop lod_pd ! mov lod_chain,true
+
+		; Copy FCB into lod_fcb
+		; SI-> user FCB in u_wrkseg
+
+ld_cf:	mov cx,fcblen/2 ! mov di,offset lod_fcb
+	push es ! push ds ! push ds
+	mov ds,u_wrkseg ! pop es
+	rep movsw
+	pop ds ! pop es
+
+
+		; Read the Header
+
+	mov bx,offset lod_fcb
+	mov byte ptr fcb_r0+2[bx],0
+	mov ax,0			;record #
+	mov bx,1			;# of sectors
+	mov dx,offset lod_dma		;DMA offset
+	mov cx,sysdat			;DMA segment
+	call drd ! cmp di,1             ;check for EOF in header read
+          je lod_eof
+           jcxz ndpchk
+lod_eof:
+        mov cx, e_bad_load              ; tried to load a 0 length cmd file
+        mov bx, 0ffffh                  ; or one whose header is incorrect
+        jmp lod_exit
+ndpchk:                                 ;see if 8087 required
+        mov lod_ndp,0                   ;default = no
+        mov bx, offset lod_dma
+        test ch_lbyte[bx],need_8087
+         jz ndp_flg                     ;not required - but is it optional?
+        cmp owner_8087,0ffffh           ;needs it,but is there one in system?
+         jnz ndp_yes                    ;yes- flag it
+        mov cx,e_nondp                  ;no - abandon load & return
+        mov bx, 0ffffh
+         jmp lod_exit 
+ndp_flg:
+        test ch_lbyte[bx],opt_8087      ;will use it if present?
+         jz h_hdr                       ;doesn't want it at all
+        cmp owner_8087,0ffffh           ;will use it,but is there one ?
+         jnz ndp_yes                    ;if not, flag it as an emulator user
+        mov lod_ndp,1
+         jmp h_hdr
+ndp_yes:
+        mov lod_ndp,0ffh                ;flag it as an 8087 user           
+h_hdr:
+        mov lod_suspnd,0                ;default = no suspend needed
+        test ch_lbyte[bx],susp_mode     ;require background suspension ?
+        jz h_hdr1                       ;no...
+        mov lod_suspnd,0ffh             ;yes, flag pd later
+
+h_hdr1:
+	mov lod_indma,0
+
+		; initialize Load Disk and User
+		; from FCB
+
+	mov bx,rlr
+	mov al,p_user[bx]
+	mov lod_user,al
+	mov al,p_dsk[bx]	;default disk of calling PD
+	mov lod_disk,al		;1-15 -> A-P
+	mov bx,offset lod_fcb
+	mov al,fcb_dr[bx]
+	mov lod_fifty,al	;base page address 50H, 0=default
+	test al,al ! jz use_ddsk
+	    dec al		;1-15 -> A-P
+	    mov lod_disk,al
+use_ddsk:
+	test byte ptr fcb_name+7[bx],080h ! jz use_dusr
+	    mov lod_user,0
+use_dusr:
+
+		; Initialize ldtab
+
+			; Zero ldtab
+	mov cx,ldtabsiz/2 ! sub ax,ax
+	mov di,offset ldtab
+	push es ! mov es,sysdat
+	rep stos ax ! pop es
+
+			; 1st ldtab entry is UDA and LSTK
+			; if a PD was specified...
+
+	mov lod_nldt,0
+	mov si,offset ldtab
+	cmp lod_pd,0 ! jne sel_uda
+		jmp gc_ifo
+sel_uda: cmp lod_ndp,0                               ;see if 8087 user and long
+          jz form_uda                                ;uda is needed
+         cmp lod_ndp,0ffh                            ;no...
+          jz form_87uda
+form_emuda: mov ldt_min[si],(lstklen+em87len)/16     ;8087 emulator user
+            mov ldt_max[si],(lstklen+em87len)/16     ;64 byte extension
+             jmp cont_uda
+form_87uda: mov ldt_min[si],(lstklen+u8087len)/16    ;8087 user
+            mov ldt_max[si],(lstklen+u8087len)/16    ;96 byte extension
+             jmp cont_uda
+form_uda:   mov ldt_min[si],(lstklen+ulen)/16	     ;min=max=UDA+STK paragraphs
+	    mov ldt_max[si],(lstklen+ulen)/16
+cont_uda:   mov ax,lod_pd ! mov ldt_pd[si],ax
+	    mov ldt_atr[si],mf_load
+	    add si,ldtlen
+	    inc lod_nldt
+	    cmp lod_chain,true ! jne gc_ifo
+
+			;We are CHAINING.  Free all memory
+			; except UDA area and LDSTK.  This will keep
+			; the first partition for the chain
+			; as well as not crash the system.
+
+		push si
+		mov cx,f_freeall ! call osif
+
+			;transfer memory to new pd
+
+		mov bx,rlr
+		mov ax,p_mem[bx] ! mov p_mem[bx],0
+		mov bx,lod_pd ! mov p_mem[bx],ax
+		pop si
+		
+gc_ifo:
+			;go through CMD header and init
+			;a ldtab entry per header entry.
+			;alloc abs mem
+
+	mov bx,offset lod_dma
+        mov al,ch_lbyte[bx]     ; save fixup flag
+        mov lod_lbyte,al
+        mov ax,ch_fixrec[bx]    ; save record # of fixups, if any
+        mov lod_fixrec,ax
+	mov lod_fixrec1,ax
+
+	mov cx,ch_entmax 	; BX = offset LOD_DMA
+	mov dx,8		; DX = position in file
+ch_more:cmp ch_form[bx],0 ! jne ch_doit
+	jmp ch_next
+ch_doit:    mov al,ch_form[bx] ! mov ldt_type[si],al	 ;type of seg
+	    mov ax,ch_length[bx] ! mov ldt_flen[si],ax	;length
+	    mov ldt_fstrt[si],dx ! add dx,ax		 ;pos in file
+	    mov ax,ch_base[bx] ! mov ldt_start[si],ax	 ;abs seg
+	    mov ax,ch_min[bx] ! mov ldt_min[si],ax	 ;min needed
+	    mov ax,ch_max[bx]
+	    cmp ax,0 ! jne setmax
+		mov ax,ch_min[bx]
+setmax:	    mov ldt_max[si],ax			 ;max wanted
+	    mov ax,lod_pd ! mov ldt_pd[si],ax	 ;pd to alloc to
+	    cmp ax,0 ! je not_load
+		mov ax,mf_load
+		jmps not_load
+skipjmp:jmps ch_more
+
+;if mpm
+
+not_load:   cmp ch_form[bx],1 ! jne try_sh
+		add ax,mf_code ! jmps s_atr
+try_sh:	    cmp ch_form[bx],9 ! jne s_atr
+		add ax,mf_code+mf_share
+s_atr:      mov ldt_atr[si],ax			;memory flags
+
+			;if abs, allocate memory
+	    cmp ldt_start[si],0 ! je ch_nabs	;see if abs mem
+		jmps ch_al
+ch_nabs:    cmp ldt_type[si],9
+	    jne ch_nxt		;see if shared code
+	      push cx
+	      push bx ! push dx	;save load DMA and position in file
+	      call get_sh
+	      pop dx ! pop bx
+	      cmp cx,0 ! pop cx
+	      je ch_nxt
+		jmp ld_out
+ch_al:		push bx ! push dx ! push cx ! push si
+		mov cx,f_malloc ! mov dx,si
+		call osif ! pop si
+		mov ax,ldt_start[si] ! mov ldt_id[si],ax
+		cmp cx,0 ! pop cx ! pop dx ! pop bx
+		je ch_nxt
+		    	;couldn't find memory
+		    mov bx,0ffffh ! mov cx,e_no_memory
+		    jmp ld_out
+
+;endif
+
+;if ccpm
+
+;not_load:   cmp ch_form[bx],9 ! jne try_code
+;		mov ch_form[bx],1
+;		mov ldt_type[si],1
+;try_code:   cmp ch_form[bx],1 ! jne s_atr
+;		add ax,mf_code
+;s_atr:	    mov ldt_atr[si],ax			;memory flags
+;
+;			;if abs, allocate memory
+;	    cmp ldt_start[si],0 ! je ch_nxt	;see if abs mem
+;ch_al:		push bx ! push dx ! push cx ! push si
+;		mov cx,f_malloc ! mov dx,si
+;		call osif ! pop si
+;		mov ax,ldt_start[si] ! mov ldt_id[si],ax
+;		cmp cx,0 ! pop cx ! pop dx ! pop bx
+;		je ch_nxt
+;		    	;couldn't find memory
+;		    mov bx,0ffffh ! mov cx,e_no_memory
+;		    jmp ld_out
+;
+;endif
+
+ch_nxt:	add si,ldtlen
+	inc lod_nldt
+ch_next:add bx,chlen
+	loop skipjmp
+
+		; alloc all other memory
+		; SI -> mpb for non_abs mem req.
+			;add all parts together for a single malloc
+	mov bx,offset ldtab
+	mov cx,lod_nldt
+	mov lod_nrels,0
+lt_more:cmp ldt_min[bx],0 ! je lt_next
+	    cmp ldt_start[bx],0 ! jne lt_next
+		mov ax,ldt_min[bx]
+		mov dx,ax
+		add ldt_min[si],ax
+		cmp dx,ldt_min[si] ! jbe lt_m	; check for ovrflw
+		    mov ldt_min[si],0ffffh
+lt_m:		mov ax,ldt_max[bx]
+		mov dx,ax
+		add ldt_max[si],ax
+		cmp dx,ldt_max[si] ! jbe lt_m1	; check for ovrflw
+		    mov ldt_max[si],0ffffh
+lt_m1:		inc lod_nrels
+lt_next:add bx,ldtlen ! loop lt_more
+
+			;malloc
+	cmp lod_pd,0 ! je noloadf
+	    mov ldt_atr[si],mf_load
+noloadf:mov ax,lod_pd ! mov ldt_pd[si],ax
+	push si ! mov dx,si ! mov cx,f_malloc
+	call osif ! pop si
+	mov ax,ldt_start[si] ! mov ldt_id[si],ax
+	cmp bx,0ffffh ! jne lt_sprd
+
+	    		;Not Enough Memory - release any
+			; memory already allocated
+ld_out:	    push cx
+	    mov bx,offset ldtab
+	    mov cx,lod_nldt ! inc cx
+lg_more:    cmp ldt_id[bx],0 ! je lg_next
+		push cx ! push bx ! push ds
+			;push MFPB on stack
+		push ldt_pd[bx]
+		push ldt_id[bx]
+		mov dx,sp ! push ss ! pop ds		
+		mov cx,f_memfree
+		call osif
+		pop cx ! pop cx
+
+		pop ds ! pop bx ! pop cx
+lg_next:    add bx,ldtlen ! loop lg_more
+	    mov bx,0ffffh ! pop cx ! jmp lod_exit
+
+lt_sprd:
+			;spread the memory allocated
+			;amongst the nrels
+			;1st give everyone the minimum
+	mov bx,offset ldtab
+	mov cx,lod_nldt
+ls_more:cmp ldt_start[bx],0 ! jne ls_next
+	    mov ax,ldt_min[bx]
+	    sub ldt_min[si],ax
+	    cmp ax,ldt_max[bx] ! jne ls_next
+		mov dx,ldt_start[si] ! mov ldt_start[bx],dx
+		add ldt_start[si],ax
+		dec lod_nrels
+ls_next:add bx,ldtlen ! loop ls_more
+
+			;spread whats left amongst those that need more
+	mov bx,offset ldtab
+	mov cx,lod_nldt
+lsl_mre:cmp ldt_start[bx],0 ! jne lsl_nxt
+	    mov ax,ldt_start[si] ! mov ldt_start[bx],ax
+	    mov ax,ldt_min[si]
+	    cmp ax,0 ! je adj_start
+		push cx ! sub cx,cx
+		mov dx,cx ! mov cl,lod_nrels
+		div cx ! pop cx
+		cmp dx,0 ! je evendiv
+		    inc ax
+evendiv:	mov dx,ldt_max[bx] ! sub dx,ldt_min[bx]
+		cmp ax,dx ! jbe nottoomuch
+		    mov ax,dx
+nottoomuch:	add ldt_min[bx],ax ! sub ldt_min[si],ax
+adj_start:  mov ax,ldt_min[bx] ! add ldt_start[si],ax
+	    dec lod_nrels
+lsl_nxt:add bx,ldtlen ! loop lsl_mre
+
+		; fill memory from file
+
+	mov si,offset ldtab
+	mov cx,lod_nldt
+lf_mre:	cmp ldt_flen[si],0 ! je lf_nxt
+	    push cx ! push ldt_start[si] ! push si
+	    call lod_group
+	    pop si ! pop ldt_start[si]
+	    cmp cx,0 ! pop cx
+	    je lf_nxt
+
+;if ccpm
+;
+;		jmp ld_out
+;endif
+
+;if mpm
+
+			; error in lod_group
+			; if loading shared code we also
+			; have to release Shared Code from SCL.
+			; It will be the top item in the list.
+
+		cmp ldt_atr[si],mf_load+mf_code+mf_share
+		je rm_sh
+		    jmp ld_out
+rm_sh:		push cx				; remember Err Code
+
+			; Remove PD from SCL
+		pushf ! cli
+		mov bx,scl
+		mov ax,p_thread[bx]
+		mov scl,ax
+		popf
+
+			; Release the memory
+
+		push ds ! push bx
+		mov bx,p_mem[bx] ! push ms_start[bx]
+		mov ax,ss ! mov ds,ax
+		mov dx,sp ! mov cx,f_memfree
+		call osif
+		pop ax ! pop bx ! pop ds
+		
+			; Place PD on PUL
+
+		pushf ! cli
+		mov ax,pul
+		mov pul,bx
+		mov p_link[bx],ax
+		popf
+
+		pop cx
+		jmp ld_out
+;endif
+
+lf_nxt:	add si,ldtlen ! loop lf_mre
+
+
+;	 Check for fixup records and do fixups
+
+        test lod_lbyte,80h        ; hi bit of last byte in cmd header
+        jz init_base              ; is set if fixups
+fx_read:
+        mov ax,lod_fixrec         ; get record # of fixups in file
+	mov bx,1                  ; read one record
+        mov cx,ds                               
+        mov dx, offset lod_dma
+        call drd                  ; do random read
+        jcxz fx_read_ok           ; 0=ok,CL=0ff if EOF
+	  inc cl		  ; EOF ?
+	  jnz fx_err		  ; some read error, not EOF
+	    mov ax,lod_fixrec1	  ; make sure one fixup
+	    cmp ax,lod_fixrec	  ; record was read since cmd header
+	    je fx_err		  ; said we needed them
+              jmps init_base
+
+fx_read_ok:                       ; go look for fixup records
+        mov bx,offset lod_dma	  ; BX-> at fixup records
+fx_chk:
+	mov al,fix_grp[bx]        ; any more fixups?
+	test al,al
+        jz init_base
+        and al,0fh		  ; low nibble is target group
+        call tblsrch              ; find target group in load table
+        mov dx,ldt_start[di]      ; DX = target segment, this is
+				  ; what we add to the load image
+	mov al,fix_grp[bx]	  ; location group is high nibble
+        mov cl,4                  ; put in low nibble of AL
+        shr al,cl
+        call tblsrch		  ; DI = location load table entry
+        mov ax,ldt_start[di]      ; AX = base segment of location
+	add ax,fix_para[bx]	  ; add paragraph offset
+
+        push es                   ; absolute paragraph in memory
+        mov es,ax
+        xor ax,ax
+        mov al,fix_offs[bx]       ; get offset of fixup location
+	mov di,ax                 
+        add es:[di],dx            ; make the fixup (finally)
+        pop es
+
+        add bx,fixlen             ; do next fixup
+	cmp bx,offset lod_dma + dskrecl	; end of this record ?
+        jne fx_chk
+          inc lod_fixrec	  ; read another record	
+          jmps fx_read		  ; of fixups
+
+tblsrch:
+;-------
+;	Search for group in load table
+;	entry:	AL = group # to match on
+;	exit:	DI = load group entry that matches or
+;		pop return and exit loader
+;		BX,DX preserved
+
+        mov cx,lod_nldt           ; # entries in table
+        mov di,offset ldtab
+srchloop:
+        cmp al,ldt_type[di]
+        je srchdn                 ; found group's entry
+          add di,ldtlen
+          loop srchloop
+	  pop ax
+	  jmps fx_err
+srchdn:
+	ret
+
+fx_err:
+	mov cx,e_fixuprec
+	jmp ld_out
+
+
+		; init Base Page
+		; 	1st Data Group has Base Page
+		;	if none then first nonshared
+		;	Code Group (8080 model)	
+init_base:
+	mov lod_8080,0
+	mov si,offset ldtab
+	mov cx,lod_nldt
+lb_more:cmp ldt_type[si],2 ! je lb_fnd
+	    add si,ldtlen ! loop lb_more
+		mov si,offset ldtab
+		mov cx,lod_nldt
+lbc_mre:	cmp ldt_type[si],1 ! je lb_fnd80
+		    add si,ldtlen ! loop lbc_mre
+			mov cx,e_no_cseg ! jmp ld_out
+lb_fnd80:	mov lod_8080,1
+lb_fnd:
+	push es ! mov es,ldt_start[si]
+	mov lod_basep,es
+	sub ax,ax ! mov di,ax
+	mov cx,05bh/2 ! rep stos ax
+	mov al,lod_8080 ! mov es:.5,al
+	mov si,offset ldtab
+	mov cx,lod_nldt
+lbb_mre:cmp ldt_type[si],0 ! je lbb_nxt
+	    mov ax,6 ! mov bl,ldt_type[si]
+	    cmp bl,9 ! jne lbb_nsh
+		mov bl,1
+lbb_nsh:    dec bl ! mul bl ! mov bx,ax
+
+		;calculate last byte (3 byte value)
+		;  =(paragraphs*16)-1
+	    push cx ! mov dx,ldt_min[si]
+	    push dx ! mov cl,4 ! shl dx,cl
+	    push dx ! dec dx ! mov es:[bx],dx
+	    pop cx ! pop dx ! push cx
+	    mov cl,12 ! shr dx,cl ! pop cx
+	    cmp cx,0 ! jne lbb_nzer
+		cmp dx,0 ! je lbb_zer
+		    dec dl ! jmps lbb_nzer
+lbb_zer:	mov es:word ptr [bx],0
+lbb_nzer:   mov es:2[bx],dl ! pop cx
+
+		;put starting paragraph in place
+	    mov ax,ldt_start[si] ! mov es:3[bx],ax
+lbb_nxt:add si,ldtlen ! loop lbb_mre
+
+		;if 8080 model, copy CS info into DS info
+
+	cmp lod_8080,1 ! jne lnot80
+	    push ds ! push es ! pop ds ! mov si,0
+	    mov di,6 ! mov cx,3
+	    rep movsw ! pop ds
+lnot80:
+	mov al,lod_fifty	;initialize base page load disk
+	mov es:.50H,al
+	pop es
+
+		; init PD ,UDA and LDSTK
+
+	mov bx,lod_basep
+	cmp lod_pd,0 ! jne lip_1
+	    jmp lod_exit
+lip_1:	mov si,offset ldtab
+	mov bx,lod_pd
+                ; if 8087 user, flag it
+        cmp lod_ndp, 0
+         jz lip_2
+        cmp lod_ndp, 1
+          jnz true_87
+        or p_sflag[bx],psf_em87
+          jmp lip_2
+true_87:
+        or p_flag[bx],pf_8087
+lip_2:	        
+                ;if it requires suspend mode, flag it
+        cmp lod_suspnd,0ffh
+        jnz lip_3
+        or p_sflag[bx],psf_suspend
+lip_3:
+        mov ax,ldt_start[si]
+	mov p_uda[bx],ax
+		; remember where lstk,uda are
+	mov lod_uda,ax
+	push es ! mov es,ax
+                ; if 8087 user, use long uda
+        cmp lod_ndp,0
+         jz shrt_uda   
+        cmp lod_ndp,1
+         jz med_uda
+            add ax,(u8087len/16) ! jmp inter_uda  ; full 8087 user, long uda
+med_uda:    add ax,(em87len/16) ! jmp inter_uda   ; uses 87 emulator,medium uda
+shrt_uda:   add ax,(ulen/16)                      ; no 8087 activity,short uda
+inter_uda:  mov lod_lstk,ax
+
+		; initialize UDA,LDSTK with zeros
+	xor di,di ! mov ax,di
+
+                ; if 8087 user, use long uda
+	cmp lod_ndp,0
+         jz shrt_uda1
+                ; if 8087 emulator user, use medium uda
+        cmp lod_ndp,1
+         jnz long_uda1
+        mov cx,(em87len + lstklen)/2 ! jmp inter_uda1
+long_uda1:
+        mov cx,(u8087len + lstklen)/2 ! jmp inter_uda1
+shrt_uda1:  mov cx,(ulen + lstklen)/2
+inter_uda1: rep stos ax ! pop es
+
+		; setup p_uda for creat_proc
+
+	mov ax,sysdat
+	sub p_uda[bx],ax
+	mov p_stat[bx],ps_run
+	mov p_prior[bx],200
+
+		; init load disk/user
+
+	mov al,lod_user ! mov p_luser[bx],al
+	mov al,lod_disk ! mov p_ldsk[bx],al
+
+			; init UDA
+
+	push es ! mov es,lod_uda
+	mov u_dma_ofst,(offset bpg_dma)
+	mov bx,lod_basep
+	mov u_dma_seg,bx
+	mov ax,lod_lstk
+        cmp lod_ndp,0ffh          ; if 8087 user, init control word for
+        jnz not_8087              ; first dispatch's frstor
+        mov u_8087, controlw      ; 03ffh = post-init 8087 state
+        push ax
+        mov ax,sysvec87_of
+        mov u_ivec87_of,ax
+        mov ax,sysvec87_sg
+        mov u_ivec87_sg,ax
+        pop ax 
+not_8087:
+	push ds ! mov ds,bx
+	mov u_initds,bx
+	mov u_inites,bx
+	mov u_initss,ax
+	mov ax,bpg_cseg
+	cmp ax,0 ! jne h_cs
+	    pop ds ! pop es ! mov cx,e_no_cseg
+	    jmp ld_out
+h_cs:   mov u_initcs,ax
+	mov ax,bpg_eseg
+	cmp ax,0 ! je noes
+	    mov u_inites,ax
+noes:	mov u_stack_sp,(offset ls_sp)
+	sub dx,dx ! mov al,bpg_8080
+	cmp al,0 ! je n80m
+	    mov dx,0100h
+n80m:
+	mov ds,u_initss
+	mov ls_offset,dx		;set up initial stack
+	mov ls_flags,0200h		;for a RETF from user
+	mov ls_roffset,offset user_retf	;process, see SUPIF.SUP
+	mov ls_rcseg,cs			;module for USER_RETF:
+	pop ds ! pop es			;code
+	mov bx,lod_basep
+	sub cx,cx
+lod_exit:
+	push cx ! push bx
+	mov cx,f_qwrite ! mov dx,offset mxloadqpb
+	call osif ! pop bx ! pop cx ! ret
+
+
+lod_group:		;load a group described in ldtab
+;----------
+;	input:	SI = addr of ldtab entry
+;	output:	CX = Error Code
+
+		; see if first part already in DMA
+	mov bx,si
+	mov ax,lod_indma		;starting paragraph in dma 
+	mov cx,ldt_fstrt[bx]
+		;AX = starting paragraph in local DMA
+		;CX = starting paragraph to transfer
+		;BX -> ldtab entry
+	cmp cx,ax ! jb rd_first
+		;starts at or after the pp. in dma
+	    sub cx,ax
+	    cmp cx,8 ! jae rd_first
+			;starts in the dma
+		mov dx,8 ! sub dx,cx
+			;CX = # of pp. to skip
+			;DX = length of remaining buffer
+		cmp dx,ldt_flen[bx] ! jbe xfer
+		    mov dx,ldt_flen[bx]
+xfer:		mov si,offset lod_dma
+		mov ax,cx ! mov cl,4 ! shl ax,cl
+		add si,ax
+			;SI -> beginning of transfer area
+			;	in lod_dma
+		mov ax,dx ! mov cl,3 ! shl ax,cl
+		mov cx,ax
+			;CX = number of words to transfer
+		xor di,di
+		push es ! mov es,ldt_start[bx]
+		rep movsw ! pop es
+		add ldt_start[bx],dx
+		sub ldt_flen[bx],dx ! add ldt_fstrt[bx],dx
+rd_first:
+	cmp ldt_flen[bx],0 ! jne rd_1st
+	    sub cx,cx ! ret
+rd_1st:
+	test ldt_fstrt[bx],07h ! jnz rd_indma
+	cmp ldt_flen[bx],8 ! jae xf_d
+rd_indma:
+	    push bx
+	    mov ax,ldt_fstrt[bx]
+	    shr ax,1 ! shr ax,1 ! shr ax,1	; Record #
+	    mov bx,1				; read 1 record
+	    mov dx,offset lod_dma		; DMA offset
+	    mov cx,sysdat			; DMA segment
+	    call drd
+	    pop bx
+	    jcxz rd_agn
+		cmp cx,0ffh ! jne rd_r3
+		    mov cx,0
+rd_r3:		ret
+rd_agn:	    mov ax,ldt_fstrt[bx]
+	    and ax,0fff8h			; note starting paragraph
+	    mov lod_indma,ax			; in DMA
+	    mov si,bx ! jmp lod_group
+
+		; We are at a Sector Boundary with at least
+		; a sector to place into the user area
+xf_d:
+	push bx
+	sub dx,dx				; DMA offset
+	mov cx,ldt_start[bx]			; DMA segment
+	mov ax,ldt_fstrt[bx]
+	shr ax,1 ! shr ax,1 ! shr ax,1		; Record #
+	mov bx,ldt_flen[bx]
+	shr bx,1 ! shr bx,1 ! shr bx,1		; # of records
+	push bx
+	call drd
+	pop ax ! pop bx
+	jcxz xfer_n
+	    cmp cx,0ffh ! jne rd_r4
+		xor cx,cx
+rd_r4:	    ret
+xfer_n: shl ax,1 ! shl ax,1 ! shl ax,1
+	add ldt_start[bx],ax
+	add ldt_fstrt[bx],ax
+	sub ldt_flen[bx],ax
+	jmp rd_first
+
+drd:
+;	input:	AX = Record Number
+;		BX = Number of Sectors
+;		CX = dma segment
+;		DX = dma offset
+;	output:	CX = 0 if okay
+;		CX = 0FFH if End of File
+;		     else Error Code
+
+	mov u_dma_ofst,dx
+	mov u_dma_seg,cx
+
+		; read BX sectors starting at Record AX
+drd_lp:
+	push bx				;old # sectors
+	push ax				;old record #
+	cmp bx,128 ! jbe drd_r
+	    mov bx,128
+
+		; Max Mulit-sector count is 128
+
+drd_r:	mov cl,u_mult_cnt
+	push cx
+	mov u_mult_cnt,bl
+	push bx
+	mov si,offset lod_fcb
+	mov fcb_r0[si],ax
+	mov cx,f_freadrdm ! mov dx,si
+	push es ! call osif ! pop es
+	pop dx				;multi_cnt used
+	pop cx ! mov u_mult_cnt,cl
+	cmp bl,1 ! jbe dr_r2
+	    mov cx,e_bad_read ! mov bx,0ffffh
+	    pop ax ! pop ax ! ret
+dr_r2:	mov cl,bl 
+        xor bh,bh ! mov di,bx           ;save BL for header read check
+	pop ax ! add ax,dx		;adjust record #
+	pop bx ! sub bx,dx		;adjust # sectors
+	shl dx,1 ! shl dx,1 ! shl dx,1
+	add u_dma_seg,dx
+
+		; check for CTRL C.  If hit while loading
+		; last set of characters, this is the place to
+		; clean things up...
+
+	push cx ! push ax ! push bx ! push di
+	mov cx,f_ciostat ! call osif
+	pop di ! pop bx ! pop ax ! pop cx
+
+		; Now see if CTRL C was hit during the
+		; the load.
+
+	mov si,rlr
+	test p_flag[si],pf_ctlc ! jz dr_r1
+	    mov cx,e_abort ! mov bx,0ffffh
+	    ret
+dr_r1:	cmp cl,0 ! je dr_r5
+	    mov cx,0ffh ! ret
+dr_r5:	cmp bx,0 ! jne dr_r6
+	    xor cx,cx
+	    ret
+dr_r6:  jmp drd_lp
+
+;if mpm
+
+get_sh:
+;------
+; Allocate memory for shared code.  If memory already
+; exists then mark LDTAB entry with FLEN=0 for no load.
+; START must be non-zero on success.
+;
+;	input:	SI = LDTAB Entry for shared code
+;	output:	CX = 0 on success
+;		   = 0ffffh on failure
+;		SI is unchanged
+;		
+
+		; 1. Look for PD Name on SCL, making sure
+		;	LDSK and LUSER are the same.
+
+	mov bx,(offset scl)-p_thread
+gs_nxt:	push si
+	mov dx,offset lod_fcb ! add dx,fcb_name
+	mov cx,f_findpdname ! call osif
+			; BX=pd found or 0ffffh
+	pop si
+	cmp bx,0ffffh ! je no_sh
+	    mov al,lod_disk
+	    cmp p_ldsk[bx],al ! jne gs_nxt
+		mov al,lod_user
+		cmp p_luser[bx],al ! jne gs_nxt
+
+		; 2. if (1.) then Share the Memory.
+		; 2.1  Set FLEN=0
+
+		    push bx ! push si
+		    call shmem
+		    pop si ! pop bx
+		    cmp cx,0ffffh ! je no_sh  
+			mov ldt_flen[si],0
+
+				;  Put SHARE PD on end of SCL
+				;  BX = SHARE PD
+
+			pushf ! cli
+			mov di,(offset SCL)-p_thread
+sh_nin1:		cmp p_thread[di],bx ! je sh_rm	;look for share PD
+			    mov di,p_thread[di] ! jmps sh_nin1
+sh_rm:			mov ax,p_thread[bx]		;take it off the list
+			mov p_thread[di],ax
+sh_in:			cmp p_thread[di],0 ! je sh_end	;look for the end
+			    mov di,p_thread[di] ! jmps sh_in		
+sh_end:			mov p_thread[di],bx		;insert share PD on end
+	        	xor cx,cx
+	        	mov p_thread[bx],cx
+	        	popf ! ret			;success
+
+		; 3. if (NOT 1.) allocate memory to NEW PD
+no_sh:
+
+			; get new PD
+
+	pushf ! cli
+	mov bx,pul
+	cmp bx,0 ! je sherr
+	    mov ax,p_link[bx] ! mov pul,ax
+	    popf
+
+			; alloc memory for code segment
+
+	    push bx ! push si
+	    mov cx,f_malloc
+	    mov dx,si
+	    call osif
+	    pop si ! pop bx
+	    cmp cx,0 ! jne merr
+
+			; initialize new PD name
+			; BX = New PD
+		push si
+		mov si,ldt_pd[si]		;SI=old pd
+		push si
+		mov di,bx
+		add si,p_name ! add di,p_name
+		mov cx,4
+		push es ! mov ax,ds ! mov es,ax
+		rep movsw
+		pop es ! pop di ! pop si
+
+			; DI = old PD, BX=New PD
+
+		mov al,lod_user ! mov p_luser[bx],al
+		mov al,lod_disk ! mov p_ldsk[bx],al
+
+			; share w/new PD
+
+		mov ax,ldt_start[si]
+		push bx ! push si ! push ds
+		push ax ! push bx ! push di
+		mov ax,ss ! mov ds,ax
+		mov dx,sp ! mov cx,f_share
+		call osif
+		add sp,6
+		pop ds ! pop si ! pop bx
+
+		; put new PD on SCL
+
+		pushf ! cli
+		mov di,(offset SCL)-p_thread
+sh_nin:		cmp p_thread[di],0 ! je sh_doit
+		    mov di,p_thread[di] ! jmps sh_nin
+sh_doit:        mov p_thread[di],bx		;insert new share PD
+	        xor cx,cx
+	        mov p_thread[bx],cx
+	        popf ! ret			;success
+merr:	    pushf ! cli
+	    mov ax,pul
+	    mov p_link[bx],ax
+	    mov pul,bx
+sherr:	popf
+	mov cx,0ffffh ! ret
+
+shmem:
+;-----
+;input:	SI = LDTAB
+;	BX = Owner PD
+;	Load_pd = Requestor
+;	Have to set LDT_START
+;
+
+	lea di,(p_mem-ms_link)[bx]
+sm_nxt:
+	mov di,ms_link[di]
+	cmp di,0 ! je sm_no
+	    mov ax,ms_flags[di]
+	    and ax,mf_share+mf_code+mf_load
+	    cmp ax,mf_share+mf_code+mf_load ! jne sm_nxt
+		push si ! push ds
+		push ms_start[di]
+		push ms_start[di]
+		push lod_pd
+		push bx
+		mov ax,ss ! mov ds,ax
+		mov dx,sp ! mov cx,f_share
+		call osif
+
+			; This will always work.
+
+		pop ax ! pop ax ! pop ax
+		pop dx ! pop ds ! pop si
+		mov ldt_start[si],dx
+		ret
+sm_no:	mov cx,0ffffh ! ret
+
+

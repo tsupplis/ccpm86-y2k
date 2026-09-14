@@ -1,0 +1,51 @@
+TITLE '** CCP/M-86 XIOS for IBM PC **'
+;*****************************************************************
+;*
+;*
+;*	               X  I  O  S
+;*                    ============
+;*
+;*        Concurrent CP/M-86 eXtended I/O System
+;*			 for the
+;*		  IBM Personal Computer
+;*
+;*	Copyright (C) 1983, Digital Research, Inc.
+;*	Box 579, Pacific Grove,  California  93950
+;*
+;*
+;*	Dec 13, 1983	 adapted by:  Dean Ballard
+;*
+;*	Ctrl/Alt/Del left alone, 0D000 MDisk works
+;*	XIOS does not trap in extended error modes
+;*	FIDDS hooks in, but are they really usable
+;*	Interrupt init to handle div, ovf, and unx
+;*	HDMAINT now modified for CCP/M version 3.1
+;*	Disk & Printer error handlers now included
+;*	Graphics support via Function 30 and ESC a
+;*	Setup Interface and Full Top special cases
+;*	Queue Driven Serial Communication included
+;*	Modified for version 3.1 CON and RSP files
+;*	Prog Func Keys and mono/color Status Lines
+;*	Double sided floppy disks and XT hard disk
+;*	Color monitor with windowing now supported
+;*	Backdoor window control entry points added
+;*
+;*************************************************
+;
+;
+
+
+include		xbegin.lib	; header, entry, patch_space, ints
+
+include		xchar.lib	; conin, status_line, list, ccb/lcb's
+
+include		xconout.lib	; console out only, including windows
+
+include		xfloppy.lib	; floppy, mdisk, disk error handling
+
+include		xhard.lib	; XT hard disk, FIDDS
+
+include		xinit.lib	; startup, hardware init, int vectors
+
+	end
+

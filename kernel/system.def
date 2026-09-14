@@ -1,0 +1,35 @@
+;*****************************************************
+;*
+;*	SYSTEM DEFINITIONS
+;*
+;*****************************************************
+
+true	   equ	0ffffh	      ; value of TRUE
+false	   equ	0	      ; value of FALSE
+unknown	   equ	0	      ; value to be filled in
+dskrecl	   equ	128	      ; log. disk record len
+fcblen	   equ	32	      ; size of file control block
+pnamsiz	   equ	8	      ; size of process name
+qnamsiz	   equ	pnamsiz	      ; size of queue name
+fnamsiz	   equ	pnamsiz	      ; size of file name
+ftypsiz	   equ	3	      ; size of file type
+osint	   equ	224	      ; int vec for O.S. entry
+debugint   equ	osint+1       ; int vec for debuggers
+ulen	   equ	0100h         ; size of uda
+u8087len   equ  ulen + 96     ; size of uda when process uses 8087
+em87len    equ  ulen + 64     ; size of uda when process uses 8087 emulator
+pdlen	   equ	030h	      ; size of Process Descriptor
+todlen	   equ	5	      ; size of Time of Day struct
+flag_tick  equ	1	      ; flag 0 = tick flag
+flag_sec   equ	2	      ; flag 1 = second flag
+flag_min   equ	3	      ; flag 2 = minute flag
+ldtabsiz   equ	0aah	      ; ldtablen=11, 10 entries
+
+mpm	equ	true          ; MP/M-86 or
+ccpm	equ	not mpm       ; CCP/M-86
+
+BCPM	equ	false	      ; CP/M-86 BDOS
+BMPM	equ	not BCPM      ; multi-process BDOS
+
+netversion equ  true          ; includes network changes
+

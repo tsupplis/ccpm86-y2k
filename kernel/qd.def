@@ -1,0 +1,83 @@
+;*****************************************************
+;*
+;*	Queue Descriptor - This is structure is used
+;*		to create a queue.  One is maintained
+;*		in the system data area for each queue
+;*
+;*	+----+----+----+----+----+----+----+----+
+;*   00	|  link   |net |org |  flags  |  name...
+;*	+----+----+----+----+----+----+----+----+
+;*   08	            ...name           | msglen  |  
+;*	+----+----+----+----+----+----+----+----+
+;*   10	|  nmsgs  |   dq    |   nq    | msgcnt  |
+;*	+----+----+----+----+----+----+----+----+
+;*   18 | msgout  | buffer  |
+;*	+----+----+----+----+
+;*
+;*	link	- used to link QDs is system lists
+;*	net	- which machine in the network
+;*	org	- origin machine in the network
+;*	flags	- Queue Flags
+;*	name	- Name of Queue
+;*	msglen	- # of bytes in one message
+;*	nmsgs	- maximum # of messages in queue 
+;*	dq	- Root of PDs waiting to read
+;*	nq	- Root of PDs list waiting to write
+;*	msgcnt	- # of messages currently in queue
+;*	msgout	- next message # to read
+;*	buf	- pointer to queue message buffer
+;*		  (for MX queues, owner of queue)
+;*
+;*****************************************************
+
+q_link		equ	word ptr 0
+q_net		equ	byte ptr q_link + word
+q_org		equ	byte ptr q_net + byte
+q_flags		equ	word ptr q_org + byte
+q_name		equ	byte ptr q_flags + word
+q_msglen	equ	word ptr q_name + qnamsiz
+q_nmsgs		equ	word ptr q_msglen + word
+q_dq		equ	word ptr q_nmsgs + word
+q_nq		equ	word ptr q_dq + word
+q_msgcnt	equ	word ptr q_nq + word
+q_msgout	equ	word ptr q_msgcnt + word
+q_buf		equ	word ptr q_msgout + word
+qdlen		equ	q_buf + word
+;
+;	Q_FLAGS values
+;
+qf_mx		equ	001h	; Mutual Exclusion
+qf_keep		equ	002h	; NO DELETE
+qf_hide		equ	004h	; Not User writable
+qf_rsp		equ	008h	; rsp queue
+qf_table	equ	010h	; from qd table
+qf_rpl		equ	020h	; rpl queue
+qf_dev		equ	040h	; device queue
+
+;*****************************************************
+;*
+;*	QPB - Queue Parameter Block
+;*
+;*	+----+----+----+----+----+----+----+----+
+;*  00	|flgs|net |  qaddr  |  nmsgs  | buffptr |
+;*	+----+----+----+----+----+----+----+----+
+;*  08	|                 name                  |
+;*	+----+----+----+----+----+----+----+----+
+;*
+;*	flgs	- unused
+;*	net	- unused (which machine to use)
+;*	qaddr	- Queue ID, address of QD
+;*	nmsgs	- number of messages to read/write
+;*	buffptr - address to read/write into/from
+;*	name	- name of queue (for open only)
+;*
+;*****************************************************
+
+qpb_flgs	equ	byte ptr 0
+qpb_net		equ	byte ptr qpb_flgs + byte
+qpb_qaddr	equ	word ptr qpb_net + byte
+qpb_nmsgs	equ	word ptr qpb_qaddr + word
+qpb_buffptr	equ	word ptr qpb_nmsgs + word
+qpb_name	equ	byte ptr qpb_buffptr + word
+qpblen		equ	qpb_name + qnamsiz
+

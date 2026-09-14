@@ -1,0 +1,121 @@
+;************************************************
+;*
+;*	Virtual Console Control Block Definition
+;*
+;*	+---------+---------+---------+---------+
+;*  00	|      attach       |       queue       |
+;*	+---------+---------+---------+---------+
+;*  04	|  flag   | startcol| column  |  rsvrd  |
+;*	+---------+---------+---------+---------+
+;*  08	|  mimic  | msource |   pc    |    vc   |
+;*	+---------+---------+---------+---------+
+;*  0C	|  btmp   |   rsvd  |       state       |
+;*	+---------+---------+---------+---------+
+;*  10  |     maxbufsiz     |       vinq        |
+;*	+---------+---------+---------+---------+
+;*  14  |       voutq       |       vcmxq       |
+;*      +---------+---------+---------+---------+
+;*  18  | qpbflags| qpbfill |     qpbqaddr      |          
+;*      +---------+---------+---------+---------+
+;*  1C  |      qpbnmsgs     |     qpbbuffptr    |
+;*      +---------+---------+---------+---------+
+;*  20  |       qbuff       |       cosleep     |
+;*      +---------+---------+---------+---------+
+;*  24  |       usleep      |       vsleep      |
+;*      +---------+---------+---------+---------+
+;*  28  |        link       +        nchar      |
+;*      +---------+---------+---------+---------+
+;*
+;*
+;*
+;*	attach	- current owner of device
+;*		  if 0, no owner
+;*		  if 0ffffh, a mimic device
+;*	queue	- linked list of PDs waiting to attach
+;*	flag	- run-time flags
+;*	startcol- used for line editing
+;*	column	- used for line editing
+;*	rsvrd	- reserved
+;*	mimic	- cio dev that mimics us.
+;*		  0ffh means no mimic device
+;*	msource	- if attach = 0ffffh, we are a
+;*		  mimic device and msource is the
+;*		  device we are mimicing.
+;*	pc	- physical console number
+;*      vc	- virtual console number
+;*	btmp	- temporary line editing variable
+;*	rsvd	- unused
+;*	state	- current state of virtual console
+;*	maxbufsiz - maximum file size for buffered mode
+;*	vinq 	- address of QPB for this virtual console's
+;*		  input.  written by PIN, created by the VOUT
+;*		  process associated with this virtual console
+;*	voutq 	- address of QPB for this virtual console's
+;*		  output. written and created by the assoc. VOUT
+;*	vcmxq	- MX queue for changing of virtual console state
+;*      qpbflags- the 1st 8 bytes of a Queue Parameter Block, for
+;*		  queue reads and writes, used only by reentrant
+;*                intercept code
+;*	qbuff	- buffer for queue writes
+;*	cosleep	- temporary list for processes waiting for XIOS console output
+;*	usleep	- user process sleeps here
+;*	vsleep	- vout process sleeps here
+;*        link  - links vc's with common physicals
+;*       nchar  - 16 bit keyboard input lookahead for status
+;*
+        
+c_attach	equ	word ptr 0
+c_queue		equ	word ptr c_attach + word
+c_flag		equ	byte ptr c_queue + word
+c_strtcol	equ	byte ptr c_flag + byte
+c_column	equ	byte ptr c_strtcol + byte
+c_rsrvd		equ	byte ptr c_column + byte
+c_mimic		equ	byte ptr c_rsrvd + byte
+c_msource	equ	byte ptr c_mimic + byte
+c_pc		equ	byte ptr c_msource + byte
+c_vc		equ	byte ptr c_pc + byte
+c_btmp		equ	byte ptr c_vc + byte
+c_rsvd		equ	byte ptr c_btmp + byte
+c_state		equ	word ptr c_rsvd + byte
+c_maxbufsiz	equ	word ptr c_state + word
+c_vinq		equ	word ptr c_maxbufsiz + word
+c_voutq		equ	word ptr c_vinq + word
+c_vcmxq		equ	word ptr c_voutq + word
+c_qpbflags	equ	byte ptr c_vcmxq + word
+c_qpbfill	equ	byte ptr c_qpbflags + byte
+c_qpbqaddr	equ	word ptr c_qpbfill + byte
+c_qpbnmsgs	equ	word ptr c_qpbqaddr + word
+c_qpbbuffptr	equ	word ptr c_qpbnmsgs + word
+c_qbuff		equ	word ptr c_qpbbuffptr + word
+c_cosleep	equ	word ptr c_qbuff + word
+c_usleep	equ	word ptr c_cosleep + word
+c_vsleep	equ	word ptr c_usleep + word
+c_link          equ     word ptr c_vsleep + word
+c_nchar         equ     word ptr c_link + word
+ccblen		equ	c_nchar + word 
+
+; Flags for c_flag
+
+cf_listcp	equ	001h	;control P toggle
+cf_compc	equ	002h	;suppress output
+cf_switchs	equ	004h	;XIOS supports switch screening
+cf_conout	equ	008h	;ownership flag of console output
+cf_vout		equ	010h	;process writing to VOUTQ
+cf_bufp		equ	020h	;just sent a char to a VOUTQ, don't
+				;echo to list if csm_ctrlP is set.
+;CCB state flags
+
+csm_buffered	equ	00001h
+csm_background	equ	00002h
+csm_purging	equ	00004h
+csm_noswitch	equ	00008h
+csm_suspend	equ	00010h
+csm_abort	equ	00020h
+csm_filefull	equ	00040h
+csm_ctrlS	equ	00080h
+csm_ctrlO	equ	00100h
+csm_ctrlP	equ	00200h
+
+;LCB - list control block is first ten bytes of VCCB
+lcblen		equ	10
+

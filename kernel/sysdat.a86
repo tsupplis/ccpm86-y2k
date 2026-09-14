@@ -1,0 +1,15 @@
+eject ! include cpyright.def
+
+;*****************************************************
+;*
+;*	System Data Area - Initialized Data
+;*
+;*****************************************************
+eject ! include system.def
+eject ! include pd.def
+eject ! include uda.def
+eject ! include qd.def
+eject ! include modfunc.def
+eject ! include sysdat.dat
+eject ! include data.bdo
+

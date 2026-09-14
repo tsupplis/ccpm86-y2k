@@ -1,0 +1,29 @@
+	include cpyright.def
+
+;*****************************************************
+;*
+;*	MP/M-86 and Concurrent CP/M-86 
+;*	     Character I/O Module
+;*
+;*****************************************************
+	eject ! include system.def
+	eject ! include modfunc.def
+	eject ! include xioscb.def
+	eject ! include pd.def
+	eject ! include err.def
+	eject ! include qd.def
+	eject ! include acb.def
+	eject ! include vccb.def
+	eject ! include char.def
+	eject ! include cmode.def
+	eject ! include cb.def
+        eject ! include uda.def
+	eject ! include cioif.cio
+	eject ! include console.cio
+	eject ! include chario.cio
+	eject ! include patch.cod
+	eject ! include uda.fmt
+	eject ! include sysdat.dat
+	eject ! include data.bdo
+	eject ! end
+

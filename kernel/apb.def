@@ -1,0 +1,16 @@
+;*************************************************************
+;*
+;*	Abort Parameter Block
+;*
+;*************************************************************
+
+apb_pd		equ	word ptr 0
+apb_term	equ	word ptr apb_pd + word
+apb_cns		equ	byte ptr apb_term + word
+apb_net		equ	byte ptr apb_cns + byte
+apb_pdname	equ	byte ptr apb_net + byte
+apb_len		equ	apb_pdname + pnamsiz
+
+;	Priority processes are set to when aborting
+
+abt_prior	equ	32

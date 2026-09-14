@@ -1,0 +1,15 @@
+
+;*****************************************************
+;*
+;*	Format of Flag Table Entry
+;*
+;*****************************************************
+
+flg_pd		equ	word ptr 0
+flg_ignore	equ	byte ptr (flg_pd + word)
+flglen		equ	flg_ignore + byte
+
+flag_off	equ	0ffffh		;flag not set
+flag_on		equ	0fffeh		;flag set
+flag_zig	equ	0ffh		;normal value
+

@@ -1,0 +1,316 @@
+
+;			  ***  SEROUT.RSP  ***
+
+;			  A Concurrent CP/M-86
+;		       Resident System Process for
+;	          Queue Driven Serial Character Output
+
+;	Oct 19, 1983				   Dean Ballard
+
+
+;	This program reads the serial out queue and sends those
+;	characters to the asynchronous communications port.  It
+;	is interrupt driven in that it performs a flag-wait any
+;	time that the async port is not ready to transmit chars.
+;	Setting up the actual interrupt routine is the respons-
+;	ibility of the companion Serial Input routine.
+
+
+;	First the hardware independent equate values.
+;	These have to do with the queue management, and generally
+;	pertain to the application program side of things.
+
+q_mes_size	equ	17	; byte count plus 16 characters
+out_q_num	equ	2	; number of out queue messages
+
+bdos		equ	0E0h	; bdos interrupt number
+
+c_detach	equ	93h	; detach console
+dev_flag_wait	equ	84h	; wait for a flag
+dev_flag_set	equ	85h	; release a flag
+p_delay		equ	8Dh	; delay dx ticks
+p_term		equ	8Fh	; terminate process
+q_make		equ	86h	; create queue code
+q_open		equ	87h	; open queue code
+q_read		equ	89h	; read queue code
+q_write		equ	8Bh	; write queue code
+
+;	RSP origin equates
+
+rsp_header	equ	00h	; start of data seg
+rsp_pd		equ	10h	; process descriptor offset
+rsp_uda		equ	40h	; user data area offset
+rsp_stack_top	equ	13Ah	; UDA stack
+rsp_data_end	equ	140h	; end of rsp stuff
+
+;	Data structure for information shared with interrupt routine
+
+t_wait		equ	byte ptr 0	; flag wait semaphore
+t_count		equ	byte ptr 1	; chars left in message
+t_ptr_off	equ	word ptr 2	; offset of trans message
+t_ptr_seg	equ	word ptr 4	; segment of trans message
+rec_prot	equ	byte ptr 6	; receive protocol code
+tran_prot	equ	byte ptr 7	; transmit protocol code
+
+
+;	Now the hardware specific equates
+;	These have to do with the I/O port and interrupt management,
+;	and are, for the most part, specific to the IBM PC
+
+;	async port bit patterns
+
+dr		equ	01h			; data ready
+tbe		equ	20h			; xmit buf empty
+r_t_mask	equ	03h			; rec/trans int en
+modem_mask	equ	0Bh			; dtr, cts, en int
+
+
+
+;	**************************
+;	***  Code begins here  ***
+;	**************************
+
+	cseg
+
+	org	00h			; small model
+
+serial_out:
+	call	which_port		; are we port 0 or port 1 ?
+	call	is_it_there		; if the port is not present
+	jnz	terminate_out		;   then terminate the process
+
+	call	open_out		; open the output queue
+	call	get_t_block		; copy address to local mem
+
+out_loop:
+	call	read_q			; wait for queue to fill
+	call	send_chars		; transmit queue message
+	jmps	out_loop		; go forever
+
+terminate_out:
+	mov	pd_flag,0		; turn off the keep flag
+	mov	cl,p_term
+	mov	dl,0
+	int	bdos			; back to bdos
+
+
+;	***************************
+;	***  Setup Subroutines  ***
+;	***************************
+
+;	see which port we are, and adjust params if necessary
+
+which_port:
+	mov	al,ncp			; get copy number
+	cmp	al,0			; if port = 0
+	jz	which_port_done		;   then leave params alone
+
+	add	al,'0'			; change port number to ascii
+	mov	qpb_out_p,al		;   and update queue name
+
+	mov	si,offset port1_params	; now adjust parameters
+	mov	di,offset port0_params
+	mov	cx,port_param_size
+	cld
+	rep	movsb			; copy port1 over port0
+
+which_port_done:
+	ret
+
+
+;	check to see if the port is present
+;	exit:	zf set if port is present
+
+is_it_there:
+	mov	dx,port_int_id		; interrupt ident port
+	in	al,dx
+	test	al,0F8h			; should be zero if present
+	ret
+
+
+;	Open the output queue
+;	If the open fails, it is because the companion Serial Input
+;	routine has not yet made the queue.  Wait here until it does.
+
+open_out:
+	mov	cl,q_open
+	mov	dx,offset qpb_out	; output queue param block
+	int	bdos			; open it
+
+	test	ax,ax			; if not successful
+	jnz	open_out		;   then try again
+	ret
+
+
+;	copy t_block address to local memory
+;	this address is passed by the companion Serial In routine
+
+get_t_block:
+	mov	cl,q_read
+	mov	dx,offset qpb_out	; output queue param block
+	int	bdos			; read shared data pointer
+
+	les	di,dword ptr msg_out	; get segment and offset
+	mov	t_block_o,di
+	mov	t_block_s,es		; save for wait loop
+	mov	es:t_ptr_seg[di],ds	; tell int where to find
+	ret				;   our trans message
+
+
+;	**************************
+;	***  Loop Subroutines  ***
+;	**************************
+
+;	read one message from the queue
+;	return only valid data messages
+
+read_q:
+	mov	cl,q_read
+	mov	dx,offset qpb_out	; output queue param block
+	int	bdos			; wait here until ready
+
+	mov	ax,word ptr msg_out	; al = count, ah = 1st byte
+	cmp	al,q_mes_size		; check message count
+	jb	read_q_done		; return if valid data msg
+
+	les	di,t_block		; point to shared data
+	cmp	al,0FEh			; recieve protocol code
+	jnz	read_q1
+	mov	es:rec_prot[di],ah	; set receive protocol
+read_q1:
+	cmp	al,0FFh			; trans protocol code
+	jnz	read_q
+	mov	es:tran_prot[di],ah	; set transmit protocol
+	jmps	read_q			; go back for another
+
+read_q_done:
+	ret				; return when ready to send
+
+
+;	send a new queue message to the interrupt routine
+
+send_chars:
+	les	di,t_block		; point to shared data
+	mov	si,offset msg_out
+	lodsb				; get message count
+	mov	es:t_ptr_off[di],si	; save the message pointer
+	mov	es:t_count[di],al	;   and the message count
+
+send_again:
+	les	di,t_block		; point to shared data
+	mov	es:t_wait[di],0FFh	; tell int we're waiting
+	call	fake_int		; and fake an interrupt
+
+	mov	cl,dev_flag_wait
+	mov	dl,t_flag		; transmit flag
+	int	bdos			; wait here for int done
+
+	les	di,t_block		; point to shared data
+	cmp	es:t_count[di],0	; if whole message sent
+	jz	send_done		;   then we're done
+
+	mov	cl,p_delay		; if not, there must be
+	mov	dx,2			;   some protocol hang up
+	int	bdos			; so, wait a bit
+	jmps	send_again		;   and try again
+
+send_done:
+	ret
+
+
+;	Interrupt entries to kick off a transmit burst
+
+fake_int0:
+	int	12			; port 0 interrupt
+	ret
+
+fake_int1:
+	int	11			; port 1 interrupt
+	ret
+
+
+;	*****************************
+;	***  RSP header, pd, uda  ***
+;	*****************************
+
+	dseg
+
+	org	rsp_header		; header start
+
+	dw	0,0
+ncp	db	1,0			; one copy
+	dw	0,0,0
+	dw	0,0
+
+
+	org	rsp_pd			; process descriptor
+
+	dw	0,0			; link, thread
+	db	0			; ready to run
+	db	181			; priority better than PIN's
+pd_flag	dw	2			; process flag "keep"
+	db	'SerOut  '		; process name
+	dw	rsp_uda/10h		; uda segment
+	dw	0,0			; disk, user, reserved
+	dw	1			; for shared code
+	dw	0,0,0			; and a mess of zeros
+	dw	0,0,0
+	dw	0,0,0
+	dw	0,0,0
+
+
+	org	rsp_uda			; user data area
+
+	dw	0,0,0,0,0,0		; no dma buffer
+	dw	0,0,0,0,0,0
+	dw	0,0,0,0,0,0
+	dw	0,0,0,0,0,0
+	dw	0,0,rsp_stack_top,0,0,0
+	dw	0,0,0,0,0,0
+	dw	0,0,0,0,0,0
+	dw	0,0,0,0,0,0
+	db	1,0,0,0,0,0		; don't switch from UDA
+					; stack at SUP entry
+	org	rsp_stack_top
+
+	dw	offset serial_out	; code start
+	dw	0			; code seg (genccpm)
+	dw	0			; flags (genccpm)
+
+;	******************************
+;	***  Our data begins here  ***
+;	******************************
+
+	org	rsp_data_end		; above the rsp stuff
+
+;	first we have parameters for port 0
+
+port0_params	rb	0
+p0_base		equ	03F8h		; port base address
+port_int_id	dw	p0_base + 2	; ro int ident
+fake_int	dw	fake_int0	; port 0's interrupt
+t_flag		db	09h		; XIOS transmit flag
+
+;	if using port 1, these values are copied over port 0's
+
+port1_params	rb	0
+p1_base		equ	02F8h		; port base address
+		dw	p1_base + 2	; ro int ident
+		dw	fake_int1	; port 1's int
+		db	0Bh		; xmit flag
+
+port_param_size	equ	offset $ - offset port1_params
+
+t_block_o	rw	1		; address of interrupt
+t_block_s	rw	1		;   shared data block
+t_block		equ	dword ptr t_block_o
+
+qpb_out		dw	0,0,0,msg_out
+		db	'SerOut'
+qpb_out_p	db	'0 '
+
+msg_out		rb	q_mes_size
+		db	00			; pad
+
+	end
+

@@ -1,0 +1,80 @@
+;**********************************************************
+;*
+;*	Call Resident System Procedure
+;*
+;**********************************************************
+
+cpb_name	equ	word ptr 0
+cpb_param	equ	word ptr cpb_name + qnamsiz
+
+;=======
+rpl_ent:	; Call Resident Procedure Library
+;=======
+;	input:	DX = CPB address in u_wrkseg
+;	output:	BX = return from RPL (also u_retseg)
+;		     1 if error
+;		CX = error code
+;
+;		The stack is used like this:
+;
+; stack bottom	-------------------------		higher memory
+;	     26	|   starting DS (sysdat)|
+;	     24	|   starting ES (uda)	|
+;	     22	|   seg of rpl_ret:	|
+;	     20	|   offset of rpl_ret:	|
+;	     18	|   seg of the RPL	|
+;	     16	|   offset or RPL	|<-------
+;	     14	| Q   /\  		|	|
+;	     12	| P   ||		|	|
+;            10	| |   ||		|	|
+;	     8 	| B qname		|	|
+;	     6 	| L buffptr		|------>|
+;	     4	| O nmsgs		|
+;	     2	| C qaddr		|
+;	     0	| K flgs & net		|<------SP
+; stack	top	-------------------------		lower memory
+
+
+	push ds ! push es
+	mov ds,u_wrkseg			; save ds
+	mov si,dx
+	push cs				; rpl_ret segment
+	mov ax,offset rpl_ret ! push ax	; rpl_ret offset
+	sub ax,ax ! push ax ! push ax	; QPB buffer
+	mov di,sp			; DI -> buffer
+	push (cpb_name+6)[si]		; qpb_name
+	push (cpb_name+4)[si]
+	push (cpb_name+2)[si]
+	push cpb_name[si]
+	mov si,cpb_param[si]		; SI=param
+	push di				; qpb_buffer address
+	inc ax ! push ax		; qpb_nmsgs
+	dec ax ! push ax ! push ax	; qpb_addr,flg,net
+	mov dx,sp ! mov di,dx
+	mov ax,ss ! mov ds,ax
+	mov cx,f_qopen
+	push si ! push di ! call osif
+	pop di ! pop si
+	cmp cx,0 ! jne rpl_err
+	    mov bx,qpb_qaddr[di]
+	    push ds ! mov ds,sysdat
+	    test q_flags[bx],qf_rpl ! pop ds
+	    jz rpl_err
+		mov cx,f_qread ! mov dx,di
+		push si ! call osif ! pop si
+		cmp cx,0 ! jne rpl_err
+		    add sp,16
+		    mov dx,si
+		    mov ds,u_wrkseg
+		    mov es,u_retseg
+		    retf
+rpl_ret:	    mov ax,es
+		    pop es ! pop ds
+		    mov u_retseg,ax
+		    ret
+rpl_err:
+	add sp,24
+	pop es ! pop ds
+	mov bx,1 ! mov cx,e_no_queue
+	ret
+

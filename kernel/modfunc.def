@@ -1,0 +1,165 @@
+;*****************************************************
+;*
+;*	CCP/M-86, MP/M-86 Inter-Module Function Definitions
+;*
+;*	Same calling conventions as User programs
+;*	except CX = function instead of CL
+;*	       BX = 2nd parameter on entry
+;*	(CH=module, CL=function # in module)
+;*
+;*****************************************************
+
+	; Module definitions
+user		equ	0
+sup		equ	1
+rtm		equ	2
+mem		equ	3
+cio		equ	4
+bdos		equ	5
+xios		equ	6
+net		equ	7
+
+	; Bits that represent present modules
+	; in module_map
+supmod_bit	equ	001h
+rtmmod_bit	equ	002h
+memmod_bit	equ	004h
+bdosmod_bit	equ	008h
+ciomod_bit	equ	010h
+xiosmod_bit	equ	020h
+netmod_bit	equ	040h
+
+        ; Network Definitions
+net_bit         equ     080h                    ;network bit in func tble entry
+
+	; Supervisor Functions
+;f_sysreset	equ	(user * 0100h) + 0
+;f_conin	equ	(user * 0100h) + 1
+f_conout	equ	(user * 0100h) + 2
+;f_rconin	equ	(user * 0100h) + 3	;supported internally
+;f_rconout	equ	(user * 0100h) + 4	;under CCP/M
+f_lstout	equ	(user * 0100h) + 5
+;f_rawconio	equ	(user * 0100h) + 6
+;f_getiobyte	equ	(user * 0100h) + 7
+;f_setiobyte	equ	(user * 0100h) + 8
+f_conwrite	equ	(user * 0100h) + 9
+f_conread	equ	(user * 0100h) + 10
+;f_constat	equ	(user * 0100h) + 11
+;f_bdosversion	equ	(user * 0100h) + 12
+;f_diskreset	equ	(user * 0100h) + 13
+;f_diskselect	equ	(user * 0100h) + 14
+f_fopen		equ	(user * 0100h) + 15
+f_fclose	equ	(user * 0100h) + 16
+;f_searchfirst	equ	(user * 0100h) + 17
+;f_searchnext	equ	(user * 0100h) + 18
+;f_fdelete	equ	(user * 0100h) + 19
+f_freadseq	equ	(user * 0100h) + 20
+;f_fwriteseq	equ	(user * 0100h) + 21
+;f_fmake	equ	(user * 0100h) + 22
+;f_frename	equ	(user * 0100h) + 23
+;f_loginvector	equ	(user * 0100h) + 24
+f_getdefdisk	equ	(user * 0100h) + 25
+f_setdma	equ	(user * 0100h) + 26
+;f_getallocvec	equ	(user * 0100h) + 27
+;f_writeprotect	equ	(user * 0100h) + 28
+;f_getrovector	equ	(user * 0100h) + 29
+;f_setfileattr	equ	(user * 0100h) + 30
+;f_getdpb	equ	(user * 0100h) + 31
+f_usercode	equ	(user * 0100h) + 32
+f_freadrdm	equ	(user * 0100h) + 33
+;f_fwriterdm	equ	(user * 0100h) + 34
+;f_filesize	equ	(user * 0100h) + 35
+f_setrndrec	equ	(user * 0100h) + 36
+;f_resetdrive	equ	(user * 0100h) + 37
+;f_accessdrive	equ	(user * 0100h) + 38
+;f_freedrive	equ	(user * 0100h) + 39
+;f_writerndzero	equ	(user * 0100h) + 40
+;f_chain	equ	(user * 0100h) + 47
+f_callbios	equ	(user * 0100h) + 50
+f_setdmab	equ	(user * 0100h) + 51
+;f_getdma	equ	(user * 0100h) + 52
+;f_getmaxmem	equ	(user * 0100h) + 53
+;f_getabsmaxmem	equ	(user * 0100h) + 54
+;f_allocmem	equ	(user * 0100h) + 55
+;f_allocabsmem	equ	(user * 0100h) + 56
+f_freemem	equ	(user * 0100h) + 57
+f_freeall	equ	(user * 0100h) + 58
+;f_userload	equ	(user * 0100h) + 59
+f_delim		equ	(user * 0100h) + 110
+f_malloc	equ	(user * 0100h) + 128
+f_memfree	equ	(user * 0100h) + 130
+;f_polldev	equ	(user * 0100h) + 131
+f_flagwait	equ	(user * 0100h) + 132
+f_flagset	equ	(user * 0100h) + 133
+f_qmake		equ	(user * 0100h) + 134
+f_qopen		equ	(user * 0100h) + 135
+;f_qdelete	equ	(user * 0100h) + 136
+f_qread		equ	(user * 0100h) + 137
+f_cqread	equ	(user * 0100h) + 138
+f_qwrite	equ	(user * 0100h) + 139
+f_cqwrite	equ	(user * 0100h) + 140
+;f_delay	equ	(user * 0100h) + 141
+f_dispatch	equ	(user * 0100h) + 142
+f_terminate	equ	(user * 0100h) + 143
+f_createproc	equ	(user * 0100h) + 144
+f_setprior	equ	(user * 0100h) + 145
+f_conattach	equ	(user * 0100h) + 146
+f_condetach	equ	(user * 0100h) + 147
+;f_setdefcon	equ	(user * 0100h) + 148
+f_conassign	equ	(user * 0100h) + 149
+;f_clicmd	equ	(user * 0100h) + 150
+;f_callrsp	equ	(user * 0100h) + 151
+f_parsefilename	equ	(user * 0100h) + 152
+;f_getdefcon	equ	(user * 0100h) + 153
+;f_sdataddr	equ	(user * 0100h) + 154
+;f_timeofday	equ	(user * 0100h) + 155
+;f_pdaddress	equ	(user * 0100h) + 156
+;f_abortprocess	equ	(user * 0100h) + 157
+f_lstattach	equ	(user * 0100h) + 158
+f_lstdetach	equ	(user * 0100h) + 159
+;f_setdeflst	equ	(user * 0100h) + 160
+;f_clstattch	equ	(user * 0100h) + 161
+f_cconattch	equ	(user * 0100h) + 162
+;f_osvernum	equ	(user * 0100h) + 163
+;f_getdeflst	equ	(user * 0100h) + 164
+
+
+	; Internal SUP functions
+f_load		equ	(sup * 0100h) + 10
+f_cload		equ	(sup * 0100h) + 14
+
+
+	; Internal RTM functions
+f_inflagset	equ	(rtm * 0100h) + 3
+f_sleep		equ	(rtm * 0100h) + 18
+f_wakeup	equ	(rtm * 0100h) + 19
+f_findpdname	equ	(rtm * 0100h) + 20
+f_sync		equ	(rtm * 0100h) + 21
+f_unsync	equ	(rtm * 0100h) + 22
+f_no_abort	equ	(rtm * 0100h) + 23
+f_ok_abort	equ	(rtm * 0100h) + 24
+f_no_abort_spec	equ	(rtm * 0100h) + 25
+
+
+	; Internal MEM functions
+f_share		equ	(mem * 0100h) + 8
+f_maualloc	equ	(mem * 0100h) + 9
+f_maufree	equ	(mem * 0100h) + 10
+f_mlalloc	equ	(mem * 0100h) + 11
+f_mlfree	equ	(mem * 0100h) + 12
+
+
+	; Internal CIO functions
+f_conprint	equ	(cio * 0100h) + 14
+f_cioterm	equ	(cio * 0100h) + 23
+f_ciostat	equ	(cio * 0100h) + 24
+f_rconin	equ	(cio * 0100h) + 2
+f_rconout	equ	(cio * 0100h) + 3
+
+
+	; Internal BDOS functions
+f_bdosterm	equ	(bdos * 0100h) + 46
+
+	; Internal Network Functions
+f_netterm	equ     078Fh
+

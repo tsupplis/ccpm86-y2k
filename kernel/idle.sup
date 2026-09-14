@@ -1,0 +1,29 @@
+;*****************************************************
+;*
+;*	Idle Process
+;*
+;*****************************************************
+
+;====
+idle:		;Idle Process
+;====
+; Jump to the XIOS idle routine
+
+;if mpm
+;	mov ds,sysdat
+;	mov bx,rlr
+;	mov es,p_uda[bx]
+;	mov ax,io_idle
+;	jmp xiosif
+;endif
+
+;if ccpm				;we could move idle to the RTM
+	mov ds,sysdat		;and initialize its IP:CS to
+	mov bx,rlr
+	mov ax,p_uda[bx]	;point to the dispatcher
+	mov es,ax		;and get rid of this
+	mov cx,f_dispatch	;code since idle will never
+	call osif		;come out of the dispatcher
+	jmps idle
+;endif
+

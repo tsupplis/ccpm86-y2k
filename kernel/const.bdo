@@ -1,0 +1,25 @@
+;*****************************************************
+;*
+;*	 BDOS Constants Area
+;*
+;*****************************************************
+
+xerr_list	dw	0,permsg,rodmsg,rofmsg,selmsg
+		dw	xe5,xe6,xe7,xe8,xe9,xe10,xe11,xe3
+
+LOG_FXS		db	11		;number of log_fxs entrys
+		db	fxi15,fxi17,fxi19,fxi22,fxi23
+		db	fxi30,fxi35,fxi99,fxi100,fxi102,fxi103
+		db	0,0,0,0		;reserved
+rw_fxs		db	7		;number of rw_fxs entrys
+		db	fxi20,fxi21,fxi33,fxi34,fxi40,fxi42,fxi43
+		db	0,0		;reserved
+sc_fxs		db	2		;number of sc_fxs entrys
+		db	fxi16,fxi18
+		db	0,0		;reserved
+
+;	number of lock list items required for lock operation
+required_table	db	1,0,2,2,1,1,2,2,1,1,2,2,1,1,2,2
+
+;************** end of BDOS Constants ****************
+

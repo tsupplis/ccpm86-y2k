@@ -1,0 +1,25 @@
+
+;*****************************************************
+;*
+;*	SYSTEM DEFINITIONS
+;*
+;*****************************************************
+
+true	   	equ	0ffffh	  	; value of TRUE
+false	   	equ	0	  	; value of FALSE
+;unknown   	equ	0	  	; value to be filled in
+dskrecl	   	equ	128	  	; log. disk record len
+pnamsiz	   	equ	8	  	; size of process name
+qnamsiz	   	equ	pnamsiz	  	; size of queue name
+;fnamsiz   	equ	pnamsiz	  	; size of file name
+;ftypsiz   	equ	3	  	; size of file type
+mpmint	   	equ	224	  	; int vec for mpm ent.
+;debugint  	equ	mpmint+1  	; int vec for debuggers
+ulen	   	equ	0100h	  	; size of uda
+pdlen	   	equ	030h	  	; size of Process Descriptor
+;todlen	   	equ	5	  	; size of Time of Day struct
+;flag_tick 	equ	1	  	; flag 0 = tick flag
+;flag_sec  	equ	2	  	; flag 1 = second flag
+;flag_min  	equ	3	  	; flag 2 = minute flag
+ldtabsiz   	equ	0aah	  	; ldtablen=11, 10 entries
+

@@ -1,0 +1,49 @@
+;*****************************************************
+;*
+;*	Error definitions
+;*
+;*****************************************************
+
+e_not_implemented  equ	1   ; not implemented
+e_bad_entry	   equ	2   ; illegal func. # 
+e_no_memory	   equ	3   ; cant find memory
+e_ill_flag	   equ	4   ; illegal flag #
+e_flag_ovrrun	   equ	5   ; flag over run in
+e_flag_underrun	   equ	6   ; flag underrun in
+e_no_qd		   equ	7   ; no unused qd's
+e_no_qbuf	   equ	8   ; no free qbuffer
+e_no_queue	   equ	9   ; cant find que on qlr
+e_q_inuse	   equ	10  ; queue in use
+;		   equ	11  ;
+e_no_pd		   equ	12  ; no free pd's
+e_q_protected	   equ	13  ; no que access
+e_q_empty	   equ	14  ; empty queue
+e_q_full	   equ	15  ; full queue
+e_ncliq		   equ	16  ; Cli queue missing
+e_nondp		   equ	17  ; no NDP present in system
+e_no_umd	   equ	18  ; no unused MD's
+e_ill_cns	   equ	19  ; illegal cns num.
+e_no_pdname	   equ	20  ; no PD match
+e_no_cnsmatch	   equ	21  ; no cns match
+e_nclip		   equ	22  ; no cli process
+e_illdisk	   equ	23  ; illegal disk #
+e_badfname	   equ	24  ; illegal filename
+e_badftype	   equ	25  ; illegal filetype
+e_nochar	   equ	26  ; char not ready
+e_ill_md	   equ	27  ; illegal mem descriptor
+e_bad_load	   equ	28  ; bad ret. from BDOS load
+e_bad_read	   equ	29  ; bad ret. from BDOS read
+e_bad_open	   equ  30  ; bad ret. from BDOS open
+e_nullcmd	   equ	31  ; null command
+e_not_owner	   equ	32  ; not owner of resource
+e_no_cseg	   equ	33  ; no CSEG in load file
+e_active_pd	   equ	34  ; PD exists on Thread Root
+e_pd_noterm	   equ	35  ; could not terminate process
+e_no_attach	   equ	36  ; could not attach to ciodev
+e_ill_lst	   equ	37  ; illegal list device
+e_ill_passwd	   equ	38  ; illegal password specified
+e_no_mimic	   equ  39  ; can't mimic or unmimic
+e_abort		   equ	40  ; external termination occured
+e_fixuprec         equ  41  ; fixup error
+e_flag_ignr        equ  42  ; flag set ignored
+

@@ -1,0 +1,96 @@
+;*****************************************************
+;*
+;*	Concurrent CP/M-86 RTM Interface Routines
+;*
+;*****************************************************
+
+	cseg
+	org 0
+
+	jmp init		;RTM initialization
+	jmp entry		;RTM entry point
+
+sysdat		dw	0	;SYSDAT segment
+supervisor	equ	offset $
+		rw	2	;SUP entry point
+
+	org	0ch
+dev_ver		db	6	;development system data version
+				;set in sysdat.fmt
+
+		db	'COPYRIGHT (C) 1982,1983,1984'
+		db	' DIGITAL RESEARCH '
+		db	'XXXX-0000-'
+serial		db	'654321'
+
+;====		===========================
+init:		; RTM module Initialization
+;====		===========================
+
+	mov bx,(offset dispatcher)	;init interrupt pdisp
+	mov word ptr [bx],offset fdisp
+	mov word ptr 2[bx],cs
+	mov bx,(offset rtm_pdisp)	;init intermodule pdisp
+	mov word ptr [bx],offset farpdisp
+	mov word ptr 2[bx],cs
+
+        mov bx,rlr                      ;init the init process's userdisp vec
+        mov word ptr p_userdisp[bx],offset def_emultr
+        mov word ptr p_userdisp + 2[bx],cs
+
+       retf
+
+;*****************************************************
+;*
+;*	RTM Function Table
+;*
+;*****************************************************
+
+	org	((offset $)+1) AND 0fffeh	;Word Boundary
+
+function	dw	sysreset_entry	;0
+		dw	poll_entry	;1
+		dw	flag_wait_entry	;2
+		dw	flag_set_entry	;3
+		dw	makeq_entry	;4
+		dw	openq_entry	;5
+		dw	deleteq_entry	;6
+		dw	readq_entry	;7
+		dw	creadq_entry	;8-conditional readq
+		dw	writeq_entry	;9
+		dw	cwriteq_entry	;10-conditional writeq
+		dw	delay_entry	;11
+		dw	dispatch_entry	;12
+		dw	terminate_entry	;13
+		dw	creat_proc_entry;14
+		dw	set_prior_entry	;15
+		dw	pd_entry	;16-get PD address
+		dw	abort_spec_entry;17-abort process
+		dw	sleep_entry	;18
+		dw	wakeup_entry	;19
+		dw	findpdname_entry;20
+		dw	sync_entry	;21
+		dw	unsync_entry	;22
+		dw	no_abort_entry	;23
+		dw	ok_abort_entry	;24
+		dw	no_abort_spec_entry	;25
+;		dw	flagalloc	;26
+
+;=====		=================
+entry:		; RTM Entry Point
+;=====		=================
+	xor ch,ch ! shl cx,1 ! mov si,cx
+	call cs:function[si]
+rtm_ret:retf
+
+;====		================
+osif:		; O.S. Interface
+;====		================
+	callf cs:dword ptr .supervisor ! ret
+
+;======		================
+xiosif:		; XIOS Interface
+;======		================
+	mov si,mod_entry
+	callf dword ptr xiosmod[si] ! ret
+

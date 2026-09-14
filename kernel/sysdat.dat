@@ -1,0 +1,587 @@
+;*****************************************************
+;*
+;*	System Data Area
+;*
+;*****************************************************
+
+	CSEG
+	org	0ch
+;dev_ver
+		db	6	;development system data version
+				;SYSDAT.CON has 16 byte code segment
+
+	DSEG
+	org	0
+
+	;
+	;This data is initialized by GENCCPM
+	;
+
+	;Module Table - contains the FAR CALL addresses
+	;	of each module for their initialization
+	;	and entry routines.
+	;
+	;	+---+---+---+---+---+---+---+---+
+	;	|     entry     |   initialize  |
+	;	+---+---+---+---+---+---+---+---+
+	;
+	;	      entry    init
+	;	      -----    ----
+
+module_table	equ	dword ptr (offset $)
+supmod		equ 	(offset $)
+		dw	3,0,	0,0	;SUP
+
+rtmmod		equ 	(offset $)
+		dw	3,0,	0,0	;RTM
+
+memmod		equ 	(offset $)
+		dw	3,0,	0,0	;MEM
+
+ciomod		equ 	(offset $)
+		dw	3,0,	0,0	;CIO
+
+bdosmod		equ 	(offset $)
+		dw	3,0,	0,0	;BDOS
+
+xiosmod		equ 	(offset $)
+		dw	0C03H,0,	0C00H,0	;XIOS
+
+netmod		equ 	(offset $)
+		dw	3,0,	0,0	;NET
+
+dispatcher	equ	(offset $)
+		dw	0,0		;far dispatcher (does IRET)
+
+rtm_pdisp	equ	(offset $)
+		dw	0,0		;far dispatcher (does RETF)
+
+	; location in memory of MP/M-86 or CCP/M-86
+
+osseg		dw	1008h	;1st parag. of MP/M-86 or CCP/M
+rspseg		dw	0	;segment of first RSP
+endseg		dw	0	;1st parag. outside of MP/M or CCP/M
+
+module_map	db	03fh	;bit map of modules that exist
+				; in this system.  low order bit
+				; corresponds to 1st module in
+				; module table.  If bit is on,then
+				; module exists.
+
+	; some answers to GENCCPM questions
+
+ncns		db	4	;# system console devices
+nlst		db	1	;# system list devices
+nccb		db	5	;# character control blocks
+nflags		db	20h	;# flags
+srchdisk	db	1	;system disk
+mmp		dw	04000h	;Max Memory per process
+nslaves		db	0	;Number of network requestors
+dayfile		db	0	;if 0ffh,display command info
+tempdisk	db	1	;Temporary disk
+tickspersec	db	60	;Number of ticks per second
+
+	; data lists created by GENCCPM
+
+free_root	dw	0	;locked unused list
+ccb		dw	0	;addr. Console Ctrl Blk Table
+flags		dw	0	;addr. Flag Table
+mdul		dw	020h	;Mem descr. Unused List
+mfl		dw	0	;Memory Free List
+pul		dw	014h	;Proc. descr. Unused List
+qul		dw	020h	;QCB Unused List
+				;MAU for queue buffer info
+qmau		dw	0	;link
+		dw	0	;start segment
+		dw	400h	;length
+		dw	0	;plist
+
+	;
+	;This data is initialized at Assembly time
+	;
+
+rlr		dw	initpd	;Ready List Root
+dlr		dw	0	;Delay List Root
+drl		dw	0	;Dispatcher Ready List
+plr		dw	0	;Poll List Root
+scl		dw	0	;Shared Code List
+thrdrt		dw	initpd	;Process Thread Root
+qlr		dw	mxloadqd;Queue List Root
+mal		dw	0	;Memory Alloc List
+
+	; Version Information
+
+version		dw	unknown	;addr. version str in SUP code segment
+				;set by GENCCPM if CCP/M
+if mpm
+bvernum		dw	01431h	;MPM-86 w/BDOS v3.1
+osvernum	dw	01431h	;MPM-86 V3.1
+endif
+
+if ccpm
+bvernum		dw	01431h	;CCP/M w/BDOS 3.1
+osvernum	dw	01421h	;CCP/M V2.1
+endif
+
+	; Time of Day Structure
+
+tod		rw	0
+tod_day		dw	067EH	;day since 1/1/78 (09 Jul 82)
+tod_hr		db	12h	;hour of day
+tod_min		db	00h	;minute of hour
+tod_sec		db	00h	;second of minute
+
+	; info from XIOS
+
+ncondev		db	0		;# console devs in XIOS
+nlstdev		db	0		;# character devs in XIOS
+nciodev		db	0		;# character i/o devices
+					; supported by XIOS.
+lcb		dw	0		; list control block address
+openvec		dw	0		; open file vector
+lock_max	db	20h		; Max Locked Records/process
+open_max	db	20h		; Max Open Files/process
+owner8087	dw	0		; no one owns it initially
+		rw	1		; RESERVED
+cmod		db	0ffh		; BDOS Compatibility
+ndp8087		rb	1		; RESERVED
+err_intercept	dw	0,0		; BDOS does a callf here
+					; to print error msgs,
+					; if second word is <> 0
+slr		dw	offset mem_spb	; Sync List Root
+		dw	0,0,0		; RESERVED
+                db      0               ; RESERVED
+
+xpcns           db      0               ; # physical consoles            
+iofs87          rw      1               ; address of NDP interrupt
+iseg87          rw      1               ; vector.
+sysvec87_of     rw      1               ; system exception handler's
+sysvec87_sg     rw      1               ; segment and offset.
+
+splr            dw      0               ; suspend list root
+
+	; SYSENT Table - MP/M-86, CCP/M-86 system function information
+	;	The supervisor calls the appropriate module
+	;	through this table.
+	;
+	;	 Low Byte  High Byte
+	;	+----+----+--------+
+	;	|function |flgs|mod|
+	;	+----+----+--------+
+	;
+	;	flgs	- 001h - network intercept
+	;		if on, the network module is called
+	;		first, on return, either the function
+	;		is called or it is considered complete
+	;		depending on the return.
+	;	mod	- module number (0-15)
+	;	function- function to call within module
+
+	;	note: sup function 0 returns not the
+	;		implemented error code to the caller,
+	;		and sup function 1 returns the illegal
+	;		function error code.
+
+	; standard CPM-2 functions
+
+	;	func,	module
+
+	org	((offset $) + 1) and 0fffeh
+
+sysent	db	0,	rtm	        ;  0-system reset
+	db	0,	cio	        ;  1-conin
+	db	1,	cio	        ;  2-conout
+	db	0,	sup	        ;  3-raw conin/aux in
+	db	0,	sup	        ;  4-raw conout/aux out
+	db	4,	cio or net_bit  ;  5-list out
+	db	5,	cio     	;  6-raw conio
+	db	0,	sup	        ;  7-getiobyte
+	db	0,	sup	        ;  8-setiobyte
+	db	6,	cio	        ;  9-conwrite
+	db	7,	cio	        ; 10-conread
+	db	8,	cio	        ; 11-constat
+	db	2,	sup or net_bit	; 12-get version
+	db	0,	bdos or net_bit	; 13-diskreset
+	db	1,	bdos or net_bit	; 14-diskselect
+	db	2,	bdos or net_bit	; 15-file open
+	db	3,	bdos or net_bit	; 16-file close
+	db	4,	bdos or net_bit	; 17-search first
+	db	5,	bdos or net_bit	; 18-search next
+	db	6,	bdos or net_bit	; 19-file delete
+	db	7,	bdos or net_bit	; 20-file read seq
+	db	8,	bdos or net_bit	; 21-file write seq
+	db	9,	bdos or net_bit	; 22-file make
+	db	10,	bdos or net_bit	; 23-file rename
+	db	11,	bdos or net_bit	; 24-login vector
+	db	12,	bdos	        ; 25-get def disk
+	db	13,	bdos	        ; 26-set dma
+	db	14,	bdos or net_bit ; 27-get alloc vector
+	db	15,	bdos or net_bit	; 28-write protect
+	db	16,	bdos or net_bit	; 29-get r/0 vector
+	db	17,	bdos or net_bit	; 30-set file attr.
+	db	18,	bdos or net_bit	; 31-get disk parm block
+	db	19,	bdos	        ; 32-user code
+	db	20,	bdos or net_bit	; 33-file read random
+	db	21,	bdos or net_bit	; 34-file write random
+	db	22,	bdos or net_bit	; 35-file size
+	db	23,	bdos or net_bit	; 36-set random record
+	db	24,	bdos or net_bit	; 37-reset drive
+	db	25,	bdos or net_bit	; 38-access drive
+	db	26,	bdos or net_bit	; 39-free drive
+	db	27,	bdos or net_bit	; 40-file write random w/zero fill
+
+			;CPM-3 extensions
+
+        db	0,	sup	        ; 41-Test and Write (NOT IMPLEMENTED)
+				        ; Would be BDOS func # 28
+	db	28,	bdos or net_bit	; 42-Lock Record
+	db	29,	bdos or net_bit	; 43-Unlock Record
+	db	30,	bdos	        ; 44-Set Multi-sector
+	db	31,	bdos or net_bit	; 45-Set Bdos Error Mode
+	db	32,	bdos or net_bit	; 46-Get Disk Free Space
+	db	12,	sup or net_bit	; 47-Chain to Program
+				        ; In CP/M-86 BDOS func # 34
+	db	33,	bdos	        ; 48-Flush Buffers
+	db	1,	sup	        ; 49-
+
+			;CPM-86 extensions
+
+	db	3,	sup	        ; 50-call xios
+	db	34,	bdos	        ; 51-set dma base
+	db	35,	bdos	        ; 52-get dma
+	db	0,	mem	        ; 53-get max mem
+	db	1,	mem	        ; 54-get abs max mem
+	db	2,	mem	        ; 55-alloc mem
+	db	3,	mem	        ; 56-alloc abs mem
+	db	4,	mem	        ; 57-free mem
+	db	5,	mem	        ; 58-free all mem
+	db	4,	sup or net_bit	; 59-load
+	db	1,	sup	        ; 60-
+	db	1,	sup	        ; 61-
+	db	1,	sup	        ; 62-
+	db	1,	sup	        ; 63-
+
+			;CP/NET functions
+
+	db	64,	net or net_bit	; 64-network login
+	db	65,	net or net_bit	; 65-network logoff
+	db	66,	net or net_bit	; 66-network send msg
+	db	67,	net or net_bit 	; 67-network rcv msg
+	db	68,	net or net_bit 	; 68-network status
+	db	69,	net or net_bit 	; 69-get network config addr
+        db      70,     net or net_bit  ; 70-set Compatibility attributes
+        db      71,     net or net_bit  ; 71-get network server config table
+        db      72,     net or net_bit  ; 72-set network error mode
+        db      73,     net or net_bit  ; 73-attach network
+        db      74,     net or net_bit  ; 74-detach network
+        db      75,     net or net_bit  ; 75-set message buffer size
+        db      76,     net or net_bit  ; 76-get network time and date
+        db      77,     net or net_bit  ; 77-get network parameter table
+        db       1,     sup             ; 78-unused
+        db       1,     sup             ; 79-unused
+        db       1,     sup             ; 80-unused
+
+		;CP/M-3 extensions
+
+	db	36,	bdos or net_bit ; 98-Reset Alloc Vector
+	db	37,	bdos or net_bit ; 99-Truncate File
+	db	38,	bdos or net_bit ;100-Set Dir Label
+	db	39,	bdos or net_bit ;101-Return Dir Label
+	db	40,	bdos or net_bit ;102-Read File XFCB
+	db	41,	bdos or net_bit ;103-Write File XFCB
+	db	42,	bdos	        ;104-Set Date and Time
+	db	43,	bdos	        ;105-Get Date and Time
+	db	44,	bdos or net_bit ;106-Set Default Password
+	db	13,	sup	        ;107-Return Serial Number
+	db	0,	sup	        ;108-(not implemented)
+	db	25,	cio	        ;109-Get/Set Console Mode
+	db	26,	cio	        ;110-Get/Set Output Delimiter
+	db	27,	cio	        ;111-Print Block
+	db	28,	cio or net_bit 	;112-List Block
+        db       1,     sup             ;113-reserved
+        db       1,     sup             ;114-reserved
+        db       1,     sup             ;115-reserved
+        db      45,     bdos            ;116-Set File_Date_Time
+
+		; MP/M functions
+
+	db	6,	mem	        ;128-mem req
+	db	6,	mem	        ;129-(same function as 128)
+	db	7,	mem	        ;130-mem free
+	db	1,	rtm	        ;131-poll device
+	db	2,	rtm	        ;132-flag wait
+	db	3,	rtm	        ;133-flag set
+	db	4,	rtm or net_bit 	;134-queue make
+	db	5,	rtm or net_bit 	;135-queue open
+	db	6,	rtm or net_bit 	;136-queue delete
+	db	7,	rtm or net_bit 	;137-queue read
+	db	8,	rtm or net_bit 	;138-cond. queue read
+	db	9,	rtm or net_bit 	;139-queue write
+	db	10,	rtm or net_bit 	;140-cond. queue write
+	db	11,	rtm	        ;141-delay
+	db	12,	rtm	        ;142-dispatch
+	db	13,	rtm 		;143-terminate
+	db	14,	rtm or net_bit 	;144-create process
+	db	15,	rtm	        ;145-set priority
+	db	9,	cio	        ;146-console attach
+	db	10,	cio	        ;147-console detach
+	db	11,	cio	        ;148-set def console
+	db	12,	cio	        ;149-console assign
+	db	5,	sup	        ;150-CLI
+	db	6,	sup	        ;151-call RPL
+	db	7,	sup	        ;152-parse filename
+	db	13,	cio	        ;153-get def console
+	db	8,	sup	        ;154-sysdat addr
+	db	9,	sup	        ;155-time of day
+	db	16,	rtm	        ;156-get PD addr
+	db	17,	rtm	        ;157-abort process
+
+		; MPM II extensions
+
+	db	15,	cio or net_bit 	;158-attach list
+	db	16,	cio or net_bit 	;159-detach list
+	db	17,	cio or net_bit 	;160-set list dev
+	db	18,	cio or net_bit 	;161-Cond. Attach list
+	db	19,	cio	        ;162-Cond. Attach Console
+	db	11,	sup or net_bit 	;163-MP/M Version Number
+	db	20,	cio or net_bit 	;164-get list dev
+
+
+	; Initialized Queues
+
+	org	((offset $) + 1) and 0fffeh
+
+mxloadqd	dw	mxdiskqd
+		db	0,0
+		dw	qf_keep+qf_mx
+		db	'MXLoad  '
+		dw	0,1,0,0,1,0,0
+mxloadqpb	db	0,0
+		dw	mxloadqd,1,0
+;		db	'MXLoad  '
+
+	; Data Used by Load Program
+
+	org	((offset $) + 1) and 0fffeh
+
+lod_uda		dw	0
+lod_lstk	dw	0
+lod_basep	dw	0
+lod_nldt	dw	0
+lod_pd		dw	0
+lod_fcb		rs	36
+lod_indma	dw	0
+lod_nrels	db	0
+lod_chain	db	0
+lod_user	db	0
+lod_disk	db	0
+lod_fifty	db	0
+lod_8080	db	0
+lod_lbyte	db	0
+lod_fixrec	dw	0
+lod_ndp         db      0
+lod_suspnd      db      0
+lod_fixrec1	dw	0
+lod_dma		rb	dskrecl
+ldtab		rb	ldtabsiz
+
+cli_dma_ofst	rw	1
+cli_dma_seg	rw	1
+cli_pflag	rw	1
+cli_chain	rb	1
+cli_term	rb	1
+cli_dma		rb	dskrecl		;dma buffer
+
+		;copy of user's clicb
+cli_net		rb	1		;net
+cli_ppd		rw	1		;parent PD
+cli_cmdtail	rb	129		;command sent
+		rb	1
+
+cli_fcb		rb	fcblen+1	;internal FCB
+
+cli_cuspqpb	db	0,0		;QPB of command
+		dw	0,0
+		dw	offset cli_ppd
+		db	'$$$$$$$$'
+
+cli_acb		db	0,0		;cns,match
+		dw	0		;pd
+		db	'$$$$$$$$'	;name
+
+cli_pcb		dw	offset cli_cmdtail	;parse
+		dw	offset cli_fcb		;ctl bk
+
+cli_pd		dw	0	;pd of load prog
+cli_err		dw	0	;error return
+cli_bpage	dw	0	;base page
+cli_lddsk	db	1	;load disk
+
+	;parent information
+
+cli_cns		db	0	;pd.p_cns save
+cli_user	db	0	;pd.p_dsk save
+cli_dsk		db	0	;pd.p_user save
+cli_err_mode	db	0	;u_error_mode save
+cli_dfil	db	0	;dayfile flag
+
+	;
+	;System Initialization Variables
+	;
+
+initpd		dw	0		;link
+		dw	0		;thread
+		db	ps_run		;stat
+		db	1		;prior
+		dw	pf_sys+pf_kernal;flag
+		db	'Init    '	;name
+		dw	unknown		;uda segment
+		db	0		;disk
+		db	0		;user
+		db	0,0		;ldsk,luser
+		dw	0		;mem
+		dw	0		;dvract
+		dw	0		;wait
+		db	0,0		;org,net
+		dw	0		;parent
+		db	0		;cns
+		db	0		;abort
+		db	0,0		;cin,cout
+		db	0		;lst
+		db	0,0,0		;sf3,4,5
+		rb	4		;reserved
+		dw	0,0		;pret,scratch
+
+
+	;User Data Area of Init process
+	;paragraph aligned
+
+	org	((offset $)+0fh) AND 0fff0h
+inituda		rb	ulen
+init_tos	rw	0
+	org	offset inituda + ud_insys
+		db	1		;keep the SUP from doing stack
+	org	offset init_tos		;switches
+
+
+	; RTM data
+	; is word aligned from init uda
+
+		dw	0cccch,0cccch,0cccch
+		dw	0cccch,0cccch,0cccch
+		dw	0cccch,0cccch,0cccch
+
+		dw	0cccch,0cccch,0cccch
+		dw	0cccch,0cccch,0cccch
+		dw	0cccch,0cccch,0cccch
+		dw	0cccch,0cccch,0cccch
+
+		dw	0cccch,0cccch,0cccch
+		dw	0cccch,0cccch,0cccch
+		dw	0cccch,0cccch,0cccch
+		dw	0cccch,0cccch,0cccch
+
+		dw	0cccch,0cccch,0cccch
+		dw	0cccch,0cccch,0cccch
+		dw	0cccch,0cccch,0cccch
+		dw	0cccch,0cccch,0cccch
+
+		dw	0cccch,0cccch,0cccch
+		dw	0cccch,0cccch,0cccch
+		dw	0cccch,0cccch,0cccch
+		dw	0cccch,0cccch,0cccch
+
+dsptchtos	rw	0
+
+indisp	   	db	false	;?currently in dispatch?
+intflag		db	0	;if 0, interrupts not enabled -
+				;not implemented
+es_sav		dw	0	;(staying word aligned)
+bx_sav		dw	0
+ax_sav		dw	0
+
+	; MEM Data
+
+beststart	dw	0
+bestlen		dw	0
+bestsi		dw	0
+bestmau		dw	0
+currmau		dw	0
+currsi		dw	0
+currmpb		dw	0,0,0,0,0
+
+;	**3.1M**
+;
+;	save area and stack for memory manager local stack switch
+;
+mem_save_sp	dw	0
+mem_save_ss	dw	0
+		dw	0cccch,0cccch,0cccch,0cccch
+		dw	0cccch,0cccch,0cccch,0cccch
+		dw	0cccch,0cccch,0cccch,0cccch
+		dw	0cccch,0cccch,0cccch,0cccch
+		dw	0cccch,0cccch,0cccch,0cccch
+		dw	0cccch,0cccch,0cccch,0cccch
+		dw	0cccch,0cccch,0cccch,0cccch
+		dw	0cccch,0cccch,0cccch,0cccch
+		dw	0cccch,0cccch,0cccch,0cccch
+		dw	0cccch,0cccch,0cccch,0cccch
+		dw	0cccch,0cccch,0cccch,0cccch
+		dw	0cccch,0cccch,0cccch,0cccch
+		dw	0cccch,0cccch,0cccch,0cccch
+		dw	0cccch,0cccch,0cccch,0cccch
+		dw	0cccch,0cccch,0cccch,0cccch
+		dw	0cccch,0cccch,0cccch,0cccch
+mem_tos		rw	0
+;
+;	**3.1M**
+;
+;	SYNC Parameter Blocks
+
+;	The MEM ENTRY: point uses the following for
+;	mutual exclusion and recursion.
+
+mem_cnt		db	0	;how many times a process has recursivly
+				;called the memory manager
+
+mem_spb		dw	q_spb	;link	Mem Sync Parameter Block
+		dw	0	;owner
+		dw	0	;wait
+		dw	0	;next
+
+;	The queue sub-system in the RTM uses the following
+;	structure for mutual exclusion
+
+q_spb		dw	cli_spb	;link	Queue Sync Parameter Block
+		dw	0	;owner
+		dw	0	;wait
+		dw	0	;next
+
+
+;	The CLI uses the CLI_SPB for mutual exclusion
+
+cli_spb		dw	thrd_spb;link	CLI Sync Parameter Block
+		dw	0	;owner
+		dw	0	;wait
+		dw	0	;next
+
+;	When the thread is accessed, the THRD_SPB must be owned
+;	first.
+
+thrd_spb	dw	msg_spb	;link	Thread Sync Parameter Block
+		dw	0	;owner
+		dw	0	;wait
+		dw	0	;next
+
+; Currently the order in which the SYNCs must be obtained if
+; more than one is needed is:
+
+;	CLI
+;	QUEUE			;called by CLI for RSPs
+;	MEM			;called by make queue
+;	THREAD			;used from the MEM module
+
+; The SYNCs must be released in reverse order
+; MSG_SPB is used by the BDOS to protect the BDOS error message
+; buffer.  MSG_SPB is in DATA.BDO
+                                                                                                                                                                                                                                                                                                                                                                                         

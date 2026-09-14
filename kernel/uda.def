@@ -1,0 +1,10 @@
+;	UDA offsets
+;
+ud_insys	equ	60H
+controlw        equ     03ffh  ; post-init 8087 state
+user_save       equ     0h     ; param for user vector save
+user_restore    equ     01h    ; param for user vector restore
+em_seg          equ     0      ; region in memory for 8087 emulator vectors
+em_offs         equ     0200h  ; (these are saved in uda extension)
+tot_emvecs      equ     034h   ; total = 14 vectors
+

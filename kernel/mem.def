@@ -1,0 +1,31 @@
+;*****************************************************
+;*
+;*	Memory Descriptor Formats
+;*
+;*****************************************************
+
+	; format while on MFL or MAL
+
+m_link		equ	word ptr 0
+m_start		equ	word ptr m_link+word
+m_length	equ	word ptr m_start+word
+m_plist		equ	word ptr m_length+word
+m_unused	equ	word ptr m_plist+word
+mdlen		equ	m_unused+word
+
+	; format while on PD as memory segment
+	;   ms_flags uses same definitions as
+	;   mpb_flags
+
+ms_link		equ	word ptr m_link
+ms_start	equ	word ptr m_start
+ms_length	equ	word ptr m_length
+ms_flags	equ	word ptr m_plist
+ms_mau		equ	word ptr m_unused
+
+	; format of spb (share parameter block)
+
+spb_opd		equ	word ptr 0
+spb_rpd		equ	word ptr spb_opd + word
+spb_start	equ	word ptr spb_rpd + word
+

@@ -1,0 +1,50 @@
+
+;*****************************************************
+;*
+;*	RSP.DEF - Describes the relative offsets of
+;*		data items in the Data Segment of a
+;*		Resident System Process.  GENSYS
+;*		links all RSP's together through the
+;*		rsp_link field (segment address ptrs).
+;*		Each RSP is started up as System
+;*		Initialization. 
+;*
+;* Format:	+---+---+---+---+---+---+---+---+
+;*	  00	| link  |sdatvar|ncp| reserved  |
+;*		+---+---+---+---+---+---+---+---+
+;*	  08	|    reserved   |  CS   |reserve|
+;*		+---+---+---+---+---+---+---+---+
+;*	  10	|  Process Descriptor           |
+;*		+---+---+---+---+---+---+---+---+
+;*	  40	|   User Data Area              |
+;*		+---+---+---+---+---+---+---+---+
+;*	  E0	| RSP data area                 |
+;*		+---+---+---+---+---+---+---+---+
+;*
+;*	link - GENSYS links all RSP's through this.
+;*		At system init, this value is filled
+;*		with the SYSDAT segment address
+;*	sdatvar - if non-zero, this is a variable address
+;*		in the SYSDAT area which indicates the
+;*		a value to put into ncopies (ncp).
+;*	ncp - Number of copies - Used by GENSYS to determine
+;*		how many copies of this RSP to generate.
+;*		This number is modified to be the specific
+;*		copy that was generated.
+;*	CS - Used by GENSYS to determine where a shared
+;*		code segment may exist in multiple copy
+;*		RSPs.
+;*
+;*****************************************************
+
+rsp_top	     equ  0
+rsp_link     equ  word ptr rsp_top
+rsp_sysdat   equ  rsp_link
+rsp_sdatvar  equ  word ptr rsp_link + word
+rsp_ncopies  equ  byte ptr rsp_sdatvar + word
+rsp_reserved equ  rsp_ncopies + byte
+rsp_md	     equ  08h
+rsp_pd	     equ  10h
+rsp_uda	     equ  ((rsp_pd+pdlen+0fh)/10h)*10h
+rsp_bottom   equ  rsp_uda + ulen
+

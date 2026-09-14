@@ -1,0 +1,49 @@
+;*****************************************************
+;*
+;*	Base Page Format
+;*
+;*****************************************************
+
+	DSEG
+	org	0	
+
+bpg_clen	rb	3
+bpg_cseg	rw	1
+bpg_8080	rb	1
+
+bpg_dlen	rb	3
+bpg_dseg	rw	1
+bpg_dxxx	rb	1
+
+bpg_elen	rb	3
+bpg_eseg	rw	1
+bpg_exxx	rb	1
+
+bpg_slen	rb	3
+bpg_sseg	rw	1
+bpg_sxxx	rb	1
+
+	org	050h
+
+bpg_lddsk	rb	1
+bpg_pw1ptr	rw	1
+bpg_pw1len	rb	1
+bpg_pw2ptr	rw	1
+bpg_pw2len	rb	1
+
+	org	05ch
+
+bpg_fcb0	rb	0
+
+	org	06ch
+
+bpg_fcb1	rb	0
+
+	org	80h
+
+bpg_dma		rb	0
+
+	org	100h
+
+bpg_udata	rb	0
+

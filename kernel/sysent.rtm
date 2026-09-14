@@ -1,0 +1,309 @@
+
+;********************************************************
+;*							*
+;*		SYSTEM ENTRY FUNCTIONS			*
+;*							*
+;********************************************************
+
+;==========		=========================
+poll_entry:		; Poll device - DL=device
+;==========		=========================
+
+	mov ax,rlr
+	mov bx,ax
+	mov p_wait[bx],dx
+	mov dx,offset plr
+	mov bl,ps_poll
+	jmp sleep_entry
+
+;===========		===================
+delay_entry:		;Delay - DX = ticks
+;===========		===================
+
+	mov bx,rlr
+	mov p_stat[bx],ps_delay
+	mov u_dparam,dx
+	xor bx,bx	;return success after coming back into
+	jmp dsptch	;context from the dispatcher
+
+;===============	==============
+dispatch_entry:		;Call dispatch
+;===============	==============
+
+	xor bx,bx	;return success ala DELAY_ENTRY:
+	jmp pdisp
+
+;===============	===========================
+set_prior_entry:	;Set Priority - DX=priority
+;===============	===========================
+
+	mov bx,rlr
+	mov p_prior[bx],dl
+	xor bx,bx	;return success ala DELAY_ENTRY:
+	jmp pdisp
+
+;========		==================
+pd_entry:		;Return addr of PD
+;========		==================
+
+	mov u_retseg,ds
+	mov bx,rlr
+	ret
+
+;================	============================
+creat_proc_entry:	;Create Process - DX->new PD
+;================	============================
+
+	call proc_creat ! jmp pdisp
+
+;===========		==============================
+sleep_entry:		;Put Calling PD on System List
+;===========		==============================
+;	entry:  DX = list root to sleep on
+;		BL = sleep status passed to the dispatcher in
+;		the PD.P_WAIT field and becomes the PD.STATUS
+;		when sleeping
+;		interrupts are typically off to ensure
+;		the PD sleeps on the specified list
+;		before another process runs.
+;	exit:	BX = 0 to indicate success after return from dispatcher
+;		if entered with interrupts off the process will return
+;		from the dispatcher with them still off
+
+	mov ax,rlr ! mov si,ax
+	mov ax,dx ! mov u_dparam,ax
+	mov p_scratch[si],bl
+	mov p_stat[si],ps_sleep
+	xor bx,bx
+	jmp dsptch
+
+;============		==============================
+wakeup_entry:		;wakeup top PD in System List
+;============		==============================
+;	entry:	DX = List Root Address
+;	exit:	first PD on list is the last entry on the DRL
+
+;	Puting the process on the end of the DRL allows the
+;	process to run before equal priority processes waking up
+;	from flag sets, i.e., interrupts.
+;	To work, the dispatcher must disable interrupts
+;	from when the last process on the DRL is placed on the
+;	RLR to when the process is back in context and
+;	turns on the interrupt flag.
+
+	pushf ! cli
+	mov bx,dx ! mov si,[bx]		;SI=PD to wake
+	test si,si ! jz wke_out		;check for a process to wake up
+	    mov ax,p_link[si]		;take PD off list
+	    mov [bx],ax			;set list root to next PD
+	    mov di,offset drl - p_link	;go to the end of DRL
+	    xor ax,ax			;AX=0
+wu_drl:
+	    cmp p_link[di],ax
+	    je wu_drlend
+	      mov di,p_link[di] ! jmps wu_drl
+wu_drlend:
+	      mov p_link[di],si		;make waking PD last on DRL
+	      mov p_link[si],ax		;0 the end of the DRL
+	      mov p_stat[si],ps_run	;new status
+	      call pdisp
+wke_out:
+	popf ! ret
+
+;==========		========================
+sync_entry:		;Obtain mutual exclusion
+;==========		========================
+;	entry:	interrupts on or off
+;		BX = Sync Parameter Block
+;	exit:	ownership of Sync Parameter Block,
+;		interrupt state unchanged
+
+;	Obtain ownership of mutually exclusive section of code
+;	without using MXqueues.  A process only sleeps temporarily
+;	on a SYNC structure.  A process that obtains the
+;	SYNC must call UNSYNC when finished with the
+;	protected data structure and before sleeping or
+;	calling SYNC with on a different SYNC structure.
+
+	mov ax,rlr
+	mov si,ax		;AX=SI calling process
+	pushf ! cli
+	xchg ax,sy_owner[bx]	;AX=owner
+	test ax,ax		;0 nobody owns it
+	jz s_got_it
+	  cmp ax,si		;do we already own it ?
+	  je s_got_it
+	    mov sy_owner[bx],ax	;restore owner
+	    lea dx,sy_wait[bx]	;list to sleep on
+	    mov bl,ps_sync	;sleep with sync status
+	    call sleep_entry
+				;awaken with sync ownership
+s_got_it:
+	popf ! ret		;we own the SPB
+
+
+;============		==========================
+unsync_entry:		;release mutual exlclusion
+;============		==========================
+;
+;	entry:	BX = Sync Parameter Block
+;	exit:	SYNC_OWNER changed to the PD in the SY_NEXT
+;		field if SY_NEXT is non 0.  The PD in the SY_NEXT
+;		must have a 0 P_LINK.  If SY_NEXT=0, the SY_OWNER
+;		field is changed to the first PD on the SY_WAIT
+;		list.  If SY_WAIT is 0, SY_OWNER becomes 0.
+
+	mov ax,rlr
+	cmp ax,sy_owner[bx]	;do we own it ?
+	jne us_ret
+	  xor ax,ax
+	  pushf ! cli		;no other process can change SYNC or DRL
+	  xchg ax,sy_next[bx]	;0 SY_NEXT field
+	  test ax,ax		;assigned next process ?
+	  jz us_wait
+	    mov si,ax
+	    jmps us_own
+us_wait:
+	    mov si,sy_wait[bx]	;give the sync to first waiting process
+	    test si,si		;no waiting PD ?
+	    jz us_zero
+	      mov ax,p_link[si]
+	      mov sy_wait[bx],ax
+	      mov p_link[si],0
+us_own:
+	    mov p_stat[si],ps_run
+	    mov ax,drl
+	    mov p_link[si],ax	;put process on DRL
+	    mov drl,si
+us_zero:
+	    mov sy_owner[bx],si	;SI=0 or process to now own sync
+	    popf		;allow interrupts
+us_ret:				;wait for next dispatch
+	ret
+
+;=================		============================
+assign_sync_entry:		;give away mutual exlclusion
+;=================		============================
+;	interrupts on
+;	entry:
+;		BX = Sync Parameter Block
+;		DX = address of list root, assign
+;		     SPB to first PD on list
+;	exit:	none
+;
+	mov ax,rlr
+	cmp sy_owner[bx],ax	;check that we own the resource
+	jne as_ret
+	  mov si,dx		;SI=list root
+	  pushf ! cli		;no other process can run
+	  mov di,[si]		;get first PD from list
+	  test di,di		;test for 0 list
+	  jz as_done
+	    mov ax,p_link[di]	;take PD off list
+	    mov [si],ax
+	    mov p_link[di],0	;0 link of NEXT PD
+				;status is still PS_SLEEP.
+				;if TEMPKEEP is on ABORT_SPEC
+				;will just turn on CTLC flag.
+				;if no TEMPKEEP, ABORT_SPEC
+				;will not find PD on the U_DPARAM
+				;list and will fail.
+	
+	    mov sy_next[bx],di	;see UN_SYNC_ENTRY
+	  	  		;for use of SYNC_NEXT field
+as_done:
+	  popf
+as_ret:
+	ret
+
+;==============
+no_abort_entry:
+;==============
+;	Keep the calling process from being aborted by
+;	using the PF_TEMPKEEP flag.
+;	Turn on the PF_TEMPKEEP flag and
+;	increment the P_TKEEPCNT. 
+
+;	entry:	none
+;	exit:	PD fields altered
+;		interrupt state unaltered
+
+;	This code must be exclusive of ABORT_SPEC's testing
+;	and acting on the PD flags.
+
+
+	mov ax,rlr
+	mov si,ax
+na_spec:
+	cmp p_tkcnt[si],0
+	jne na_saved
+	  test p_flag[si],pf_tempkeep
+	  jz na_saved
+	    or p_tkcnt[si],80h		;save orignal TEMPKEEP in MSB
+na_saved:				;until rest of O.S. is fixed
+	or p_flag[si],pf_tempkeep
+	inc p_tkcnt[si]
+	ret
+
+;===================
+no_abort_spec_entry:
+;===================
+;	Keep the specified process from being aborted by setting
+;	its TEMPKEEP flag.
+
+;	entry:	DX=PD address, interrupts off
+;	exit:	PD TEMPKEEP turned on, TKCNT incremented
+
+	mov si,dx
+	jmps na_spec	
+
+;==============
+ok_abort_entry:
+;==============
+;	Allow the calling process to be aborted if
+;	the PF_TEMPKEEP flag is keeping it from being aborted.
+;	P_TKCNT is decremented in the PD, if P_TKCNT
+;	is = 0 then PF_TEMPKEEP is turned off and PF_CTLC
+;	flag is tested.
+
+;	Interrupts should be turned off if an NO_ABORT_SPEC
+;	can be performed on a process running this code.
+
+;	entry:	none
+;	exit:	PD fields altered
+
+	mov ax,rlr
+	mov si,ax
+	mov al,p_tkcnt[si]
+	and al,07FH			;high bit is original TEMPKEEP
+	dec al
+	jz oa_restore			;assume 
+	  dec p_tkcnt[si]		;no borrow from MSB
+	  ret
+oa_restore:
+if netversion
+	  and p_tkcnt[si],80H		;was TEMPKEEP on originally ?
+endif
+if not netversion
+          test p_tkcnt[si],80h
+endif
+	  jnz oa_ret			;if it was don't chk CTLC here
+					;turn off TEMPKEEP
+	    and p_flag[si],not pf_tempkeep
+	    test p_flag[si],pf_ctlc
+	    jz oa_ret
+	      mov dx,0ffffh		;if PF_CTLC is set ok to
+if netversion
+              push si
+	      call terminate_entry	;terminate even if SYS PD,
+              pop si
+endif					;see ABT_CHK in ABORT.RTM
+					;terminate may fail if
+					;KEEP was set while
+if not netversion
+              call terminate_entry
+endif
+oa_ret:					;TEMPKEEP was also set.
+	mov p_tkcnt[si],0
+	ret
+

@@ -1,0 +1,538 @@
+;*************************************************************
+;* 
+;*	Terminate and Abort Specify Process Entry Points
+;*
+;*************************************************************
+
+;==============		==============
+sysreset_entry:		; System Reset
+;==============		==============
+	xor dx,dx
+ 	mov cx,f_terminate
+	jmp osif
+
+;===============	===============================
+terminate_entry:	; Terminate - DX=terminate code
+;===============	===============================
+; This entry point is used for a process to terminate itself.  The
+; code from the label 'TERMINATE:' on, is also used by a process to be
+; terminated when it comes back into context, as set up by
+; abort specified process.
+
+	mov bx,rlr
+	call abt_chk
+	jcxz terminate
+	  jmp term_err
+
+terminate:				;process terminated by abort
+	mov bx,rlr			;spec resumes execution here
+	cli				;interrupts off during stack switch 
+	mov ss,p_uda[bx]		;reset the stack to top of UDA
+        mov sp,ulen			
+	sti
+
+	mov p_prior[bx],abt_prior	;finish termination quickly
+					;abort spec can't force us
+					;to reenter terminate when
+					;we have best priority
+
+	mov bx,offset thrd_spb		;get ownership of thread
+	call sync_entry			;list before searching
+
+	xor dx,dx
+	mov bx,(offset thrdrt)-p_thread
+	mov ax,rlr
+nxtchld:
+	mov bx,p_thread[bx]		;set all child process's p_parent
+	test bx,bx ! jz nochld		;field to 0
+	  cmp p_parent[bx],ax
+	  jne nxtchld
+	    mov p_parent[bx],dx		;found a child, 0 its parent field
+	    jmps nxtchld
+nochld:
+	mov bx,offset thrd_spb
+	call unsync_entry
+					;set parent's child abort flag
+	mov bx,rlr			;if terminating process's
+	test p_flag[bx],pf_ctlc		;CTL_C flag is on, ie, we are
+	jz term_r1			;terminating from an abort spec
+	  and p_flag[bx],not pf_ctlc	;or control C
+	  mov bx,p_parent[bx]
+	  test bx,bx ! jz term_r1
+	  or p_flag[bx],pf_childabort
+term_r1:
+	mov u_error_mode,0feh		;call BDOS termination
+if netversion
+        mov cx, f_netterm
+        call osif
+endif
+	mov cx,f_bdosterm
+	call osif
+
+	mov bx,offset q_spb
+	call sync_entry
+	call rlsmx			;release all MXqueues
+	mov bx,offset q_spb
+	call unsync_entry
+
+	mov bx,offset mem_spb		;get ownership of MEM
+	call sync_entry
+	mov mem_cnt,1			;keep MEM from freeing
+					;the MEM_SPB
+	
+	mov bx,offset thrd_spb		;get the MEM sync BEFORE
+	call sync_entry			;the THRD sync to avoid
+					;deadlock
+
+	mov cx,f_freeall		;free all memory except
+	call osif			;load stack and UDA
+	mov bx,rlr			;dispatcher does rest of
+	mov p_stat[bx],ps_term		;termination
+	jmp dsptch
+
+term_err:
+;--------
+;	entry:	CX=1 then can't terminate because KEEP or SYS flag
+;		CX=0ffffh TEMPKEEP on, CTLC turned on
+
+;	called from TERMINATE_ENTRY and ABORT_SPEC_ENTRY
+;	after call to ABT_CHK:
+
+	dec cx ! jz term_err1
+					;TEMPKEEP and CTLC flag on
+	  xor bx,bx ! mov cx,bx		;and process will terminate
+	  ret				;itself, or needs CTLC information
+
+term_err1:
+	mov cx,e_pd_noterm		;couldn't term because of
+	mov bx,0ffffh ! ret		;SYS or KEEP flags,
+					;CTLC is off
+
+;================
+abort_spec_entry:		;Abort the specified process
+;================
+;	entry:	DX = address of APB in the caller's U_WRKSEG
+;	exit:	BX = 0 if success, 0FFFFH if failure
+;		CX = 0 "     "   , error code if failure
+
+; Set up the specified PD for termination when it is next in context.
+; If the running PD is the same as the PD to abort, we can just use
+; the terminate entry point.  Otherwise we use the Abort Parameter Block
+; to find it.  If it cannot be found, name and console must both match,
+; the abort fails.  If the TEMPKEEP flag is on, set the CTLC flag
+; and return.  If the KEEP flag is on and not the TEMPKEEP flag,
+; then fail.
+; If the terminate code in DL on entry, is not 0ffh
+; and the SYS flag is on in the PD to be aborted, then fail.
+; The PD is taken off the list it is attached to via its link field.
+; The terminating PD's priority is set to ABT_PRIOR,
+; and the address of TERMINATE: is put on top of its UDA stack.
+; This forces the terminating process to run next (it has the
+; best priority in the system) and for it to resume execution
+; at TERMINATE: on returning from the dispatcher.
+
+	push dx
+	mov bx,offset thrd_spb		; get ownership of thread
+	call sync_entry			; while searching
+	pop si				; U_WRKSEG:SI->APB
+
+	push ds ! mov ds,u_wrkseg
+	mov bx,apb_pd[si]		; get PD adr to abort
+	mov cx,apb_term[si]		; get termination/memfree code
+	mov ah,apb_cns[si]		; console from APB
+	pop ds
+	push cx				; save termination code
+	test bx,bx ! jz abt_findit	; got a PD ID, but not verified
+	  call find_pdthrd		; find it on thread
+	  push cx			; save return code
+	  jmps abt_unsync
+
+abt_findit:
+ 	  add dx,offset apb_pdname	; get adr of named PD
+	  mov bx,offset thrdrt - p_thread ; find it on thread
+	  call findpdnc			; look for PD name and console match
+	  push cx			; save return code
+abt_unsync:
+	push bx				; BX=PD if found
+	mov bx,offset thrd_spb
+	call unsync_entry
+	pop bx
+	pop cx				; CX=0 if no PD found
+	jcxz abt_err1
+				; successfully found PD
+	pop dx			; DX = terminate code
+	mov ax,rlr		; we are aborting ourselves
+	cmp ax,bx		; jump to TERMINATE_ENTRY
+	jne abt_notus
+;if netversion
+;	  jmp sysreset_entry
+;endif
+;if not netversion
+          jmp terminate_entry
+;endif
+abt_notus:
+	mov indisp,true		; stop dispatching
+	;pushf ! cli		; do not let process or another
+				; process (NO_ABORT_SPEC) change the
+	or p_flag[bx],pf_ctlc	; flags while testing and acting on them.
+	call abt_chk		; ok to abort this PD ?
+	jcxz abt_ok
+	  ;popf			; can't abort it - return
+	  call ok_disp
+	  jmps term_err
+
+	; The interrupt window above may be lessened if the TERMINATE_ENTRY
+	; code is moved to the dispatcher and the status is set to PS_TERM.
+	; Turning interrupts back on, the aborting process could come
+	; back into context.  Before turning on TEMPKEEP it would check
+	; its status, if it is PS_TERM, then it goes to the dispatcher
+	; to terminate.
+
+abt_ok:				; this process will be aborted
+	mov dl,p_stat[bx]	; call abort function based on status
+	mov dh,0 ! mov di,dx
+
+	add di,di
+	call cs:abort_tab[di]	; find via p_link and take PD off its list
+	;popf
+	call ok_disp		; process can't come back into context
+				; so interrupts are ok
+	jcxz abt_err2		; couldn't find PD on list by indicated
+	  mov indisp,false	; by P_STAT
+	  mov p_prior[bx],abt_prior
+				; set to low priority
+	  push es		; save calling process' UDA
+	  mov es,p_uda[bx]	; UDA of PD being aborted
+	  mov si,(ulen-2)	; reset stack to top of UDA
+	  mov u_sp,si
+	  mov u_ss,es
+;if netversion
+;          mov es:[si],offset sysreset_entry
+;endif
+;if not netversion
+	  mov es:[si],offset terminate
+;endif
+				; TERMINATE: will be executed when
+				; terminating process comes back into
+	  			; context
+	  xor ax,ax		; on exit from dispatcher interrupts
+	  mov u_flag_sav,ax	; will be off
+	  mov u_inint,false	; return into context with a RET and
+				; not an IRET
+if netversion
+         inc es:byte ptr u_insys
+endif
+	  pop es		; ES=calling PD's UDA
+	  call abt_putdrl
+	  xor bx,bx		; indicate sucess
+	  jmp pdisp		; force abort to happen before we return 
+				; since terminating process has better
+				; priority
+
+abt_err1:
+	pop dx			; throw out termination code
+abt_err2:
+	mov cx,e_no_pdname	; set TERM_ERR for other returns
+	mov bx,0ffffh
+	ret
+
+; The folowing are the abort handlers for a specific PD status.
+; These labels are entered in the abort_tab(le) in the RTM data area. 
+; Interrupts assumed off.
+; For all of the following:
+;	entry:	BX = PD addr to be aborted
+;		AH = cons
+;	exit:	CX=0 if error
+;		BX preserved
+;
+; abort_specified process jump table
+;
+				; Status	
+abort_tab	dw	abtrun	; 0  = ready list root
+		dw	abtslp	; 1  = poll
+		dw	abtdly	; 2  = delay
+		dw	abtslp	; 3  = swap
+		dw	abttrm	; 4  = term
+		dw	abtrun	; 5  = sleep
+		dw	abtslp	; 6  = dq
+		dw	abtslp	; 7  = nq
+		dw	abtflg	; 8  = flagwait
+		dw	abtslp	; 9  = ciowait
+		dw	abtslp	; 10 = sync
+abt_tablen	equ	offset $ - offset abort_tab
+
+abtrun:			
+;-------
+; On ready list root or dispatcher ready list
+
+	mov di,(offset rlr) - p_link
+	call find_pd
+	jcxz abtr_drl
+	  jmps snip_it
+abtr_drl:			; wasn't on rlr, try drl 
+	mov di,(offset drl) - plink
+	jmps abt_common
+
+abtslp:
+;------
+; On list indicated by u_dparam
+; Note: a PD in the SY_NEXT field will not be found
+; and cannot be terminated.  Usually the PD has TEMPKEEP on
+; so it never gets this far.
+
+	push es ! mov es,p_uda[bx]
+	mov di,u_dparam
+	pop es ! jmps abt_common
+
+abtdly:
+;------
+	mov di,offset dlr - p_link
+	call find_pd
+	jcxz abt_tab_err
+	  mov si,p_link[si]	; Fix wait field in next PD on dlr
+	  test si,si
+	  jz ad_nofix		; Are there more PDs after the one
+	    mov dx,p_wait[si]	; being aborted on the DLR ?
+	    add dx,p_wait[bx]	; Add wait of aborting PD
+	    mov p_wait[si],dx	; New value in next PD on dlr
+ad_nofix:
+	  jmps snip_it
+
+abttrm:
+;------
+	mov indisp,false
+	call pdisp		; we are terminating already
+	xor cx,cx		; make sure termination completes
+	jmps abt_tab_err	; before returning error
+
+abtflg:
+;------
+	xor cx,cx
+        push es ! mov es, p_uda[bx]
+	mov di,u_dparam		; flag PD field asleep on
+        pop es
+	cmp bx,[di]		; if interrupts are allowed
+	jne aflg_err		; in this code, check DRL
+	  inc flg_ignore[di]	; and RLR if not in flags
+	  mov flg_pd[di],flag_off
+	  inc cx
+aflg_err:
+	  ret
+
+abt_common:
+;----------
+	call find_pd ! jcxz abt_tab_err
+	;jmps snip_it
+
+snip_it:
+;-------
+; Take PD out of linked list of PDs
+;	entry:	BX = PD being snipped out
+;		DI = offset of previous PD or offset of root - p_link.
+
+	mov dx,p_link[bx]	; DX = next link
+	mov p_link[di],dx       
+	ret			; CX<>0
+
+abt_tab_err:
+;-----------
+	ret			; CX = 0
+
+;
+; End of abort_tab(le) functions
+; 
+
+
+abt_putdrl:
+;-------
+; Puts PD on DRL
+;	entry:	BX = PD to insert
+;	exit:	BX preserved
+
+        pushf ! cli
+	mov dx,drl
+	mov p_link[bx],dx
+	mov drl,bx
+        popf ! ret
+
+; Utility routines for abort entry point 
+
+findpdnc:
+;--------
+; Find PD by name and console, via thread list.
+;	entry:	BX = offset of thread list root - p_thread
+;		DX = adr of name in u_wrkseg
+;		AH = console number	
+;		ownership of thread sync
+;	exit:	BX = PD
+;		CX = 0 failure
+
+	xor cx,cx
+nxt_pdname:
+	push ax			; save console number
+	call findpdname_entry
+	pop ax
+	jcxz fnc_found_one	; CX = 0 is success from findpdname
+	  xor cx,cx
+	  ret			; CX = 0 is failure from this routine
+fnc_found_one:			; found PD w/ same name
+	cmp p_cns[bx],ah	; chk for same console #
+	  jnz nxt_pdname
+	inc cx ! ret		; success
+
+find_pdthrd:
+;-----------
+; Find PD on thread list
+;	entry:	BX = PD address we want
+;		ownership of thread sync
+;	exit:	CX = 0 if not found
+;		BX prserved
+
+	xor cx,cx
+	mov di,offset thrdrt - p_thread
+fp_next:
+	mov di,p_thread[di]
+	test di,di
+	jz fp_err
+	  cmp bx,di
+	  jne fp_next
+	    inc cx
+fp_err:
+	ret
+
+
+find_pd:
+;-------
+; Find PD through link field, interrupts assumed off
+;	entry:	BX = PD address
+;		DI = offset of list root - p_link
+;	exit:	BX = SI = PD address
+;		DI = Previous PD
+;		CX = 0 if failure
+
+        mov si,p_link[di]
+        xor cx,cx
+fpd_nxt_pd:
+	test si,si		; SI could be zero to start
+	    jz  fpd_not_found
+	cmp si,bx		; Are addresses the same ?
+	    jz fpd_found
+fpd_nxt_lnk:
+	mov di,si		; Save previous link
+	mov si,p_link[si]
+	jmps fpd_nxt_pd
+fpd_found:
+	inc cx
+fpd_not_found:
+	ret
+
+fflgpd:
+;-----
+;	Find offset into flag table of flag waiting PD
+;	entry:	BX = PD
+;	exit:	DI = offset in RTM data of flag
+;		CX = 0 if failure
+;		BX preserved
+
+	mov cl,nflags
+	xor ch,ch
+	mov di,flags
+ffp_nxt_flg:
+	cmp bx,flg_pd[di]	; assume legal flag
+	jz ffp_pdfound
+	    add di,flglen
+	    loop ffp_nxt_flg
+ffp_pdfound:
+	    ret			; CX is 0 at end of loop instr
+				; CX <> 0 if found
+
+
+ok_disp:
+;-------
+	mov indisp,false
+	cmp drl,0
+	jz od_ret
+	  call pdisp
+od_ret:
+	ret
+
+
+abt_chk:
+;-------
+;	Check different PD flags for terminate or abort
+;	CTLC flag is on if called from ABORT_SPEC
+;	entry:	BX = PD to possibly abort
+;		DL = termination code
+;		interrupts off if called from ABORT_SPEC
+;	exit:	CX = 00000H if ok to abort
+;		     00001H IF NOT OK TO ABORT
+;		     0FFFFH IF TEMPKEEP
+;		BX = PD as on entry
+;		interrupts unchanged
+
+	xor cx,cx
+	mov ax,p_flag[bx]		;AX = PD flags
+
+					;test TEMPKEEP first
+					;for signaling KEEP process
+					;to terminate i.e., the TMP
+					;while in the CLI
+	test ax,pf_tempkeep ! jz ac_keep
+	  or ax,pf_ctlc			;signal control C
+	  dec cx			;temp keep return
+	  jmps ac_ret
+ac_keep:
+	test ax,pf_keep ! jnz ac_no
+					;not KEEP, test SYS
+	inc dl ! jz ac_ok		;if DL = 0ffh -> ok to terminate
+	test ax,pf_sys ! jz ac_ok	;DL<>0ffh & not sys-> ok to terminate
+ac_no:
+	  and ax,not pf_ctlc		;turn off ctlc 
+	  inc cx			;CX=1, can't terminate
+
+ac_ret:
+	mov p_flag[bx],ax		;new flags if no termination
+ac_ok:
+	ret
+
+rlsmx:
+;-----
+;	Release all MX queues owned by the terminating process
+;	called only from TERMINATE_ENTRY
+;	entry:	we own the Queue SYNC
+;	exit:	none
+
+;	To guard against queue deletes, and to make interrupt
+;	windows are smaller, we start over from the beginning of
+;	QLR after we write to an MXqueue that we own.
+
+	mov bx,rlr			;BX=running process
+;	pushf ! cli
+	mov si,(offset qlr)-q_link
+rm_nxt:
+	mov si,q_link[si]		;SI=QD currently checking
+	test si,si			;end of list ?
+	jz rm_done
+	  test q_flags[si],qf_mx	;is it an MX queue ?
+	  jz rm_nxt
+	    cmp bx,q_buf[si]		;do we own it ?
+	    jne rm_nxt
+;	      popf			;allow interrupts
+	      push si			;put 2-word QPB on stack
+	      xor ax,ax
+	      push ax
+	      mov dx,sp
+	      mov cx,f_qwrite
+	      push ds			;save DS
+	      push ss ! pop ds		;DS=SS
+	      call osif
+	      pop ds			;restore DS
+	      pop ax ! pop ax		;throw out 2-word QPB
+	      jmps rlsmx		;start over from
+					;top of queue list
+					;a queue could have been
+					;deleted while we were writing
+rm_done:
+;	popf
+	ret
+

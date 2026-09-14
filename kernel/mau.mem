@@ -1,0 +1,303 @@
+;*****************************************************
+;*
+;*	Memory Allocation Unit Routines
+;*
+;*	Memory Allocation Unit
+;*		A Memory Allocation Unit is a contiguous
+;*	area of memory that is described by a MD.
+;*	At the beginning of this area is a Suballocation
+;*	table that describes areas within it that are
+;*	allocated or free
+;*
+;*	     +----+----+----+----+----+----+----+----+
+;*	MD   |  Link   |  Start  | Length  |  Plist  |
+;*	     +----+----+----+----+----+----+----+----+
+;*
+;*	Link - Link field for placing MAUs on Linked
+;*		lists
+;*	Start - Segment Address of the area covered
+;*	Length - Length of area
+;*	Plist - used for a linked list of partitions
+;*		that are included in this area.
+;*
+;*	Suballocation Table
+;*		The m_start field is the segment
+;*	address of the suballocation table (offset 0).
+;*	The first entry of the table is special and
+;*	has the following format.
+;*
+;*	     +----+----+----+----+----+
+;*	SAT0 |ents|   reserved        |
+;*	     +----+----+----+----+----+
+;*
+;*		sat1_ents - number of SAT entries
+;*			not including SAT0
+;*	Subsequent entries have the following format
+;*
+;*	     +----+----+----+----+----+
+;*	SAT  |  Start  |  Length |nall|
+;*	     +----+----+----+----+----+
+;*
+;*		start - start address of this contiguous
+;*			piece of memory
+;*		length - of this piece of memory
+;*		nall - number of times allocated
+;*			0 = free  2 = share
+;*
+;*****************************************************
+
+sat_start	equ	word ptr 0
+sat_length	equ	word ptr sat_start + word
+sat_nall	equ	byte ptr sat_length + word
+satlen		equ	sat_nall + byte
+
+;==============
+maualloc_entry:		; Alloc from MAU
+;==============
+; Allocate a piece of memory from an MAU
+;
+;	input:	BX = address of MAU
+;		DX = MPB in u_wrkseg
+;		mpb_start = abs addr (0 = any)
+;		mpb_min = minimum necessary
+;		mpb_max = maximum wanted
+;
+;	output:	BX =     0h if success
+;		     0ffffh if failure
+;		CX = Error Code
+;		mpb_start = start address
+;		mpb_min = mcb_max = length
+
+	push es ! mov es,u_wrkseg
+
+		; if absolute, see if within MAU
+	mov si,dx ! mov cx,es:mpb_start[si]
+	cmp cx,0 ! je maua_rel
+	    mov ax,m_start[bx]
+	    cmp cx,ax ! jb maua_err
+		add ax,m_length[bx]
+		cmp cx,ax ! jae maua_err
+maua_rel:
+	mov ds,m_start[bx]
+maua_start:
+	sub bx,bx ! mov dl,bl			;BX->SAT entry
+						;DL = SAT number
+maua_nsat:
+	inc dl ! add bx,satlen
+	cmp dl,.0 ! ja maua_err			;?out of table entries?
+	cmp sat_start[bx],0 ! je maua_err	;?end of used table?
+	    cmp sat_nall[bx],0 ! jne maua_nsat	;?already allocated?
+		mov cx,es:mpb_start[si]
+		cmp cx,0 ! je maua_nabs		;?abs req?
+		    mov ax,sat_start[bx]
+		    cmp cx,ax ! jb maua_nsat	;?in this area?
+			add ax,sat_length[bx]
+			cmp cx,ax ! jae maua_nsat
+			    cmp cx,sat_start[bx] ! je maua_nabs ;?exact?
+				sub cx,sat_start[bx]
+				push si
+				call mau_split			;make exact
+				pop si
+				jmps maua_start
+maua_err:
+	mov bx,0ffffh ! mov cx,e_no_memory
+	jmps maua_out
+maua_nabs:
+	    mov cx,es:mpb_min[si]
+	    mov ax,sat_length[bx]
+	    cmp cx,ax ! ja maua_nsat
+		mov cx,es:mpb_max[si]
+		cmp cx,ax ! jae maua_alloc
+		    cmp sat_nall[bx],0 ! je maua_splitit
+			mov ax,es:mpb_flags[si]
+			and ax,mf_share ! jz maua_nsat
+			    jmps maua_alloc
+maua_splitit:	    push si ! call mau_split ! pop si
+maua_alloc:	mov ax,sat_length[bx]
+		mov es:mpb_min[si],ax
+		mov es:mpb_max[si],ax
+		mov ax,sat_start[bx]
+		mov es:mpb_start[si],ax
+		inc sat_nall[bx]
+		call mau_collapse
+		sub bx,bx ! mov cx,bx
+		jmps maua_out
+maua_out:
+	mov ds,sysdat
+	pop es ! ret
+
+;=============
+maufree_entry:		; Free from MAU
+;=============
+; free SAT in given MAU
+;	input:	DX = address of MAF in u_wrkseg
+;	output:	CX = 0 if successful
+;		CX = 0ffffh on failure
+;		if CX = 0,
+;		    BX = 0 if MAU still in use
+;		    BX = 0ffffh if MAU is empty
+;		if CX = 0ffffh
+;		    BX = 0ffffh
+
+	push es ! mov es,u_wrkseg
+	mov si,dx
+	mov bx,es:maf_mau[si]
+	mov ds,m_start[bx]
+
+		; ES:SI -> MAF
+		; DS: 0 -> SAT table
+
+	sub bx,bx ! mov cx,bx
+	mov dx,es:maf_sat[si]
+
+		; DS:BX -> current SAT
+		; CX = SAT entry number
+		; DX = MAF_SAT start
+
+mauf_nsat:
+	add bx,satlen ! inc cx
+	cmp cx,.0 ! ja mauf_err
+	    cmp dx,sat_start[bx]		; This SAT?
+	    jne mauf_nsat
+		cmp dx,es:maf_start[si]		; Freeing all of it?
+		je mauf_free
+		    cmp sat_nall[bx],1		; Is it shared?
+		    je mauf_nsha
+			jmps mauf_out		; Can't split it
+						; since its shared.
+						; But, no error
+
+mauf_nsha:	    mov cx,es:maf_start[si]	; Not shared,
+		    mov ax,sat_start[bx]
+		    add ax,sat_length[bx]
+		    cmp ax,cx ! jb mauf_err	; Within range?
+
+				; must split this SAT
+				; this can only be done if not shared
+
+			sub cx,dx ! call mau_split
+			sub cx,cx ! mov bx,cx ! jmps mauf_c
+mauf_free:	dec sat_nall[bx]
+mauf_c:		call mau_collapse ! jmps mauf_out
+mauf_err:
+	mov bx,0ffffh ! mov cx,e_no_memory
+mauf_out:
+	pop es ! mov ds,sysdat
+	ret
+
+mau_split:		;split SAT into 2
+;---------		-----------------
+; new SAT element starting at split boundary
+; with nall=0, old has same nall.
+;	input:	BX = address of SAT element
+;		CX = length to split at
+;	output:	BX = address of original SAT element
+
+	push bx ! push cx
+	add bx,satlen ! call mau_insert
+	cmp cx,0 ! pop cx
+	pop bx ! jne maus_err		;create hole if error
+	    lea di,satlen[bx] ! mov dx,sat_length[bx]
+	    sub dx,cx ! mov sat_length[di],dx
+	    mov dx,cx ! add dx,sat_start[bx]
+	    mov sat_start[di],dx ! mov sat_nall[di],0
+maus_err:
+	mov sat_length[bx],cx
+	ret
+
+mau_collapse:		;collapse adjacent unallocated SATs
+;------------		-----------------------------------
+; collapse adjacent unallocated SATs and holes in table
+; if possible
+;	return:	BX = 0 if not empty
+;		   = 0ffffh if empty
+;		CX = 0
+
+	sub bx,bx ! mov cx,bx
+mauc_nsat:
+	inc cx
+	cmp cx,.0 ! je mauc_mtchk
+	  add bx,satlen ! lea di,satlen[bx]
+	  cmp sat_start[bx],0 ! je mauc_mtchk
+	  cmp sat_start[di],0 ! je mauc_mtchk
+	  cmp sat_nall[bx],0 ! jne mauc_notfree
+		;this SAT is free
+	    mov ax,sat_start[bx] ! add ax,sat_length[bx]
+	    cmp ax,sat_start[di] ! je mauc_fnohole
+			;followed by a hole
+		mov ax,sat_start[di] ! sub ax,sat_start[bx]
+		mov sat_length[bx],ax
+mauc_fnohole:
+		;free SAT., no hole
+	    cmp sat_nall[di],0 ! jne mauc_nsat
+			;followed by free SAT
+		mov ax,sat_length[di]
+		add sat_length[bx],ax
+		push bx ! push cx
+		mov bx,di ! call mau_release
+		pop cx ! pop bx
+		sub bx,satlen ! dec cx
+		jmp mauc_nsat
+mauc_notfree:
+		;allocated SAT
+	  mov ax,sat_start[bx] ! add ax,sat_length[bx]
+	  cmp ax,sat_start[di] ! je mauc_nsat
+			;followed by a hole
+	    cmp sat_nall[di],0 ! je mauc_nfhole
+			;next SAT is allocated
+		push bx ! push cx
+		mov di,bx ! call mau_insert
+		pop cx ! pop bx
+		jmp mauc_nsat
+mauc_nfhole:		;Alloc SAT, followed by hole
+			;next SAT is free
+	    mov ax,sat_start[di] ! sub ax,sat_start[bx]
+	    sub sat_start[di],ax ! add sat_length[di],ax
+	    jmp mauc_nsat
+
+mauc_mtchk:
+	mov bp,0ffffh
+	xor cx,cx ! xor bx,bx
+mauc_mtn:
+	inc cx
+	cmp cx,.0 ! je mauc_out
+	    add bx,satlen
+	    cmp sat_start[bx],0 ! je mauc_out
+		cmp sat_nall[bx],0 ! je mauc_mtn
+		    mov bp,0
+mauc_out:
+	mov bx,bp ! xor cx,cx ! ret
+	
+mau_release:
+;-----------
+;	input: BX = SAT to release
+
+	push es ! mov ax,ds ! mov es,ax
+	mov ax,satlen
+	mul byte ptr .0
+	push ax ! mov cx,ax ! sub cx,bx
+	mov di,bx ! add bx,satlen
+	mov si,bx ! rep movs al,al
+	pop bx ! mov sat_length[bx],0
+	mov sat_start[bx],0
+	mov sat_nall[bx],0
+	pop es ! ret
+
+mau_insert:
+;----------
+;	input: 	BX = SAT to place new SAT in front
+;	output:	CX = 0 if successful
+
+	mov ax,satlen ! mul byte ptr .0
+	mov si,ax ! mov cx,0ffffh
+	cmp sat_start[si],0 ! jne maui_r
+	    mov cx,si ! sub cx,bx
+	    dec si ! lea di,satlen[si]
+	    push es ! push ds ! pop es
+	    std ! rep movsb ! cld
+	    pop es ! sub cx,cx
+	    mov sat_start[bx],cx
+	    mov sat_length[bx],cx
+	    mov sat_nall[bx],cl
+maui_r:	ret
+

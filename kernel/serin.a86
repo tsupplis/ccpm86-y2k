@@ -1,0 +1,822 @@
+
+;			  ***  SERIN.RSP  ***
+
+;			 A Concurrent CP/M-86
+;		      Resident System Process for
+;	          Queue Driven Serial Character Input
+
+;	Oct 19, 1983				    Dean Ballard
+
+
+;	This program reads characters from a circular buffer and
+;	writes them to the serial input queue for consumption by
+;	an application program.  The characters are put into the
+;	buffer by an interrupt routine which is contained within
+;	this module.  The interrupt routine also serves to alert
+;	the serial output routine when it is waiting on transmit
+;	buffer empty.
+
+
+;	First the hardware independent equate values.
+;	These have to do with the queue management, and generally
+;	pertain to the application program side of things.
+
+q_mes_size	equ	17	; byte count plus 16 characters
+in_q_num	equ	4	; number of in queue messages
+out_q_num	equ	2	; number of out queue messages
+
+c_buf_size	equ	300	; receive int circular buffer
+stack_size	equ	64	; for interrupt routine
+
+bdos		equ	0E0h	; bdos interrupt number
+
+c_detach	equ	93h	; detach console
+dev_flag_wait	equ	84h	; wait for a flag
+dev_flag_set	equ	85h	; release a flag
+p_delay		equ	8Dh	; delay dx ticks
+p_priority	equ	91h	; set process priority
+p_term		equ	8Fh	; terminate a process
+q_make		equ	86h	; create queue code
+q_open		equ	87h	; open queue code
+q_read		equ	89h	; read queue code
+q_write		equ	8Bh	; write queue code
+s_sysdat	equ	9Ah	; get system data seg
+
+;	RSP data origin addresses
+
+rsp_header	equ	00h	; start of data segment
+rsp_pd		equ	10h	; process descriptor offset
+rsp_uda		equ	40h	; user data area offset
+rsp_stack_top	equ	13Ah	; at the end of uda
+rsp_data_end	equ	140h	; end of rsp stuff
+
+;	protocol constants
+
+dtr_dsr		equ	01h	; bit for dsr/dtr protocol
+rts_cts		equ	02h	; bit for rts/cts protocol
+xon_xoff	equ	04h	; bit for xon/xoff protocol
+
+xon		equ	11h	; start transmission
+xoff		equ	13h	; stop transmission
+
+;	system data page address pointers
+
+	dseg
+
+	org	00h
+sup_o		rw	1	; supervisor offset
+sup_s		rw	1	; supervisor segment
+
+	org	38h
+disp_o		rw	1	; dispatcher offset
+disp_s		rw	1	; dispatcher segment
+
+
+;	Now the hardware specific equates
+;	These have to do with the I/O port and interrupt management,
+;	and are, for the most part, specific to the IBM PC
+
+;	async port bit patterns
+
+dr		equ	01h		; data ready
+tbe		equ	20h		; xmit buf empty
+r_t_mask	equ	03h		; rec/trans int en
+rec_int		equ	04h		; from int id reg
+tran_int	equ	02h		; from int id reg
+no_int		equ	01h		; no hardware interrupt
+dsr_bit		equ	20h		; from modem status
+cts_bit		equ	10h		; from modem status
+rts_bit		equ	02h		; also with int en
+dtr_bit		equ	01h		; to modem control
+i_en		equ	08h		; interrupt enable
+
+;	8259 programmable interrupt ports and patterns
+
+pic_ack		equ	20h		; 8259 acknowledge address
+pic_mask	equ	pic_ack + 1	; 8259 int mask address
+ns_eoi		equ	20h		; non specific end of int
+
+
+
+;	**************************
+;	***  Code begins here  ***
+;	**************************
+
+	cseg
+
+	org	00h			; small model
+
+serial_in:
+	call	which_port		; are we port 0 or port 1 ?
+	call	is_it_there		; if the port is not present
+	jnz	terminate_in		;   then terminate the process
+
+	call	get_sys_data		; read supervisor, dispatcher
+	call	make_queues		; input, output, and mx queues
+	call	open_queues		; open all queues
+	call	write_mx_queue		; set up the mx queue
+	call	write_t_block		; send address to serial out
+	call	install_int		; prepare for interrupts
+
+in_loop:
+	call	read_c_buf		; get char(s) from buffer
+	call	pause			; wait if there's no hurry
+	call	write_q			; write message to queue
+	jmps	in_loop			; go forever
+
+terminate_in:
+	mov	pd_flag,0		; turn off the keep flag
+	mov	cl,p_term
+	mov	dl,0
+	int	bdos			; back to bdos
+
+
+;	***************************
+;	***  Setup Subroutines  ***
+;	***************************
+
+;	see which port we are, and adjust params if necessary
+
+which_port:
+	mov	al,ncp			; get copy number
+	cmp	al,0			; if port = 0
+	jz	which_port_done		;   then leave params alone
+
+	push	ds
+	pop	es			; local move
+	mov	si,offset qn_list	; list of queue names
+	mov	cx,qn_list_size		; count of names to change
+	add	al,'0'			; change port number to ascii
+
+qn_list_loop:
+	mov	di,[si]
+	stosb				; change to '1'
+	inc si  ! inc si
+	loop	qn_list_loop
+
+	mov	si,offset port1_params	; now adjust parameters
+	mov	di,offset port0_params
+	mov	cx,port_param_size
+	cld
+	rep	movsb			; copy port1 over port0
+
+which_port_done:
+	ret
+
+
+;	check to see if the port is present
+;	exit:	zf set if port is present
+
+is_it_there:
+	mov	dx,port_int_id		; interrupt ident port
+	in	al,dx
+	test	al,0F8h			; should be zero if present
+	ret
+
+
+;	fetch pointers to supervisor and dispatcher entries
+
+get_sys_data:
+	mov	cl,s_sysdat
+	int	bdos			; es:bx points to sysdat
+	mov	sys_data_s,es		; save system data segment
+
+	mov	ax,es:sup_o[bx]
+	mov	i_sup_o,ax		; save supervisor offset
+	mov	ax,es:sup_s[bx]
+	mov	i_sup_s,ax		; save supervisor segment
+
+	mov	ax,es:disp_o[bx]
+	mov	i_disp_o,ax		; save dispatcher offset
+	mov	ax,es:disp_s[bx]
+	mov	i_disp_s,ax		; save dispatcher segment
+	ret
+
+
+;	create input, output, and mx queues
+
+make_queues:
+	mov	dx,offset qd_in
+	call	make_one		; make the input queue
+
+	mov	dx,offset qd_out
+	call	make_one		; make the output queue
+
+	mov	dx,offset qd_mx		; and the mx queue too
+make_one:
+	mov	cl,q_make
+	int	bdos			; make it
+	ret
+
+
+;	open all three queues
+
+open_queues:
+	mov	dx,offset qpb_in
+	call	open_one		; open the input queue
+
+	mov	dx,offset qpb_out
+	call	open_one		; open the output queue
+
+	mov	dx,offset qpb_mx	; and the mx queue too
+open_one:
+	mov	cl,q_open
+	int	bdos			; open it
+	ret
+
+
+;	perform the initial write to the mx queue
+
+write_mx_queue:
+	mov	cl,q_write
+	mov	dx,offset qpb_mx
+	int	bdos			; port is now available
+	ret
+
+
+;	write the address of the shared data block to the out queue
+;	to enable the Serial Out process access
+
+write_t_block:
+	mov	t_block_s,ds		; our data segment
+	mov	cl,q_write		; offset is already there
+	mov	dx,offset qpb_out
+	int	bdos			; start up the out routine
+	ret
+
+
+;	set up interrupt vector and hardware
+
+install_int:
+	mov	di,ser_ds_ptr		; point to the place to
+	mov	cs:[di],ds		;   store our data segment
+					; store it in the code seg
+	sub	ax,ax
+	mov	es,ax			; base page extra segment
+	mov	di,ser_int_vect		; vector destination
+	mov	ax,ser_int_entry	; for port 0 or port 1
+	stosw				; store offset
+	mov	ax,cs
+	stosw				; store segment
+
+	in	al,pic_mask		; now program the 8259
+	and	al,ser_pic_mask		;   to allow this interrupt
+	out	pic_mask,al
+
+	mov	dx,port_int_en		; which comm ints to use
+	mov	al,r_t_mask		; allow receive and transmit
+	out	dx,al
+
+	mov	dx,port_modem_ctrl
+	mov	al,dtr_bit + rts_bit + i_en
+	out	dx,al			; set up modem control
+
+	mov	dx,port_int_id
+	in	al,dx			; clear a pending xmit int
+	ret				; ready to go
+
+
+;	**************************
+;	***  Loop Subroutines  ***
+;	**************************
+
+;	read characters from the circular buffer
+
+read_c_buf:
+	cli				;; critical section
+	mov	si,buf_out_ptr		;; for reading
+	mov	ax,buf_in_ptr		;; used by int routine
+	cmp	ax,si			;; if they're different
+	jnz	read_now		;;   then something's there
+
+	mov	r_wait,0FFh		;; if not, then wait
+	sti				; interrupts are ok
+	call	rec_prot_on		; enable handshakes
+	mov	cl,dev_flag_wait
+	mov	dl,r_flag
+	int	bdos			; wait for c_buf to fill
+	jmps	read_c_buf		; go back and set it up
+
+read_now:
+	sti
+	push	ds
+	pop	es			; local extra seg
+	mov	cx,q_mes_size - 1	; max number of chars
+	mov	di,offset msg_in + 1	; start of char message
+
+read_loop:
+	movsb				; from c_buf to message
+	cmp	si,c_buf_end		; check for wrap around
+	jb	read_no_wrap
+	mov	si,offset c_buf
+read_no_wrap:
+	cmp	ax,si			; are there more chars?
+	loopnz	read_loop		; if so, loop up to max
+
+	mov	buf_out_ptr,si		; update the pointer
+	mov	al,q_mes_size - 1
+	sub	al,cl			; al = char count
+	mov	msg_in,al		; store in the message
+	ret
+
+
+;	pause to fill the buffer a bit
+;	this maximizes the use of full queue messages
+;	and frees up the processor for other tasks
+
+pause:
+	cmp	msg_in,q_mes_size - 1	; if last message was full
+	jz	pause_done		;   then don't wait
+
+	mov	cl,p_delay
+	mov	dx,1			; wait at least 1 tick
+	int	bdos
+pause_done:
+	ret
+
+
+;	write one message to the queue
+
+write_q:
+	mov	cl,q_write
+	mov	dx,offset qpb_in	; input queue param block
+	int	bdos			; wait here if not ready
+	ret				; return when ready to send
+
+
+;	receive protocol handler
+
+rec_prot_on:
+	mov	bx,offset r_on_prot	; receive on data
+	mov	al,0FFh			; state = true
+	xchg	al,r_prot_state		; test and set state
+	test	al,al			; if protocol if off now
+	jz	receive_prot		;   then turn it on
+	ret				; else just return
+
+rec_prot_off:
+	mov	bx,offset r_off_prot	; receive stop data
+	mov	r_prot_state,0		; protocol is off now
+;	jmps	receive_prot
+
+receive_prot:
+	mov	al,rec_prot_code	; code for which protocol
+	test	al,al			; if none being used
+	jz	rec_prot_done		;   then just skip it
+
+	and	al,03h			; if not hardware handshake
+	jz	rec_prot_x		;   then do xon/xoff
+
+	xlat	bx			; turn code into control bits
+	mov	dx,port_modem_ctrl	; to control dtr, rts
+	out	dx,al			; set modem lines
+	jmps	rec_prot_done
+
+rec_prot_x:
+	mov	al,[bx]
+	mov	send_x,al		; either xon or xoff
+	cmp	al,xon
+	jnz	rec_prot_done		; if we're sending an xon
+	call	fake_int		;   then fake an interrupt
+					;   to kick it off
+rec_prot_done:
+	ret
+
+
+;	Interrupt entries to kick off an xon transmit
+
+fake_int0:
+	int	12			; port 0 interrupt
+	ret
+
+fake_int1:
+	int	11			; port 1 interrupt
+	ret
+
+
+serin_code_top	equ	offset $
+
+
+;	*****************************
+;	***  RSP header, pd, uda  ***
+;	*****************************
+
+	dseg
+
+	org	rsp_header		; header start
+
+	dw	0,0
+ncp	db	1,0			; one copy
+	dw	0,0,0
+	dw	0,0
+
+
+	org	rsp_pd			; process descriptor
+
+	dw	0,0			; link, thread
+	db	0			; ready to run
+	db	180			; priority better than PIN's
+pd_flag	dw	2			; process flag "keep"
+	db	'SerIn   '		; process name
+	dw	rsp_uda/10h		; uda segment
+	dw	0,0			; disk, user, reserved
+	dw	1			; for shared code
+	dw	0,0,0			; and a mess of zeros
+	dw	0,0,0
+	dw	0,0,0
+	dw	0,0,0
+
+
+	org	rsp_uda			; user data area
+
+	dw	0,0,0,0,0,0		; no dma buffer
+	dw	0,0,0,0,0,0
+	dw	0,0,0,0,0,0
+	dw	0,0,0,0,0,0
+	dw	0,0,rsp_stack_top,0,0,0
+	dw	0,0,0,0,0,0
+	dw	0,0,0,0,0,0
+	dw	0,0,0,0,0,0
+	db	1,0,0,0,0,0		; don't switch from UDA
+					; stack at SUP entry
+
+	org	rsp_stack_top
+
+	dw	offset serial_in	; code start
+	dw	0			; code seg (genccpm)
+	dw	0			; flags (genccpm)
+
+
+;	******************************
+;	***  Our data begins here  ***
+;	******************************
+
+	org	rsp_data_end		; above the rsp stuff
+
+;	first we have parameters for port 0
+
+port0_params	rb	0
+p0_base		equ	03F8h		; port base address
+port_data	dw	p0_base		; rw data
+port_int_en	dw	p0_base + 1	; wo int enable
+port_int_id	dw	p0_base + 2	; ro int ident
+port_modem_ctrl	dw	p0_base + 4	; wo bit 3 = en int
+port_status	dw	p0_base + 5	; ro tbe and da
+port_modem_stat	dw	p0_base + 6	; ro dsr cts
+fake_int	dw	fake_int0	; for software interrupt
+ser_int_vect	dw	12 * 4		; interrupt vector location
+ser_int_entry	dw	i_serial_0	; interrupt entry point
+ser_ds_ptr	dw	data_seg_0	; port 0's data segment
+ser_pic_mask	db	0EFh		; enable pic interrupt
+r_flag		db	08h		; XIOS receive flag
+t_flag		db	09h		; XIOS transmit flag
+
+;	if using port 1, these values are copied over port 0's
+
+port1_params	rb	0
+p1_base		equ	02F8h		; port base address
+		dw	p1_base		; rw data
+		dw	p1_base + 1	; wo int enable
+		dw	p1_base + 2	; ro int ident
+		dw	p1_base + 4	; wo bit 3 = en int
+		dw	p1_base + 5	; ro tbe and da
+		dw	p1_base + 6	; ro dsr cts
+		dw	fake_int1	; soft int
+		dw	11 * 4		; int vector location
+		dw	i_serial_1	; int entry point
+		dw	data_seg_1	; port 1's data seg
+		db	0F7h		; pic interrupt mask
+		db	0Ah		; rec flag
+		db	0Bh		; xmit flag
+
+port_param_size	equ	offset $ - offset port1_params
+
+
+;	queue descriptors, buffers, and parameter blocks
+
+q_in_buf	rb	q_mes_size * in_q_num
+
+qd_in		dw	0,0,02h
+		db	'SerIn'
+qd_in_p		db	'0  '
+		dw	q_mes_size,in_q_num,0
+		dw	0,0,0
+		dw	q_in_buf
+
+
+q_out_buf	rb	q_mes_size * out_q_num
+
+qd_out		dw	0,0,02h
+		db	'SerOut'
+qd_out_p	db	'0 '
+		dw	q_mes_size,out_q_num,0
+		dw	0,0,0
+		dw	q_out_buf
+
+
+qd_mx		dw	0,0,03h
+		db	'MXSer'
+qd_mx_p		db	'0  '
+		dw	0,1,0
+		dw	0,0,0,0
+
+qpb_in		dw	0,0,0,msg_in
+		db	'SerIn'
+qpb_in_p	db	'0  '
+
+qpb_out		dw	0,0,0,t_block_o
+		db	'SerOut'
+qpb_out_p	db	'0 '
+
+qpb_mx		dw	0,0,0,0
+		db	'MXSer'
+qpb_mx_p	db	'0  '
+
+;	queue name adjustment list for port numbers
+
+qn_list		dw	qd_in_p
+		dw	qd_out_p
+		dw	qd_mx_p
+		dw	qpb_in_p
+		dw	qpb_out_p
+		dw	qpb_mx_p
+
+qn_list_size	equ	(offset $ - offset qn_list) / 2
+
+
+t_block_o	dw	t_block
+t_block_s	rw	1		; filled by write t_block
+
+msg_in		rb	q_mes_size
+
+r_prot_state	db	0FFh		; 0FFh => rec protocol on
+
+all_on		equ	i_en+dtr_bit+rts_bit
+r_on_prot	db	xon, all_on, all_on, all_on
+r_off_prot	db	xoff, rts_bit+i_en, dtr_bit+i_en, i_en
+
+serin_data_top	equ	offset $
+
+eject
+
+;	***************************************
+;	***  Interrupt routine begins here  ***
+;	***************************************
+
+	cseg
+
+	org	serin_code_top
+
+;	this collection of data must be in the code segment
+;	and it must not change, or reentrancy is blown
+
+data_seg0	rw	1		; port 0's data segment
+data_seg1	rw	1		; port 1's data segment
+
+i_sup_o		rw	1		; supervisor offset
+i_sup_s		rw	1		; supervisor segment
+supervisor	equ	dword ptr i_sup_o
+
+;	serial char interrupt entry for port 0
+
+i_serial_0:
+	push	ds			; on user's stack
+	mov	ds,data_seg0		; get port zero's data seg
+	jmps	i_serial_shared		;   and share the rest
+
+;	serial char interrupt entry for port 1
+
+i_serial_1:
+	push	ds			; on user's stack
+	mov	ds,data_seg1		; get port 1's data seg
+;	jmps	i_serial_shared		;   and share the rest
+
+;	shared serial char interrupt code
+
+i_serial_shared:
+	mov	save_ax,ax		; first switch stacks
+	mov	save_ss,ss
+	mov	save_sp,sp
+	mov	ax,ds			; set up local stack
+	mov	ss,ax
+	mov	sp,local_stack
+	push bx ! push cx ! push dx ! push bp
+	push si ! push di ! push es
+	mov	es,ax			; for receive stosb
+
+	mov	dx,port_int_id		; int identification reg
+	in	al,dx			; this says which int it is
+	and	al,07h			; 3 lsb's only
+	mov	int_id,al		; save for pic reset
+	cmp	al,rec_int		; if not from char received
+	jnz	i_transmit		;   then skip
+
+i_receive:
+	mov	dx,port_status		; just to double check
+	in	al,dx			;   we look at line status
+	test	al,dr			; if not data ready
+	jz	i_rec_wait		;   then skip buffer write
+i_rec_char:
+	mov	dx,port_data
+	in	al,dx			; fetch the data char
+	test	tran_prot_code,xon_xoff	; check to see if this is
+	jz	i_rec_to_buf		;   an xon/xoff character
+	cmp	al,xon			;   for the transmit side
+	jz	i_rec_x			; if it is, get out of here
+	cmp	al,xoff
+	jz	i_rec_x
+
+i_rec_to_buf:				; a valid data char rec'd
+	mov	di,buf_in_ptr
+	stosb				; store to circular buffer
+	cmp	di,c_buf_end		; check for wrap around
+	jb	i_rec_no_wrap
+	mov	di,offset c_buf		; wrap to beginning
+i_rec_no_wrap:
+	mov	ax,di
+	sub	ax,buf_out_ptr		; check buffer fullness
+	jz	i_rec_too_full		; right to the brim
+	mov	buf_in_ptr,di		; update if any room at all
+	jnc	i_rec_valid		; subtraction worked
+	add	ax,c_buf_size		; ax = chars in buffer
+i_rec_valid:
+	cmp	ax,c_buf_size - 10h	; if not too full
+	jb	i_rec_wait		;   then carry on
+i_rec_too_full:
+	call	rec_prot_off		; else, try to stop the stream
+
+i_rec_wait:
+	mov	al,0
+	xchg	al,r_wait		; test and set wait flag
+	test	al,al			; if Serial In isn't waiting
+	jz	i_transmit		;   then check for transmit
+
+	mov	dl,r_flag		; if it is waiting
+	call	i_set_flag		;   then set the flag
+	jmps	i_transmit		; check for xmit message
+
+i_rec_x:
+	mov	rec_x,al		; save xon/xoff for transmit
+;	jmps	i_transmit		;   and carry on
+
+;	in case a character was received just before transmit is to
+;	be checked, we always check for a pending transmit message.
+
+i_transmit:
+	cmp	send_x,0		; if there is an xon/xoff
+	jz	i_tran_from_buf		;   to send, it has top priority
+
+	call	trans_ready		; check tbe
+	jz	i_exit			; if not ready, come back again
+
+	mov	dx,port_data
+	mov	al,send_x
+	out	dx,al			; send an xon/xoff char
+	mov	send_x,0		; don't do it again
+	jmps	i_exit			; and depart
+
+i_tran_from_buf:
+	cmp	t_count,0		; if transmit message is empty
+	jz	i_tran_wait		;   see if serout is waiting
+
+	call	trans_prot		; if protocol blocks transmission
+	jz	i_tran_wait		;   then skip the output
+
+	call	trans_ready		; check tbe
+	jz	i_tran_wait		;   for a flag wait on serout
+
+	les	si,t_pointer		; point to transmit message
+	mov	al,es:[si]		; grab the character
+	mov	dx,port_data
+	out	dx,al			; ship the character
+	inc	si			; bump and
+	mov	t_ptr_off,si		;   update the pointer
+	dec	t_count			; and if characters remain
+	jnz	i_exit			;   then don't set the flag
+
+i_tran_wait:
+	mov	al,0
+	xchg	al,t_wait		; test and set wait flag
+	test	al,al			; if Serial Out not waiting
+	jz	i_exit			;   then we're done
+
+	mov	dl,t_flag		; if it is waiting
+	call	i_set_flag		;   then set flag
+
+i_exit:
+	cmp	int_id,no_int		; if interrupt was soft
+	jz	i_no_pic		;   then don't reset pic
+	mov	al,ns_eoi		; reset the pic
+	out	pic_ack,al
+
+i_no_pic:
+	pop es ! pop di ! pop si
+	pop bp ! pop dx ! pop cx ! pop bx
+
+	mov	ax,save_ax
+	mov	ss,save_ss		; restore the stack
+	mov	sp,save_sp
+	pop	ds			; get back user's ds
+	iret				; do not dispatch!
+
+
+;	check for transmit buffer empty.  zf set if not
+
+trans_ready:
+	mov	dx,port_status		; if message pending, see if
+	in	al,dx			;   the port is ready
+	test	al,tbe			; if not ready, then check
+	ret
+
+;	check for transmit protocol ready.  zf set if not
+
+trans_prot:
+	mov	ah,tran_prot_code	; which protocol to use
+	test	ah,ah			; if zero
+	jz	trans_prot_ok		;   then skip the works
+
+	mov	dx,port_modem_stat
+	in	al,dx			; get the status bits
+	test	ah,dtr_dsr
+	jz	trans_prot1		; if dsr/dtr protocol
+	test	al,dsr_bit		;   see if dsr is on
+	jz	trans_prot_done		; if not, it's no good
+
+trans_prot1:
+	test	ah,rts_cts
+	jz	trans_prot2		; if rts/cts protocol
+	test	al,cts_bit		;   see if cts is on
+	jz	trans_prot_done		; if not, forget it
+
+trans_prot2:
+	test	ah,xon_xoff
+	jz	trans_prot_ok		; if xon/xoff protocol
+	cmp	rec_x,xoff		;   see if we've got an xoff
+	jz	trans_prot_done		; if so, go back
+
+trans_prot_ok:
+	or	al,0FFh			; clear the zero flag
+trans_prot_done:
+	ret				; with zf
+
+;	set the flag passed in register dl
+
+i_set_flag:
+	mov	dh,0			; ensure dx = flag num
+	mov	cx,dev_flag_set
+	push	ds
+	mov	ds,sys_data_s
+	callf	supervisor		; right to the sup
+	pop	ds
+	ret
+
+
+;	************************************
+;	***  Interrupt data begins here  ***
+;	************************************
+
+	dseg
+
+	org	serin_data_top
+
+save_ax		rw	1		; for stack switch
+save_ss		rw	1
+save_sp		rw	1
+
+int_id		rb	1		; saves the int_id_reg
+r_wait		db	00h		; is Serial In waiting?
+
+;	this is the data block which is shared with SerOut
+
+t_block		equ	offset $
+t_wait		db	00h		; is Serial Out waiting?
+t_count		db	00h		; message byte count
+t_ptr_off	rw	1		; offset of trans message
+t_ptr_seg	rw	1		; segment of trans message
+t_pointer	equ	dword ptr t_ptr_off
+rec_prot_code	db	00h			; receive protocol code
+tran_prot_code	db	dtr_dsr + xon_xoff	; transmit protocol code
+
+
+buf_in_ptr	dw	c_buf		; used by int to fill
+buf_out_ptr	dw	c_buf		; used by Serial In to empty
+
+rec_x		db	xon		; our received xon/xoff
+send_x		db	00h		; an xon/xoff to send
+
+sys_data_s	rw	1		; system data seg
+
+i_disp_o	rw	1		; dispatcher offset
+i_disp_s	rw	1		; dispatcher segment
+dispatcher	equ	dword ptr i_disp_o
+
+c_buf		rb	c_buf_size	; receive circular buffer
+c_buf_end	equ	offset $
+
+		rb	stack_size	; local interrupt stack
+local_stack	equ	offset $
+
+		db	00h		; for gencmd
+
+	end
+

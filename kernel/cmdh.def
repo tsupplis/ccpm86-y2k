@@ -1,0 +1,35 @@
+;*****************************************************
+;*
+;*	Command Header Format and Load Fixup Records
+;*
+;*****************************************************
+
+						;group descriptor format
+ch_form		equ	byte ptr 0
+ch_length	equ	word ptr (ch_form + byte)
+ch_base		equ	word ptr (ch_length + word)
+ch_min		equ	word ptr (ch_base + word)
+ch_max		equ	word ptr (ch_min + word)
+chlen		equ	ch_max + word
+
+ch_entmax	equ	8			;max number of group
+						;descriptors
+
+ch_lbyte	equ	byte ptr 07fh		;MSB bit in CH_LBYTE
+ch_fixrec	equ	word ptr 07dh		;signals fixup records
+						;start at record number
+						;in CH_FIXREC
+
+fix_grp		equ	byte ptr 0		;format of fixup record
+fix_para	equ	word ptr fix_grp + byte
+fix_offs	equ	byte ptr fix_para + word
+fixlen		equ	fix_offs + byte
+
+                ; Flag def's for ch_lbyte
+need_fxps       equ     080H                      ;need fixup records             
+opt_8087        equ     040H                      ;optional 8087 request
+need_8087       equ     020H                      ;requires 8087
+need_rsx        equ     010H                      ;requires rsx load
+susp_mode       equ     008H                      ;suspend if background task
+
+

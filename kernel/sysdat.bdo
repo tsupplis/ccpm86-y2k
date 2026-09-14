@@ -1,0 +1,82 @@
+
+;*****************************************************
+;*
+;*	bdos data area
+;*
+;*****************************************************
+
+;	SYTEM DATA EQUATES
+
+SUPMOD		equ	ds:word ptr .000h
+XIOSMOD		equ	ds:word ptr .028h
+FREE_ROOT	equ	ds:word ptr .052h
+RLR		equ	ds:word ptr .068h
+TOD		equ	ds:byte ptr .07Eh
+open_vector	equ	ds:word ptr .088h
+LOCK_MAX	equ	ds:byte ptr .08Ah
+OPEN_MAX	equ	ds:byte ptr .08Bh
+err_intercept	equ	ds:word ptr .092h
+media_flag	equ	ds:byte ptr .0C0Eh
+
+		DSEG
+if PCMODE
+
+		PUBLIC arecord
+		PUBLIC attributes
+		PUBLIC bdrwflg
+		PUBLIC blk
+		PUBLIC blkcnt
+		PUBLIC blkidx
+		PUBLIC blkoffset
+		PUBLIC byteoff
+		PUBLIC check_fcb_ret
+		PUBLIC chksiz
+		PUBLIC cdrmaxa
+		PUBLIC clsize
+		PUBLIC common_dma
+		PUBLIC comp_fcb_cks
+		PUBLIC cpm_tod
+		PUBLIC dirmax
+		PUBLIC dir_cnt
+		PUBLIC dcnt
+		PUBLIC dirp
+		PUBLIC dma_ofst
+		PUBLIC dma_seg
+		PUBLIC dont_close
+		PUBLIC extcnt
+		PUBLIC fx_intrn
+		PUBLIC hash_seg
+		PUBLIC high_ext
+		PUBLIC info
+		PUBLIC info_fcb
+		PUBLIC lock_shell
+		PUBLIC lprvblk
+		PUBLIC lret
+		PUBLIC make_flag
+		PUBLIC mon_days
+		PUBLIC mult_cnt
+		PUBLIC mult_num
+		PUBLIC nclstrs
+		PUBLIC parlg
+		PUBLIC pc_cr
+		PUBLIC pc_ext
+		PUBLIC pc_module
+		PUBLIC pc_tod
+		PUBLIC phymsk
+		PUBLIC physhf
+		PUBLIC preread
+		PUBLIC prvblk
+		PUBLIC rd_dir_flag
+		PUBLIC sdcnt
+		PUBLIC searchl
+		PUBLIC update_rc
+		PUBLIC usrcode
+
+		PUBLIC ddio_op
+		PUBLIC ddio_drive
+		PUBLIC ddio_startrec
+		PUBLIC ddio_nsectors
+		PUBLIC ddio_dmaoff
+		PUBLIC ddio_dmaseg
+
+endif

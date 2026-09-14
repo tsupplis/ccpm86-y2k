@@ -1,0 +1,12 @@
+;********************************************************
+;							*
+;		Sync Parameter Block			*
+;							*
+;********************************************************
+
+sy_link		equ	word ptr 0
+sy_owner	equ	word ptr sy_link + 2
+sy_wait		equ	word ptr sy_owner + 2
+sy_next		equ	word ptr sy_wait + 2
+synclen		equ	sy_next + 2
+

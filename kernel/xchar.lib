@@ -1,0 +1,1212 @@
+eject						; Dec 13, 1983
+;			SERIAL I/O
+;			----------
+
+;************************************************
+;*						*
+;*		CONSOLE INPUT			*
+;*						*
+;************************************************
+
+reorg6	equ	offset $
+	cseg
+	org	reorg6
+
+;========
+io_const:
+;========
+	xor ax,ax
+	ret
+
+
+wake_key	equ	7DH		;window manager alarm clock
+full_key	equ	7EH		;full/partial window toggle
+
+
+;	console input entry point
+;	entry:	dl = console number
+
+io_conin: 
+	mov	dl,top_screen		; current foreground console
+	call	point_vs		; point to console structure
+	cmp	vs_pfk_count,0		; check for pfk's waiting
+	jz	conin_wait		; skip if none
+
+	mov	si,vs_pfk_ptr		; else get the current ptr
+	lodsb				; grab the value
+	test	al,al			; if valid, then skip
+	jnz	conin_pfk
+
+	mov	vs_pfk_count,al		; if not, zap the count
+	jmps	conin_wait		;   and wait for key
+conin_pfk:
+	mov	vs_pfk_ptr,si		; update pointer
+	dec	vs_pfk_count		; decrement the count
+	mov	ah,0			; clear out the flag
+	ret				; and return with value
+
+conin_wait:
+	push	bx
+	push	cx
+	mov	dx,ci_flag		; get the flag number
+	call	flagwait		; wait for a key
+	pop	cx			; recover the virtual cons #
+	pop	bx			; recover vs_ pointer
+
+	mov	ax,key			; get the character and type
+	test	ah,ah			; set the flags
+	jz	conin_done		; normal ascii then leap
+
+	cmp	al,wake_key		; switch to window manager?
+	jz	w_wake
+	cmp	al,full_key		; switch to full screen?
+	jz	w_full
+
+	cmp	al,070h
+	jb	new_pfk			; set pfk pointer and count
+
+	and	al,0Fh			; keep it to 16 vc's
+conin_done:
+	ret
+
+pfk_l_size	equ	20		; chars per pfk in low table
+pfk_h_size	equ	 4		; chars per pfk in high table
+low_pfks	equ	10		; number of 20 char pfk codes
+high_pfks	equ	40		; number of 4 char pfk codes
+
+;	a pfk has just been typed, set pointers and count
+
+new_pfk:
+	cmp	al,low_pfks + high_pfks	; if pfk code is too big
+	jae	conin_wait		;   then ignore it
+	cmp	vs_pfk_exp,0		; if pfk expansion flag off
+	jz	no_pfk_exp		;   then just return code
+
+	call	point_pfk		; set pointer and count
+	jmps	io_conin		; back to return the value
+
+no_pfk_exp:
+	mov	bx,offset pfk_code_tbl
+	xlat	bx			; convert to code
+	or	al,80h			; put the msb back
+	mov	ah,0			; zero the flag
+	ret				; and return the code
+
+
+;	point to pfk table  -  public, called by z_prog_pfk
+;	entry:	al = pfk table index
+;		bx -> vs_
+;	exit:	vs_pfk_ptr -> pfk value
+;		vs_pfk_count = maximum char count
+
+point_pfk:
+	sub	si,si			; zero offset for low table
+	mov	cl,pfk_l_size		; chars per low pfk
+	cmp	al,low_pfks		; check for low table
+	jb	point_pfk1		; skip if F1 - F10
+
+	sub	al,low_pfks		 ; index into high table
+	mov	si,pfk_l_size * low_pfks ; offset for high table
+	mov	cl,pfk_h_size		 ; chars per high pfk
+point_pfk1:
+	mul	cl			; index into table
+	add	si,ax
+	add	si,vs_pfk_tbl		; add table offset
+	mov	vs_pfk_ptr,si		; set initial pointer
+	mov	vs_pfk_count,cl		; and initial count
+	ret
+
+
+;	wake up the window manager
+
+w_wake:
+	cmp	im_here,1		; see if manager is resident
+	jb	conin_wait		; ignore if not
+	call	check_no_switch		; if console is no switch
+	jnz	conin_wait		;   then ignore wmenu key
+	cmp	graphic_bits,0		; if anyone is in graphics
+	jnz	conin_wait		;   then block out wmenu
+
+	mov	im_here,2		; resident and active
+	mov	dx,ww_flag
+	mov	key_flag,dx		; redirect the keyboard
+	mov	ww_stat_flag,true	; for ww_key status check
+	call	flagset			; wake up the manager
+	pushf				; now fake an interrupt
+	callf	dword ptr dispatcher	;   and a return
+	jmp	conin_wait		; wait for keyboard restore
+
+;	if current window is small, switch to full
+;	if current window is full, switch to previous window
+
+w_full:
+	mov	dl,top_screen		; get active console num
+	call	ww_full_window		; full/small switch
+	jmp	conin_wait		; get another character
+
+
+;	check for console in no switch mode
+;	exit:	zf set switch is allowed
+
+check_no_switch:
+	mov	al,top_screen
+	cbw
+	shl	ax,1
+	xchg	bx,ax			 ; bx = screen word ptr
+	mov	bx,ccb_list[bx]		 ; get foreground ccb
+	test	c_state[bx],csm_noswitch ; set flag if switchable
+	ret
+
+
+;	XIOS back door entry to pass window manager a keystroke.
+;	Window manager will go to sleep on this call if cl < 0FEH.
+
+;	entry:	cl = 0FFH  =>  input/status
+;			exit:	al = char if char ready
+;				al = 0 if no char ready
+;		cl = 0FEH  =>  status only
+;			exit:	al = 0FFH if char ready
+;				al = 0 if no char ready
+;		cl < 0FEH  =>  wait for input
+;			exit:	al = char when ready
+
+;	exit:	if al = char then
+;			ah = key type
+;			     0  =>  regular
+;			     0FFH  =>  special
+
+ww_key:
+	mov ah,0
+	mov al,ww_stat_flag		;true if a character is ready
+	cmp cl,0FEH			;if status check, just return
+	jz ww_key_exit
+	  jb ww_get_key			;if cl < FE, then read a key
+	    test al,al			;if cl = FF, then
+	    jz ww_key_exit		;  return a 0 if not ready
+ww_get_key:				;else read a key
+	mov dx,ww_flag			;get window flag
+	call flagwait			;wait till awakened
+
+	mov ww_stat_flag,false		;turn off status byte
+	mov ax,key			;get char and type
+ww_key_exit:
+	ret				;and just return it
+
+
+;************************************************
+;*						*
+;*	PROGRAMMABLE FUNCTION KEY TABLES	*
+;*						*
+;************************************************
+
+reorg7	equ	(offset $ + 1) and -2
+	dseg
+	org	reorg7
+
+;	pfk codes used for programming and no-exp returns
+
+pfk_code_tbl	db	';<=>?@ABCD'	; F1 - F10
+		db	'GHIKMOPQRS'	; numeric pad
+		db	'abcdefghij'	; alt F1 - F10
+		db	'klmnopqrst'	; shift F1 - F10
+		db	'uvwxyz{|}~'	; crtl F1 - F10
+
+
+pfk_tbl0:			; for virtual console #0
+
+;			F1 - F10
+	db	'DIR A:',cr,0,'            '
+	db	'DIR B:',cr,0,'            '
+	db	'SDIR A:',cr,0,'           '
+	db	'SDIR B:',cr,0,'           '
+	db	'SHOW A:',cr,0,'           '
+	db	'SHOW B:',cr,0,'           '
+	db	'DSKMAINT',cr,0,'          '
+	db	'PIP',cr,0,'               '
+	db	'FUNCTION',cr,0,'          '
+	db	'CONFIG',cr,0,'            '
+;			numeric keypad
+	dw	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,7Fh,0
+;			alt F1 - alt F10
+	dw	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+;			shift F1 - shift F10
+	dw	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+;			ctrl F1 - crtl F10
+	dw	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+
+
+pfk_tbl1:			; for virtual console #1
+
+;			F1 - F10
+	db	'DIR A:',cr,0,'            '
+	db	'DIR B:',cr,0,'            '
+	db	'SDIR A:',cr,0,'           '
+	db	'SDIR B:',cr,0,'           '
+	db	'SHOW A:',cr,0,'           '
+	db	'SHOW B:',cr,0,'           '
+	db	'DSKMAINT',cr,0,'          '
+	db	'PIP',cr,0,'               '
+	db	'FUNCTION',cr,0,'          '
+	db	'CONFIG',cr,0,'            '
+;			numeric keypad
+	dw	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,7Fh,0
+;			alt F1 - alt F10
+	dw	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+;			shift F1 - shift F10
+	dw	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+;			ctrl F1 - crtl F10
+	dw	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+
+
+pfk_tbl2:			; for virtual console #2
+
+;			F1 - F10
+	db	'DIR A:',cr,0,'            '
+	db	'DIR B:',cr,0,'            '
+	db	'SDIR A:',cr,0,'           '
+	db	'SDIR B:',cr,0,'           '
+	db	'SHOW A:',cr,0,'           '
+	db	'SHOW B:',cr,0,'           '
+	db	'DSKMAINT',cr,0,'          '
+	db	'PIP',cr,0,'               '
+	db	'FUNCTION',cr,0,'          '
+	db	'CONFIG',cr,0,'            '
+;			numeric keypad
+	dw	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,7Fh,0
+;			alt F1 - alt F10
+	dw	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+;			shift F1 - shift F10
+	dw	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+;			ctrl F1 - crtl F10
+	dw	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+
+
+pfk_tbl3:			; for virtual console #3
+
+;			F1 - F10
+	db	'DIR A:',cr,0,'            '
+	db	'DIR B:',cr,0,'            '
+	db	'SDIR A:',cr,0,'           '
+	db	'SDIR B:',cr,0,'           '
+	db	'SHOW A:',cr,0,'           '
+	db	'SHOW B:',cr,0,'           '
+	db	'DSKMAINT',cr,0,'          '
+	db	'PIP',cr,0,'               '
+	db	'FUNCTION',cr,0,'          '
+	db	'CONFIG',cr,0,'            '
+;			numeric keypad
+	dw	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,7Fh,0
+;			alt F1 - alt F10
+	dw	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+;			shift F1 - shift F10
+	dw	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+;			ctrl F1 - crtl F10
+	dw	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+
+
+
+;********************************************************
+;*							*
+;*		STATUS LINE ROUTINE			*
+;*							*
+;********************************************************
+
+
+;	Display status line on 25th line of IBM PC monochrome
+;	screen.  First gather information into local string
+;	and then copy to the video display RAM.
+
+;	The format of the status line is:
+
+;Console=1 Buffered  FILENAME ABCDM* ^S ^P=0 Printer=2  Win Caps Num  12:34:56 am
+;          Dynamic                   ^O
+
+sl_mono_bit	equ	01h	; if status goes to monochrome
+sl_color_bit	equ	02h	; if status goes to color
+
+reorg8	equ	offset $
+	cseg
+	org	reorg8
+
+;	quick return.  status line is being used
+ret_statline:
+	ret
+
+;	window manager status line call.  the same as a normal call
+;	except that source data is char/attrib (160 bytes)
+
+ww_statline:
+	mov si,offset sl_get_160 ;for char/attrib fetch
+	jmps sl_free		 ;go to it
+
+
+;	normal io status line call
+;	entry:	if cx = 0  normal status update
+;		if cx = offset, print 80 chars at cx:dx
+;		if cx = 0FFFFh, resume normal status
+;	exit:	al = 0  if call was successful
+;		al = 0FFh  if call was blocked
+
+io_statline:
+	mov si,offset sl_get_80	;for char/attrib fetch
+
+sl_shared:
+	mov al,true
+	xchg sline_locked,al	;is in io_statline at time
+	test al,al		;sline_locked = 0ffh if locked
+	jz sl_free		;sline_locked = 0 if not
+	cmp sl_exit_value,al	;if not locked on exit
+	jnz ret_statline	;then just return
+sl_free:
+	push es			;save UDA
+	jcxz sl_keep		;if cx=0, skip source update
+	  mov sl_off,cx		;store offset
+	  mov sl_seg,dx		;  and segment of source data
+sl_keep:
+	cmp sl_off,0ffffh	;if normal status line
+	jz sl_norm		;  then skip
+	 jcxz sl_ex		;if cx=0, ignore the call
+
+	mov sl_get_char,si	;save fetch call
+	mov si,sl_off		;source offset
+	mov dl,sl_crt_flag	;which crt bits
+	call sl_disp_prep	;ready reg's for display
+sl_ext_loop:
+	mov es,sl_seg		;source segment
+	call sl_get_char	;either get_80 or get_160
+	call sl_put_char	;put one char to status line
+	loop sl_ext_loop	;80 times
+sl_ex:
+	jmp sl_exit
+
+sl_get_80:
+	mov al,es:[si]		;fetch character only
+	mov ah,sl_attrib	;status line attribute
+	inc si			;bump once
+	ret
+
+sl_get_160:
+	mov ax,es:[si]		;fetch character / attribute
+	inc si			;and bump twice
+	inc si
+	ret
+
+;	normal status line update
+
+sl_norm:
+	push ds ! pop es
+	mov di,offset smsg_cnum
+	mov al,' ' ! mov cx,offset smsg_pstr - offset smsg_cnum
+	rep stosb		;blank out local status string
+	mov di,offset smsg_pnum
+	mov cx,offset smsg_hour - offset smsg_pnum
+	rep stosb
+
+	mov al,top_screen
+	cbw			;ah=0
+	mov bx,ax		;for ccb fetch
+	add al,'0'		;console numbers 0-3
+	mov smsg_cnum,al	;set console number
+
+	add bx,bx		;word pointer
+	mov bx,ccb_list[bx]	;get process which owns the
+	mov si,c_owner[bx]	;top console
+	test si,si ! jz s_nopd	;make sure a process is currently
+
+	  mov al,p_list[si]
+	  add al,'0' ! mov smsg_pnum,al
+	lea si,p_name[si]	;offset of process name
+	mov di,offset smsg_pd
+	mov cx,4 ! rep movsw
+
+s_nopd:
+s_ctrlS:
+	mov ax,c_state[bx]
+	test ax,csm_ctrlS ! jz s_ctrlO
+	  mov s_msgctrlS,'S^' ! jmps s_ctrlP
+s_ctrlO:
+	test ax,csm_ctrlO ! jz s_ctrlP	;ctrl S and ctrl O are mutally
+	  mov s_msgctrlS,'O^'		;exclusive print one of ^S or ^O
+s_ctrlP:
+	test ax,csm_ctrlP ! jz s_mode
+	  mov s_msgctrlP,'P^'
+	  mov dl,'=' ! mov dh,c_mimic[bx]
+	  add dh,'0' ! mov smsg_ctrlP_num,dx
+s_mode:
+	mov di,offset s_msgmode
+	mov cx,length dynstr
+
+	mov si,offset noswstr
+	test ax,csm_noswitch ! jnz s_movmode	;if 1 noswitch
+	  mov si,offset dynstr
+	  test ax,csm_buffered ! jz s_movmode	;if 0 dynamic
+	    mov si,offset bufstr
+	    test ax,csm_purging ! jz s_movmode	;if 0 buffered
+	      mov si,offset purstr		;else purging
+s_movmode:
+	rep movsb
+
+s_get_openvec:			; display a letter for each drive
+				; with open files  ABCDM*
+	mov	dx,open_vec	; BDOS sets this vector in SYSDAT
+	mov	di,offset smsg_openvec
+	mov	si,offset sl_drive_list
+	mov	cx,6		; drives to check
+s_get_open1:
+	lodsw			; get test mask
+	test	dx,ax		; if this drive is not on
+	jz	s_get_open2	;   then skip
+	  movsb			; store the drive letter
+	  jmps	s_get_open3	; skip the pointer bump
+s_get_open2:
+	inc	si
+	inc	di
+s_get_open3:
+	loop	s_get_open1
+
+s_window:
+	cmp im_here,0 ! jz s_capslock
+	  mov si,offset winstr
+	  mov di,offset smsg_window
+	  mov cx,length winstr
+	  rep movsb
+
+s_capslock:
+	mov al,toggle_bits
+	test al,capslock_bit ! jz s_numlock
+	  mov si,offset capstr
+	  mov di,offset smsg_capslock
+	  mov cx,length capstr
+	  rep movsb
+
+s_numlock:
+	test al,numlock_bit ! jz sl_time
+	  mov si,offset numstr
+	  mov di,offset smsg_numlock
+	  mov cx,length numstr
+	  rep movsb
+
+sl_time:
+	cmp	sl_clk_flag,0	; if clocks disabled
+	jz	sl_display	;   then skip
+
+sl_hours:
+	mov	al,tod_hour	; get current hour from sysdat
+	cmp	al,sl_hour_save	; if no change
+	jz	sl_minutes	;   then skip
+
+	mov	sl_hour_save,al	; save for future skip
+	mov	dx,'ma'		; assume 'am'
+	cmp	al,12h		; if in the morning
+	jb	sl_hour1	;   then skip
+	  sub	al,12h		; correct the hour
+	  das			; (it's decimal dummy!)
+	  mov	dx,'mp'		;   and make it 'pm'
+sl_hour1:
+	cmp	al,0		; if hour = 0
+	jnz	sl_hour2	;   then make it 12
+	  mov	al,12h
+sl_hour2:
+	mov	smsg_ampm,dx	; save 'am' or 'pm'
+	call	sl_ascii	; convert bcd to ascii
+	cmp	al,'0'		; blank a leading zero
+	jnz	sl_hour3
+	  mov	al,' '
+sl_hour3:
+	mov	smsg_hour,ax	; and store the hour
+
+sl_minutes:
+	mov	al,tod_min
+	cmp	al,sl_min_save	; if no change in minutes
+	jz	sl_seconds	;   then skip
+
+	mov	sl_min_save,al	; save the value
+	call	sl_ascii	; convert bcd to ascii
+	mov	smsg_min,ax	; and store the minute
+
+sl_seconds:
+	mov	al,tod_sec	; always do seconds
+	call	sl_ascii	; convert bcd to ascii
+	mov	smsg_sec,ax	; and store the second
+
+sl_display:
+	mov	dl,sl_crt_flag	; get allowable crt bits
+	test	dl,sl_mono_bit + sl_color_bit
+	jz	sl_exit		; if both off, bag it
+
+	mov	si,offset status_msg
+	call	sl_disp_prep	; get the reg's ready
+	mov	ah,sl_attrib	; status line attribute
+sl_disp1:
+	lodsb			; get character
+	call	sl_put_char	; put ax to status line
+	loop	sl_disp1
+
+sl_exit:
+	pop	es
+	mov	al,sl_exit_value ; successful update
+	mov	sline_locked,al	 ; free the semaphore
+	ret
+
+;	set up pointers and count for status display
+
+sl_disp_prep:
+	mov	di,sl_offset * 2
+	mov	bx,offset status_copy
+	mov	cx,80		; character count
+	ret
+
+;	put one char/attrib to either or both status lines
+;	entry:	ax = char/attrib
+;		dl = crt code mask   01 => mono  02 => color
+
+sl_put_char:
+	cmp	ax,[bx]		; if character is the same
+	jz	sl_put4		;   then just bump pointers
+
+	mov	[bx],ax		; save the copy
+	test	dl,sl_mono_bit
+	jz	sl_put1		; skip if not to mono
+
+	mov	es,sl_mono_seg
+	mov	es:[di],ax	; store if mono on
+sl_put1:
+	test	dl,sl_color_bit
+	jz	sl_put4		; back to loop if off
+	cmp	graphic_bits,0	; if anyone is in graphics
+	jnz	sl_put4		;   then don't show color
+
+;	color status line character output
+
+	push	bx		; get some room
+	push	cx
+	push	dx
+	mov	es,sl_color_seg
+	mov	bx,ax		; save char in bx
+	mov	dx,color_port+6	; crt status
+	mov	cx,3		; maximum wait
+
+	cli			;; hold the interrupts
+sl_c_norm1:
+	in	al,dx		;; wait for horiz retrace
+	test	al,hrt		;;   to go away
+	loopnz	sl_c_norm1	;; but don't wait too long
+sl_c_norm2:
+	in	al,dx		;; wait for a fresh
+	test	al,hrt		;;   horiz retrace
+	jz	sl_c_norm2
+	xchg	ax,bx		;; char to ax
+	stosw			;; store and bump di
+	sti			;; ints back on
+
+	pop	dx		; recover registers
+	pop	cx
+	pop	bx
+	jmps	sl_put_5	; di already bumped
+sl_put4:
+	inc	di		; bump the crt pointer
+	inc	di
+sl_put5:
+	inc	bx		; bump the copy pointer
+	inc	bx
+	ret			; back to loop
+
+;	convert bcd in al to ascii in ax
+
+sl_ascii:
+	mov	ah,33h		; the ms nibbles
+	mov	cl,4
+	ror	ax,cl		; al = 10's digit
+	mov	cl,4
+	ror	ah,cl		; ah = 1's digit
+	ret
+
+
+;	***  Status line error message entry  ***
+;
+;	entry:	si -> error message
+;		di -> allowable responses  (count,string..)
+;	exit:	al = response character
+
+sl_error_out:
+	mov	al,true
+	xchg	al,sline_locked	; test and set status semaphore
+	test	al,al
+	jnz	sl_error_out	; if somebody's using it, wait
+	mov	sl_exit_value,true
+
+	mov	sl_error_msg,si	 ; save message offset
+	mov	sl_error_resp,di ;   and responses
+	push	sl_off		 ; save offset address
+	push	sl_seg		 ;   and segment
+	push	key_flag	 ; save keyboard state
+
+	push	es
+	push ds ! pop es	; for local moves
+	mov	si,offset status_copy
+	mov	di,offset sl_error_save
+	mov	cx,80
+	rep	movsw		; save the current status line
+	pop	es
+
+	mov	dx,ds
+	mov	cx,sl_error_msg
+	call	io_statline	; print the error message
+	inc	beep_counter
+
+er_response:
+	inc	beep_counter	; beep once
+
+	mov	dx,er_flag
+	mov	key_flag,dx	; now keyboard is ours
+	call	flagwait	; wait here for a key
+
+	mov	ax,key		; get the ascii key value
+	and	al,0DFh		; convert to upper case
+	mov	di,sl_error_resp
+	mov	cl,[di]
+	mov	ch,0
+	jcxz	er_resp_good	; if di -> 0, take anything
+
+	push 	es
+	push ds ! pop es
+	inc	di		; to response chars
+	repnz	scasb		; check for legal value
+	pop	es
+	jnz	er_response	; if bad, try again
+
+er_resp_good:
+	mov	sl_error_key,al	; save the value
+	mov	dx,ds
+	mov	cx,offset sl_error_save
+	call	ww_statline	; full 160 byte write
+
+	pop	key_flag
+	pop	sl_seg
+	pop	sl_off
+
+	mov	sline_locked,false
+	mov	sl_exit_value,false
+	mov	al,sl_error_key	; return value
+	ret
+
+
+reorg_sl1	equ	offset $
+	dseg
+	org	reorg_sl1
+
+;	status line data area
+
+sline_locked	db	0	; semaphore for status line code
+sl_clk_flag	db	0FFh	; do we show the clock?
+sl_exit_value	db	0	; restore semaphore on exit
+
+sl_attrib	db	0Bh	; enhanced cyan for PC
+sl_off		dw	0ffffh	; offset of source
+sl_seg		dw	0	; segment of source
+sl_get_char	rw	1	; variable fetch vector
+
+sl_mono_seg	dw	0B000h	; monochrome crt base address
+sl_color_seg	dw	0B800h	; color crt base address
+sl_hour_save	db	0	; current bcd hour
+sl_min_save	db	0	; current bcd minute
+
+sl_error_msg	rw	1	; error message offset
+sl_error_resp	rw	1	; allowable response table offset
+sl_error_key	rb	1	; response key
+
+;	status line message image
+
+status_msg		rb	0
+			db	'Console='	;0-7	
+smsg_cnum		rb	1		;8
+			db	' '		;9
+smsg_mode		rb	8		;10-17
+			db	'  '		;18-19
+smsg_pd			rb	8		;20-27
+			db	' '		;28
+smsg_openvec		rb	6		;29-34
+			db	' '		;35
+smsg_ctrlS		rw	0		;36-37
+smsg_ctrlO		rw	1		;36-37
+			db	' '		;38
+smsg_ctrlP		rw	1		;39-40
+smsg_ctrlP_num		rw	1		;41-42
+			db	' '		;43
+smsg_pstr		db	'Printer='	;44-51
+smsg_pnum		rb	1		;52
+			db	'  '		;53-54
+smsg_window		rb	3		;55-57
+			db	' '		;58
+smsg_capslock		rb	4		;59-62
+			db	' '		;63
+smsg_numlock		rb	3		;64-66
+			db	'  '		;67-68
+smsg_hour		dw	'0 '		;69-70
+smsg_c1			db	':'		;71
+smsg_min		dw	'00'		;72-73
+smsg_c2			db	':'		;74
+smsg_sec		dw	'00'		;75-76
+			db	' '
+smsg_ampm		dw	'  '		;78-79
+
+;	String constants for status line
+
+dynstr			db	'Dynamic '	;these 4 
+bufstr			db	'Buffered'	;messages must
+purstr			db	'Purging '	;be the
+noswstr			db	'NoSwitch'	;same length
+
+;	Test masks and drive names for get_openvec
+
+sl_drive_list		db	01,00,'A',02,00,'B'
+			db	04,00,'C',08,00,'D'
+			db	00,10h,'M',0F0h,0EFh,'*'
+
+;	window, capslock, and numlock indicators
+
+winstr			db	'Win'
+capstr			db	'Caps'
+numstr			db	'Num'
+
+status_copy	rw	80	; keep a copy of status line
+
+sl_error_save	rw	80	; back up for error messages
+
+reorg_sl2	equ	offset $
+	cseg
+	org	reorg_sl2
+
+eject
+
+;************************************************
+;*						*
+;*		LIST DEVICES			*
+;*						*
+;************************************************
+
+;	Character to list out device
+;	Entry:	CL = character
+;		DL = device
+;	Exit:	character sent
+
+io_list:
+	mov	bl,dl		; get device number
+	mov	bh,0
+	add	bx,bx		; bx = word pointer
+	jmp	ds:list_out[bx]	; branch out
+
+;	This table is set up in Init depending on available equipment
+
+list_out	dw	null_out	; printer 0
+		dw	null_out	; printer 1
+		dw	null_out	; printer 2
+		dw	null_out	; printer 3
+		dw	null_out	; printer 4
+
+
+;	Character to parallel printer
+
+parallel_out:
+	push cx ! push	dx		; save the character and device
+	call	poll			; wait for device to be ready
+	pop dx ! pop cx			; device and character
+
+	mov	ax,par_stat_word[bx]	; what was the status?
+	cmp	al,98h			; ready/select
+	jz	par_out_yes		; skip if it's a go
+	xor	ah,al			; if status = ignore code
+	and	ah,7Fh			;   except for busy bit
+	jnz	par_out_fault		;   then just quit
+	ret
+
+;	printer fault requires a status line error message
+
+par_out_fault:
+	push bx ! push cx ! push dx
+	mov	si,offset par_no_paper	; out of paper message
+	cmp	al,20h			; -ready/paper/error
+	jz	par_out_error
+	mov	si,offset par_off_line	; not on-line message
+par_out_error:
+	mov	di,offset par_sub_msg
+	mov	cx,par_sub_len		; length of sub message
+	push	es
+	push ds ! pop es
+	rep	movsb			; save the sub message
+	pop	es
+
+	mov	si,offset par_error_msg
+	mov	al,dl			; get printer number
+	or	al,'0'			; convert to ascii
+	mov	.8[si],al		; set printer number
+	mov	di,offset par_error_resp
+	call	sl_error_out		; get response
+	pop dx ! pop cx ! pop bx
+
+	cmp	al,'R'			; if retry
+	jz	parallel_out		;   then go again
+	mov	al,par_stat_code[bx]	; if ignore, then
+	mov	par_ignore_code[bx],al	;   save for future ignores
+	ret				; and just return
+
+par_out_yes:
+	mov	par_ignore_code[bx],1	; reset the ignore status
+	mov	al,cl			; AL = character
+	mov	dx,ds:list_data[bx]	; get the port for this device
+
+	out	dx,al			; send character
+	inc dx ! inc dx			; reset it
+	mov	al,0dh			; printer strobe on
+	out	dx,al
+	mov	al,0ch			; printer strobe off 
+	out	dx,al
+	ret
+
+;	Parallel printer status line error data
+
+par_error_msg	db	'Printer n     '
+par_sub_msg	db	'Out of Paper     '	; for instance
+		db	'Retry, Ignore?   '
+		db	'                 '
+		db	'               '
+
+par_no_paper	db	'Out of Paper'
+par_off_line	db	'Not On-Line '
+par_sub_len	equ	offset $ - offset par_off_line
+
+par_error_resp	db	2,'RI'
+
+
+;	Serial printer init routine
+;	This is called the first time
+;	that a port is to print a character
+;	entry:	bx = device# * 2
+;		cl = char
+
+serial_init:
+	push bx ! push cx		; save the data
+	mov	dx,ds:list_data[bx]	; get our qpb
+	mov	cl,q_open
+	call	supif			; open the output queue
+	pop cx ! pop bx
+	test	ax,ax			; see if open succeeded
+	jz	serial_init_good	; skip if it worked
+
+	mov	ds:list_out[bx],offset null_out
+	ret				; wipe us out
+
+serial_init_good:
+	mov	ds:list_out[bx],offset serial_out
+;	jmps	serial_out		; now the queue is open
+
+
+;	Serial printer output routine
+;	This is called forever after the first time
+;	that a port is to print a character.
+;	entry:	bx = device# * 2
+;		cl = char
+
+serial_out:
+	mov	dx,ds:list_data[bx]	; get qpb offset
+	mov	si,dx
+	dec	si			; point to character
+	mov	[si],cl			; store the character
+	mov	cl,q_write
+	call	supif			; write char to queue
+	ret
+
+;	This is for nonexistent printer numbers
+
+null_out:
+	ret
+
+
+;	List data table   This is the port number for parallel ports
+;	and the offset of the qpb for serial ports
+
+list_data	dw	03BCh		; BW card parallel port
+		dw	0378H		; 0378h parallel port card as shipped
+		dw	0278h		; 0278h parallel port card option
+		dw	qpb0		; SerOut0 queue paramater block
+		dw	qpb1		; SerOut1 queue parameter block
+
+;	Parallel port status code and status to ignore for 3 printers
+
+par_stat_code	db	0
+par_ignore_code	db	1
+		db	0,1,0,1
+par_stat_word	equ	word ptr par_stat_code
+
+;	Queue parameter blocks for serial printers
+
+q_msg0	db	1,0			; count, char
+qpb0	dw	0,0,0,q_msg0
+	db	'SerOut0 '
+
+q_msg1	db	1,0			; count, char
+qpb1	dw	0,0,0,q_msg1
+	db	'SerOut1 '
+
+
+;	List status entry point
+;	entry:	DL =	device
+;	exit:	AX =	0 if not ready
+;			0FFFFh if ready
+;		BX =	device# * 2
+
+io_listst:
+	mov	bl,dl		; get device number
+	mov	bh,0
+	add	bx,bx		; bx = word pointer
+	jmp	ds:list_stat[bx]	; branch out
+
+;	This table is set up in Init depending on available equipment
+
+list_stat	dw	null_stat	; printer 0
+		dw	null_stat	; printer 1
+		dw	null_stat	; printer 2
+		dw	serial_stat	; printer 3
+		dw	serial_stat	; printer 4
+
+
+;	Get status from parallel printer
+;	Called from io_listst and from io_poll
+;	Entry:	BX =	device# * 2
+;		DL =	device#
+;	Exit:	AX =	0 if not ready
+;			0ffffh if ready
+;		BX =	device# * 2
+
+parallel_stat:
+	push	dx			; save device #
+	mov	dx,ds:list_data[bx]	; port for parallel printer
+	inc	dx 
+	in	al,dx			; DX=status register, get status
+	pop	dx			; restore device number
+
+	and	al,0B8h			; mask ready/paper/select/error
+	mov	ds:par_stat_code[bx],al	; save the status port value
+	cmp	al,18h			; if -ready/select
+	mov	ax,0			;   then set ax to zero and
+	jz	par_stat_done		;   continue with polling
+	dec	ax			; else ready => ax=ffff
+par_stat_done:
+	ret
+
+
+;	Status for serial device always indicates ready
+;	because dispatch is handled by the queue mechanism
+;	Also used by non-existent printers	
+;	exit:	ax = 0FFFFh  =>  ready
+
+serial_stat:
+null_stat:
+	mov	ax,0FFFFh		; ready
+	ret
+
+
+
+;************************************************
+;*						*
+;*		POLL ROUTINES			*
+;*						*
+;************************************************
+
+;	Check device for ready status, call dev_poll if not ready
+
+poll:					;poll device
+;----
+;	Entry:	DL =	device number
+;	Exit:		device ready
+;		BX =	device# * 2
+	
+	call io_poll			;check hardware first
+	test ax,ax			;AX=0 if not ready
+	jnz poll_done			;BX=device# * 2 set by io_poll
+
+	push bx				;save device# * 2
+	mov cl,dev_poll			;give up the CPU resource
+	call supif
+	pop bx				;device# * 2
+poll_done:
+	ret
+	  
+
+;	io_poll is called from the dispatcher after a process makes
+;	a dev_poll call to the O.S.  During system dispatches, a
+;	a call to io_poll is made for each polling process.
+;	Entry:	DL =	device #
+;	Exit:	AX =	0 if not ready, 0FFFFH if ready
+;		BX =	device# * 2
+
+io_poll:
+	xor bx,bx
+	mov bl,dl
+	shl bx,1
+	jmp poll_table[bx]
+
+poll_table	dw	parallel_stat	;each of these must
+		dw	parallel_stat	;preserve BX and DX
+		dw	parallel_stat
+
+
+;	auxiliary input/output routines are just no-ops
+
+io_auxin:
+	ret
+
+io_auxout:
+	ret
+
+
+;	a general xios information pointer return function
+;	entry:	cx = which pointer
+;		     0 => equipment data
+;		     1 => setup data
+
+io_pointer:
+	mov	bx,cx
+	add	bx,bx		; word index
+	mov	ax,ptr_list[bx]	; here's the return value
+	ret
+
+
+reorg11	equ	(offset $ + 1) and -2
+	dseg
+	org	reorg11
+
+
+;************************************************
+;*						*
+;*		PUBLIC DATA BLOCKS		*
+;*						*
+;************************************************
+
+ptr_list	dw	equip_data
+		dw	setup_data
+
+;	Equipment configuration data block
+
+equip_data	rb	0
+num_flop	dw	0	; number of floppy disks	1-4
+num_hard	dw	0	; number of hard disks		0-2
+num_print	dw	0	; number of parallel printers	0-3
+num_port	dw	0	; number of serial ports	0-2
+num_mono	dw	0	; number of monochrome crts	0-1
+num_color	dw	0	; number of color crts		0-1
+num_ndp		dw	0	; number of 8087's		0-1
+num_mmkb	dw	0	; main memory in Kilobytes    256-640
+num_mdkb	dw	0	; memory disk in Kilobytes      0-384
+
+;	Setup data block
+
+setup_data	rb	0
+disk_int_off	rw	1	; disk interrupt offset
+disk_int_seg	rw	1	; disk interrupt segment
+		dw	pfk_tbl0
+		dw	pfk_tbl1
+		dw	pfk_tbl2
+		dw	pfk_tbl3
+lo_mem_top	dw	0	; main mem seg ceiling    4000-A000
+hi_mem_start	dw	0	; high mem seg beginning  C000-E000
+hi_mem_top	dw	0	; high mem seg ceiling    D000-F000
+boot_disk	rb	1	; from whence we came
+		rb	0	; pad
+
+
+;********************************************************
+;*							*
+;*		CONSOLE CONTROL BLOCKS			*
+;*							*
+;********************************************************
+
+;	ccb_list used by io_statline routine
+ccb_list	dw	ccb0,ccb1,ccb2,ccb3
+
+ccb_tab		rb	0
+CCB0		DW	0		;OWNER
+		dw	0,0,0
+		db	0ffh, 0ffh	;mimic, msource
+		db	0
+		db	0		;virtual console number
+		dw	0
+		dw	0		;foreground and dynamic
+					;be the foreground console
+		dw	10h		;max buffer file size
+                dw      0,0,0,0,0,0
+                dw      0,0,0,0,0
+		dw	ccb1,0		;first link
+
+ccb1		dw	0		;owner
+		dw	0,0,0
+		db	0ffh, 0ffh	;mimic, msource
+		db	0
+		db	1		;virtual console number
+		dw	0
+		dw	csm_background	;background and dynamic
+		dw	10h		;max buffer file size
+                dw      0,0,0,0,0,0
+                dw      0,0,0,0,0
+		dw	ccb2,0		;link to next
+
+ccb2		dw	0		;owner
+		dw	0,0,0
+		db	0ffh, 0ffh	;mimic, msource
+		db	0
+		db	2		;virtual console number
+		dw	0
+		dw	csm_background	;background and dynamic
+		dw	10h		;max buffer file size
+                dw      0,0,0,0,0,0
+                dw      0,0,0,0,0
+		dw	ccb3,0		;link to next
+
+ccb3		dw	0		;owner
+		dw	0,0,0
+		db	0ffh, 0ffh	;mimic, msource
+		db	0
+		db	3		;virtual console number
+		dw	0
+		dw	csm_background	;background and dynamic
+		dw	10h		;max buffer file size
+                dw      0,0,0,0,0,0
+                dw      0,0,0,0,0
+		dw	0,0		;end of link list
+
+
+;********************************************************
+;*							*
+;*		LIST CONTROL BLOCK TABLE		*
+;*							*
+;********************************************************
+
+lcb_tab		rb	0
+lcb0		dw	0,0,0,0
+		db	0ffh, 0ffh	;mimic, msource
+
+lcb1		dw	0,0,0,0
+		db	0ffh
+		db	0ffh
+
+lcb2		dw	0,0,0,0
+		db	0ffh
+		db	0ffh
+
+lcb3		dw	0,0,0,0
+		db	0ffh
+		db	0ffh
+
+lcb4		dw	0,0,0,0
+		db	0ffh
+		db	0ffh
+
+;	This little garbage patch is to protect io_conout from a system bug
+;	which happens when a list device detaches.  If you can detach printer
+;	number 4 without affecting this table, then it may be safely removed.
+
+		dw	0FFFFh,0FFFFh,0FFFFh
+		dw	0FFFFh,0FFFFh,0FFFFh
+		dw	0FFFFh,0FFFFh,0FFFFh
+		dw	0FFFFh,0FFFFh,0FFFFh
+

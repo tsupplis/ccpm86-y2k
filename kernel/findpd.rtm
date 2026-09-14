@@ -1,0 +1,40 @@
+;*****************************************************
+;*
+;*	Find Process Descriptor
+;*
+;*****************************************************
+
+;================	=================================
+findpdname_entry:	; Find Process Descriptor by Name
+;================	=================================
+; Find process by name in thread list
+; Before calling this routine, calling process must
+; own the THRD_SPB (Thread Sync Parameter Block) as
+; interrupts are not turned off.
+;
+;	input:	DX->name in u_wrkseg
+;		BX->thread list root - p_thread
+;	output:	BX=pd if found
+;		  =0ffffh if not found
+;		CX=0 if found
+;		  =e_no_pdname if not found
+
+	push es ! mov es,u_wrkseg
+fpn_cmpname:
+	mov si,dx
+	mov bx,p_thread[bx]
+	cmp bx,0 ! je fpn_nomatch
+	   mov cl,0
+	   lea di,p_name[bx]
+fpn_cmplet:
+	   cmp cl,8 ! je fpn_found
+		mov al,es:[si] ! sub al,[di]
+		shl al,1 ! jnz fpn_cmpname
+		    inc cl ! inc si ! inc di
+		    jmps fpn_cmplet
+fpn_found: mov cx,0 ! jmps fpn_exit
+fpn_nomatch:
+	mov cx,e_no_pdname ! mov bx,0ffffh
+fpn_exit:
+	pop es ! ret
+

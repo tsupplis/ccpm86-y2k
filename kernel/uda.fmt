@@ -1,0 +1,77 @@
+;*****************************************************
+;*
+;*	User Data Area - The User Data Area is an 
+;*	extension of the process descriptor but it 
+;*	travels with the user.  It contains info 
+;*	that is needed only while in context.
+;*
+;*	While in the operating system, The Extra
+;*	Segment register points to the beginning
+;*	of the User Data Area.
+;*
+;*****************************************************
+
+
+	eseg
+	org	0
+
+u_dparam	rw	1	; arg to dispatch
+
+;	this area overlays part of BDOS
+u_dma_ofst	rw	1	; BDOS dma offset
+u_dma_seg	rw	1	; BDOS dma segment
+u_func		rb	1	; actual function number
+u_searchl	rb	1	; BDOS search length 
+u_searcha	rw	1	; BDOS search FCB offset
+u_searchabase	rw	1	; BDOS search user's segment
+u_dcnt		rw	1	; BDOS directory count
+u_dblk		rw	1	; BDOS directory block #
+u_error_mode	rb	1	; BDOS error mode
+u_mult_cnt	rb	1	; BDOS multi-sector count
+u_df_password	rb	8	; BDOS default password
+u_pd_cnt	rb	1	; BDOS process count
+uda_ovl_len	equ	(offset $)-(offset u_dma_ofst)
+;	end of overlay area
+
+
+u_in_int	rb	1
+u_sp		rw	1	; save register area
+u_ss		rw	1
+u_ax		rw	1
+u_bx		rw	1
+u_cx		rw	1
+u_dx		rw	1
+u_di		rw	1
+u_si		rw	1
+u_bp		rw	1
+u_wrkseg	rw	1	; curr seg addr of buf
+u_retseg	rw	1	; usr ES return
+u_ds_sav	rw	1	;\
+u_stack_sp	rw	1	; usr stack segment
+u_stack_ss	rw	1	; usr stack pointer
+u_ivectors	rw	4	; save int 0,1
+u_ivec87_of     rw      1       ; NDP interrupt vector
+u_ivec87_sg	rw	1	; for exception handling
+u_ivectors2	rw	4	; save int 3,4
+u_es_sav	rw	1	; > Used during interrupts
+u_flag_sav	rw	1	;/
+
+u_initcs	rw	1
+u_initds	rw	1
+u_inites	rw	1
+u_initss	rw	1
+u_os_ip		rw	1	; O.S. vec save
+u_os_cs		rw	1
+u_debug_ip	rw	1	; RTS,Debug Vector Save
+u_debug_cs	rw	1
+u_insys		rb	1	; # times through user_entry
+u_stat_sav	rb	1	; used during interrupts
+u_conccb	rw	1	; default console's CCB addr
+u_lstccb	rw	1	; default list devices CCB addr
+u_delim		rb	1	; delimiter for user function 9
+u_ioexerr       rb      1       ; extended error ret codes for bdos
+ 
+	org	ulen
+u_8087		rw	47	; 8087 save area
+				; see dispatcher, loader and terminate
+

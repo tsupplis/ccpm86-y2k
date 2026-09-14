@@ -1,0 +1,94 @@
+pagesize 45
+;       *****************************
+;       * Codemacros for 8087     *
+;       * numeric data processor: *
+;       ***************************
+;
+                        ; stack references:
+st      equ     0       ; stack top (= register 0)
+st0     equ     0       ; register 0
+st1     equ     1       ; register 1
+st2     equ     2       ; register 2
+st3     equ     3       ; register 3
+st4     equ     4       ; register 4
+st5     equ     5       ; register 5
+st6     equ     6       ; register 6
+st7     equ     7       ; register 7
+;
+;
+codemacro       FRSTOR  src:M
+        db      9bh
+        segfix  src
+        db      0ddh
+        modrm   4,src
+endm
+
+codemacro       FSTCW   dst:Mw
+        db      9bh
+        segfix  dst
+        db      0d9h
+        modrm   7,dst
+endm
+
+codemacro       FDISI
+        db      9bh
+        dw      0e1dbh
+endm
+
+codemacro       FSAVE   dst:M
+        segfix  dst
+        db      0ddh
+        modrm   6,dst
+endm
+
+codemacro       FNINIT
+        dw      0e3dbh
+endm
+
+
+codemacro       FNDISI
+        dw      0e1dbh
+endm
+
+codemacro       FNSTCW   dst:Mw
+        segfix  dst
+        db      0d9h
+        modrm   7,dst
+endm
+
+codemacro       FNSTSW   dst:Mw
+        segfix  dst
+        db      0ddh
+        modrm   7,dst
+endm
+
+codemacro       FNCLEX
+        dw      0e2dbh
+endm
+
+codemacro       FNSAVE  dst:M
+        db      0ddh
+        modrm   6,dst
+endm
+
+codemacro       FNSTENV dst:M
+        segfix  dst
+        db      0d9h
+        modrm   6,dst
+endm
+
+codemacro       FLDENV  src:M
+        db      9bh     
+        segfix  src
+        db      0d9h
+        modrm   4,src
+endm
+
+codemacro       FNOP
+        db      9bh     
+        dw      0d0ddh
+endm
+
+FWAIT   equ     WAIT
+
+

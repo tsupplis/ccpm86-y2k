@@ -1,0 +1,26 @@
+;*****************************************************
+;*
+;* Interrupt Vectors - to fiddle with the interrupt
+;*	 vectors, set the Data Segment Register to 0
+;*	 and use the following variables.
+;*
+;*****************************************************
+
+	DSEG
+
+i_divide_ip	rw	1	; int 0
+i_divide_cs	rw	1
+i_trace_ip	rw	1	; int 1
+i_trace_cs	rw	1
+i_nomask_ip	rw	1	; int 2
+i_nomask_cs	rw	1
+i_break_ip	rw	1	; int 3
+i_break_cs	rw	1
+i_ovrflw_ip	rw	1	; int 4
+i_ovrflw_cs	rw	1
+i_interrupts	rw	((osint-5)*2)
+i_os_ip		rw	1
+i_os_cs		rw	1
+i_debug_ip	rw	1
+i_debug_cs	rw	1
+

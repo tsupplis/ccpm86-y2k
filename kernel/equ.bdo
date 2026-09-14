@@ -1,0 +1,56 @@
+
+;		BDOS symbols:
+
+on		EQU	0ffffh
+off		EQU	00000h
+
+;	Special 8086 symbols:
+
+b		equ	byte ptr 0
+w		equ	word ptr 0
+
+;	literal constants
+
+enddir		EQU	0ffffh		;end of directory
+
+;	file control block (fcb) constants
+
+fcblen		EQU	32		;fcb length
+empty		EQU	0e5h		;empty directory entry
+lstrec		EQU	127		;last record# in extent
+recsiz		EQU	128		;record size
+dirrec		EQU	recsiz/fcblen	;directory elts / record
+dskshf		EQU	2		;log2(dirrec)
+dskmsk		EQU	dirrec-1
+fcbshf		EQU	5		;log2(fcblen)
+maxext		EQU	31		;largest extent number
+maxmod		EQU	63		;largest module number
+fwfmsk		EQU	80h		;file write flag is high
+					;order modnum
+namlen		EQU	15		;name length
+;lstfcb 	EQU	fcblen-1
+
+drv		EQU	0		;drive field
+f1		EQU	1		;file name byte 1 to 8
+;f2		EQU	2
+;f3		EQU	3
+;f4		EQU	4
+f5		EQU	5
+;f6		EQU	6
+f7		EQU	7
+f8		EQU	8
+
+;	reserved file indicators
+
+rofile		EQU	9		;t1' -> read/only file
+sysfil		EQU	10		;t2' -> system file
+ARCHIV		EQU	11		;t3' -> FILE HAS BEEN ARCHIVED
+extnum		EQU	12		;extent number field
+chksum		EQU	13		;unfilled bytes field
+modnum		EQU	14		;data module number
+reccnt		EQU	15		;record count field
+dskmap		EQU	16		;disk map field
+nxtrec		EQU	fcblen
+ranrec		EQU	nxtrec+1	;random record field (3 bytes)
+
+

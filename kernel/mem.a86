@@ -1,0 +1,30 @@
+
+	include cpyright.def
+
+;*****************************************************
+;*
+;*	MP/M-86 Memory Management Module
+;*
+;*****************************************************
+	eject ! include system.def
+	eject ! include modfunc.def
+	eject ! include pd.def
+	eject ! include qd.def
+	eject ! include err.def
+	eject ! include mem.def
+	eject ! include mpb.def
+        eject ! include uda.def
+	eject ! include memif.mem
+	eject ! include cpmmem.mem
+	eject ! include memory.mem
+	eject ! include share.mem
+	eject ! include mau.mem
+	eject ! include ml.mem
+	eject ! include util.mem
+	eject ! include patch.cod
+	eject ! include uda.fmt
+	eject ! include lstk.fmt
+	eject ! include sysdat.dat
+	eject ! include data.bdo
+	eject ! end
+

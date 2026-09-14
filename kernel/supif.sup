@@ -1,0 +1,361 @@
+;*****************************************************
+;*
+;*	SUPERVISOR INTERFACE ROUTINES
+;*
+;*****************************************************
+
+;=========
+user_entry:
+;=========
+;	User Entry Point - enter here from a INT 224
+;
+;		REGISTER USAGE
+;	ENTRY			EXIT
+;	-----			----
+;  CL - Function Code	  AX - Copy of BX
+;  DX - Param     	  BX - Return
+;  DS - Seg Addr  	  CX - Error Code	
+;			  ES - Segment Return
+;
+;		DS,SI,DI,BP preserved through call
+;
+;		SETUP FOR MPM ENVIRONMENT
+;		-------------------------
+;	contents of users stack
+;		Flags
+;		CS
+;		IP		<- u_stack_ss,_sp
+;	DS =  Sysdat Segment
+;	ES -> user_data_area (UDA)
+;	DX -> function parameter
+;	u_wrkseg == user's DS
+;	u_retseg == user's ES
+					;interrupts are off
+					;set up MPM,CCPM environment
+	cld ! mov ax,ds			;AX = user's DS
+	mov ds,sysdat
+	mov bx,rlr
+	mov ds,p_uda[bx]		;DS = UDA segment
+	mov ds:u_retseg,es		;save user's ES
+
+					;U_INSYS is count of times
+					;through this entry point
+	cmp ds:u_insys,0 ! jne noswt	;change stacks to UDA stack
+					;if U_INSYS = 0
+					;otherwise leave stack alone
+
+					;U_WRKSEG where is user's entry DS
+					;is saved
+	  mov ds:u_wrkseg,ax		;wipe out earlier u_wrkseg
+	  mov ds:u_stack_ss,ss
+	  mov ds:u_stack_sp,sp
+	  mov ax,ds
+	  mov ss,ax ! mov sp,ulen	;stack starts at end of UDA
+	  jmps uecont
+noswt:
+	push ds:u_wrkseg		;save current u_wrkseg on UDA stack
+	mov ds:u_wrkseg,ax
+
+uecont:
+	sti
+	inc ds:u_insys
+	mov ax,ds ! mov es,ax		;register moves are faster than
+	mov ds,sysdat			;push and pop, DS=SYSDAT,ES=UDA 
+	push si ! push di ! push bp
+
+	mov u_func,cl			;record function number in UDA
+	xor ch,ch			;call function and do
+	call netchk			;netwrk chk, returns BX, ES, CX
+
+coret:
+	pop bp ! pop di ! pop si
+	mov ax,es			;setup user's environment and return
+	mov ds,ax			;DS = UDA segment
+	mov es,ds:u_retseg		;restore ES from entry unless
+					;function returns a segment value
+	mov ax,ds:u_wrkseg		;AX = user's entry DS
+	cli
+        dec ds:u_insys ! jnz nstk	;switch back to user's stack
+					;if U_INSYS = 0 
+            push bx ! push ds ! push cx ;See if process should be suspended.
+            mov ds,sysdat               ;Since it's on its way out, it doesn't
+            mov bx,rlr                  ;own any critical regions and we can
+                                        ;put it to sleep until its console is
+                                        ;switched into the foreground.
+            mov ax,p_sflag[bx]
+            test ax,psf_suspend         ;is this a suspendable process ?
+             jz coret1                  ;no...
+            mov es,p_uda[bx]            ;Set up ES = UDA
+            mov al,p_cns[bx]     
+            xor ah,ah ! xor bh,bh       ;get vccb's state
+            mov bx,ccblen  ! mul bx            
+            mov bx,ccb ! add bx,ax
+            mov ax, c_state[bx]         
+            test ax,csm_suspend         ;is it to be suspended now ?
+             jz coret1                  ;no...
+            mov bx,rlr
+            push dx
+            mov dx, offset splr         ;get suspend list for sleep_entry
+            mov ud_param,dx
+            mov cx, f_sleep             ;call to RTM to place in list
+            xor bh,bh
+            mov bl,ps_ciowait           ;user ciowait instead of suspend
+             call osif                  ;so the abort code will work
+            pop dx 
+coret1:
+          pop cx ! pop  ds ! pop bx
+          mov ax,ds:u_wrkseg
+          mov es,ds:u_retseg
+coret2:
+	  mov ss,ds:u_stack_ss
+	  mov sp,ds:u_stack_sp
+	  jmps ueout
+nstk:
+        sti       
+	pop ds:u_wrkseg			;restore previous U_WRKSEG if not 
+					;going back to user's stack
+ueout:	mov ds,ax			;DS = user's entry DS
+	mov ax,bx			;parameter return BX = AX
+	inc ax
+	jz u_err1			;CX=error code if AX,BX=0FFFFH
+	  xor cx,cx			;CX always 0 if no error
+u_err1:
+	dec ax
+	iret				;back to user ...
+					;restore interrupts as they
+ 					;were on entry
+
+sysfunc:	; call system function
+;-------	-----------------------
+;	entry:	if CH <> 0 then CH is module number
+;		     (usually 1:SUP, 2:RTM, 3:MEM, 4:CIO, 5:BDOS)
+;		     network check is bypassed
+;		if CH = 0 then network check is done
+;		CL = function #
+;		DX = arg
+;		BX = arg
+;	exit:	BX = return value
+;		ES = segment return value
+;		CX = error code if BX = 0FFFFH
+
+	test ch,ch ! jz netchk			;network or local
+	    mov ax,cx ! jmps localfunc		;in local module
+
+
+illfunc:				;illegal function number
+	jmp i_ent
+
+netchk:
+;	enter here for network check
+;	check for function numbers represented in function table,
+;	ENTTAB_TABLE.  Table space is saved by making the functions
+;	contiguous as we check the range.
+;	The table has entries for functions 0-80, 98-116, 128-164.
+;	Numbers 70-97, 117-127, 165-255 are not in the table.
+;	Illegal functions in this table return the error codes
+;	not implemented (1) or illegal function number (2).
+;	Function not in the table return the illegal function number
+;	code.
+;	To add a new user function modify the files SYSDAT.DAT and
+;	MODFUNC.DEF as well as the ranges immediately
+;	below.  All of the modules SUP,RTM,MEM,CIO,BDOS,SYSDAT must
+;	then be reassembled.
+if netversion
+        mov ax,cx
+        cmp al,80 ! jbe okfunc
+            sub al,17 ! cmp al,81 ! jb illfunc
+                cmp al,99 ! jbe okfunc
+                    sub al,11
+;
+;	3.1M patch for illegal function numbers 117-127
+;
+	cmp al,100 ! jb illfunc			;117 -127 are now 89 -99
+		cmp al,136 ! ja illfunc
+;
+;	end of 3.1M patch
+;
+endif
+if not netversion
+	cmp cl,80 ! jbe okfunc
+	    sub cl,17 ! cmp cl,81 ! jb illfunc	;98-116 are now 81-99
+	        cmp cl,99 ! jbe okfunc		;128-164 are now 100-136
+		    sub cl,11			
+;
+;	3.1M patch for illegal functions 117-127
+;
+	cmp cl,100 ! jb illfunc			;117 -127 are now 89 - 99
+		cmp cl,136 ! ja illfunc
+;
+;	end of 3.1M patch
+;
+endif
+okfunc:
+if netversion
+        shl ax,1
+        mov si,ax
+        mov ax,word ptr sysent[si]
+        test ah,net_bit
+          jz localfunc
+        and ah, not net_bit
+        mov bl,module_map
+        test bl,netmod_bit
+          je localfunc
+        push ax
+        callf dword ptr .netmod
+        cmp al,0ffh
+        pop ax
+          je localfunc
+        mov ax,bx
+        ret
+ endif
+if not netversion      
+						;CL is now 0 - num entries
+						;- 1 in entry table
+	mov si,cx ! shl si,1			;times 2 for entry table
+	add si,offset sysent			;AH high nibble flags
+	mov ax,enttab_entry[si]			;AH low nibble module
+						;AL function number
+						;within module
+	test ah,net_bit ! jz localfunc	        ;not a network function
+	    and ah,not net_bit		        ;turn off network bit
+	    mov al,module_map
+	    test al,netmod_bit ! je localfunc	;network module is not there
+	 	push ax
+	 	callf dword ptr .netmod		;call network CL = func
+	 	cmp al,true			;if AL=0FFH do func locally
+	 	pop ax				;in addition over network
+	 	jne localfunc
+	 	    mov ax,bx ! ret
+endif
+
+localfunc:					;not over the network
+	cmp ah,sup ! je insup			;AH=module, AL=function	
+	    mov cl,ah
+	    mov ch,module_map ! shr ch,cl	;does module exist ?
+	    jnc badmod
+		xor ch,ch ! dec cx		;make module 0 relative
+		shl cx,1 ! shl cx,1 ! shl cx,1	;* 8
+		mov si,cx ! mov cl,al		;func # in CL
+		callf dword ptr module_table[si]
+		ret
+badmod:
+	jmp n_imp
+insup:
+	xor ah,ah
+	shl ax,1 ! mov si,ax 			; mov cx,ax
+	jmp cs:supfunc[si]
+
+;=====
+entry:		; Supervisor module entry point
+;=====		-------------------------------
+;
+;		Arrive here usually on a CALLF using address
+;		at SYSDAT:4.  Note: flag set is handled specially.
+;
+;	entry:	if CH <> 0 then CH is module number
+;		     (usually 1:SUP, 2:RTM, 3:MEM, 4:CIO, 5:BDOS)
+;		     network check is bypassed
+;		if CH = 0 then network check is done;		
+;		CL = function #. If CH = 0 then CL is treated
+;		     as a function number used with an INT 224:
+;		     it is a USER function.
+;		     If CH is not 0 then CL is the function number
+;		     within the module specified by CH.
+;		     The file MODFUNC.DEF contains the equates
+;		     used for accessing functions from within the O.S.
+;		     These functions are INTERNAL functions.
+;		     Note the INTERNAL functions are a superset of
+;		     the USER functions.  The equates for USER
+;		     functions in MODFUNC.DEF have a 0 for the high byte
+;		     forcing network checking from this entry point.
+;		     An example: if f_conin (from MODFUNC.DEF) is
+;		     equal to 0001H.  A Console output call to this
+;		     entry point thus result in CH = 0, CL = 1.
+;		DX = arg
+;		BX = arg
+;
+;	exit:	BX = return value
+;		ES = segment return value
+;		CX = error code if BX = 0FFFFH
+
+
+	cmp cx,f_flagset ! jne notfs	;flag set is exception:
+	    mov cx,f_inflagset		;do not go over network,
+	    call sysfunc		;make path shorter,
+	    mov ax,bx			;parameter return BX = AX
+	    inc ax			;AX=0FFFFH if error
+	    jz u_err2			;CX= error code if AX,BX=0FFFFH
+	      xor cx,cx			;CX=0 if no error
+u_err2:
+	    dec ax			;set AX back to 0 or 0FFFFH
+	    retf			;DS must equal system
+notfs:					;data segment
+
+	;mov u_unused,cx			;save 16 bit function number
+	call osif ! retf
+
+osif:					;point SUP uses to get
+					;to other modules
+	push u_wrkseg			;save current u_wrkseg
+	mov ax,ds
+	mov u_wrkseg,ax
+	mov ax,sysdat
+	mov ds,ax
+	call sysfunc
+	mov ax,u_wrkseg
+	mov ds,ax
+	pop u_wrkseg
+	mov ax,bx			;BX,CX are return codes
+	inc ax				;AX=0FFFFH if error
+	jz u_err3			;CX= error code if AX,BX=0FFFFH
+	  xor cx,cx			;CX=0 if no error
+u_err3:
+ 	dec ax				;set AX back to 0 or 0FFFFH
+	ret
+
+
+;=========
+user_retf:
+;=========
+;	If a user process does a RETF to terminate,
+;	the process ends here.  The Load function sets up
+;	the default stack to point here.
+
+	mov bx,rlr
+	and p_flag[bx],not pf_keep+pf_tempkeep+pf_ctlc+pf_sys
+	mov cx,f_terminate
+	xor dx,dx
+	int osint		;make sure the terminate
+				;succeed by reseting the
+				;the keep,tempkeep,ctlc,sys flags
+
+;======
+xiosif:
+;======
+	callf dword ptr .xiosmod ! ret
+
+;*****************************************************
+;*
+;*	Supervisor function table
+;*
+;*****************************************************
+
+	org	((offset $)+1) AND 0fffeh	;Word Boundary
+
+supfunc	dw	n_imp		; 0-not implemented
+	dw	i_ent		; 1-illegal function number
+	dw	bver_ent	; 2-(12)get BDOS version
+	dw	cbios_ent	; 3-(50)call bios
+	dw	load_ent	; 4-(59)user load function
+	dw	cli_ent		; 5-(150)CLI
+	dw	rpl_ent		; 6-(151)Call RPL
+	dw	parse_ent	; 7-(152)parse filename
+	dw	sdat_ent	; 8-(154)get sysdat addr
+	dw	tod_ent		; 9-(155)get tod addr
+	dw	load		; 10-load function
+	dw	over_ent	; 11-O.S. version number
+	dw	chain_ent	; 12-(47)Program Chain
+	dw	ser_ent		; 13-(107)return serial
+	dw	cload_ent	; 14-chain load function
+
+                                                                                                                                                                                                                                                                                                                             

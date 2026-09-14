@@ -1,0 +1,223 @@
+;*****************************************************
+;*
+;*	Memory List Functions
+;*
+;*****************************************************
+
+;=============
+mlalloc_entry:		; Alloc from Mem List
+;=============
+; Create a MAU from a Memory List.  Memory List is a 
+; linked list of MDs in memory order (low first).  It
+; is assumed that units in the Memory List are paragraphs
+;	input:	DX = address of MPB in u_wrkseg
+;		BX = ML root in SYSDAT
+;	output:	BX = address of MAU
+;		   = 0ffffh if error
+;		CX = Error Code
+
+	mov si,dx
+	sub ax,ax ! mov cx,ax ! mov dx,0ffffh
+		; AX = MD w/best score
+		; DX = best score
+		; CX = # partitions used
+		; SI -> MPB in u_wrkseg
+	push ax ! push cx
+mla_nmd:cmp m_link[bx],0 ! je mla_found
+	    push bx ! push dx ! push si
+	    call mla_value
+	    pop si ! pop dx ! pop bx
+	    cmp cx,dx ! jae mla_next
+		mov dx,cx ! pop cx ! mov cx,ax
+		pop ax ! mov ax,bx
+		push ax ! push cx
+		cmp dx,0 ! je mla_found
+mla_next:   mov bx,m_link[bx]
+	    jmps mla_nmd
+mla_found:
+	pop cx ! pop ax
+	cmp ax,0 ! je mla_err
+	    mov bx,ax ! mov ax,cx
+	    jmp mla_makemau
+mla_err:
+	mov bx,0ffffh ! mov cx,e_no_memory
+mla_out:ret
+
+mla_value:
+;---------
+;	input:	BX = ML element Root
+;		SI = MPB in u_wrkseg
+;	output:	CX = value (0=perfect,0ffffh=no fit)
+;		AX = # of elements
+
+        xor bp,bp                           ; Func 129 repair, FMB, 1/20/84
+
+	push es ! mov es,u_wrkseg
+	sub ax,ax ! mov dx,0
+		; AX = # of partitions
+		; DX = total length so far
+	mov di,m_link[bx]
+	cmp di,0 ! je mlav_err
+		; we have a list
+	    cmp es:mpb_start[si],0 ! je mlav_next
+			;an absolute request
+		mov cx,m_start[di] ! add cx,(2*satlen)
+		cmp es:mpb_start[si],cx ! jb mlav_err
+			;it starts after our start
+		    add cx,m_length[di] ! sub cx,(2*satlen)
+		    cmp es:mpb_start[si],cx ! jae mlav_err
+
+                                              ; Func 129 repair, FMB, 1/20/84
+        mov bp,1                              ; On an absolute request, the
+        inc ax                                ; current available length within
+        mov dx,cx                             ; the partition was not calculated
+        sub dx, es:mpb_start[si]              ; correctly.
+        mov bx,di                             ;
+        mov di, m_link[bx]                    ;
+
+			                   ;this list satisfies ABS requirement
+mlav_next:  mov cx,es:mpb_max[si]
+	    cmp cx,dx ! jb mlav_chk
+mlav_add:	cmp ax,0 ! je mlav_ad1
+		    push ax
+		    mov ax,m_start[bx]
+		    add ax,m_length[bx]
+		    cmp ax,m_start[di] ! pop ax ! je mlav_ad1
+			jmps mlav_chkmin
+mlav_ad1:	inc ax ! add dx,m_length[di]
+		mov bx,di ! mov di,m_link[bx]
+		cmp di,0 ! jne mlav_next
+mlav_chkmin:	    mov cx,es:mpb_min[si]
+		    add cx,(2*satlen)
+		    cmp cx,dx ! jbe mlav_calc
+mlav_err:		mov cx,0ffffh ! sub ax,ax
+			pop es ! ret
+            
+mlav_chk:   
+            cmp bp,1 ! je mlav_calc            ; Func 129 repair, FMB, 1/20/84
+
+            add cx,(2*satlen)
+	    cmp cx,dx !  ja mlav_add
+
+mlav_calc:	; HERE IS WHERE WE GIVE THIS SET A VALUE.
+		; IT CAN SATIFY THE REQUEST.
+
+		; ALGORITHM:
+		; 	#partitions = #partitions + 1 if next
+		;		to contiquous memory
+		;	value = (abs(max-length) SHR 4) +
+		;		((#partitions-1) SHL 2)
+		; idea is that 1K = 1 paritition to avoid
+		; gobbling all of our small partitions.
+		; we deal with 256 byte memory units so we
+		; won't overflow a word.
+
+		; AX = # partitions
+		; DX = memory size
+ 
+	    push ax ! dec ax
+	    mov cl,2
+	    shl ax,cl
+	    mov cx,es:mpb_max[si]
+	    add cx,(2*satlen)
+
+;		If MAX memory is FFFF, SAT adjustment
+;		wraps around so force FFFF.
+
+	    cmp cx,(2*satlen) ! jae mlav_added
+		mov cx,0ffffH
+mlav_added:
+
+	    cmp cx,dx ! jbe mlav_ab
+		xchg dx,cx
+mlav_ab:    sub dx,cx ! mov cl,4 ! shr dx,cl
+	    add dx,ax ! mov cx,dx
+	    pop ax ! pop es ! ret
+
+mla_makemau:
+;-----------
+;	input:	BX = address of ML element Root
+;		AX = number of elements
+;	output:	BX = MAU address
+
+	cmp ax,1 ! jg mlam_getmd
+	    mov si,m_link[bx] ! mov cx,m_link[si]
+	    mov m_link[bx],cx ! mov bx,si
+	    sub cx,cx ! mov m_plist[bx],cx
+	    mov m_link[bx],cx
+	    jmp mla_initmau
+mlam_getmd:
+	push ax ! push bx
+	call getmd
+	mov di,bx ! pop bx ! pop ax
+	jcxz mlam_gotmd
+	    sub bx,bx ! ret
+mlam_gotmd:
+	mov m_link[di],0 ! mov m_length[di],0
+	mov si,m_link[bx] ! mov m_plist[di],si
+	mov cx,m_start[si] ! mov m_start[di],cx
+mlam_next:
+	mov cx,m_length[si] ! add m_length[di],cx
+	dec ax ! cmp ax,0 ! je mlam_nomore
+	    mov si,m_link[si] ! jmps mlam_next
+mlam_nomore:
+	push bx
+	mov bx,m_link[si]
+	mov m_link[si],0
+	pop si ! mov m_link[si],bx
+	mov bx,di ! sub cx,cx ! ;jmp mla_initmau
+
+mla_initmau:
+;----------
+;	input:	BX = address of MAU
+;	output:	BX = address of MAU
+;		CX = 0
+
+	mov dx,m_start[bx] ! mov cx,m_length[bx]
+	push cx ! push es ! mov es,dx ! sub ax,ax
+	mov di,ax ! mov cx,((32*satlen)/2)
+	rep stos ax ! pop es
+	pop cx ! mov ds,dx
+	mov byte ptr .0,31
+	sub cx,(2*satlen) ! add dx,(2*satlen)
+	mov si,satlen ! mov sat_start[si],dx
+	mov sat_length[si],cx ! mov sat_nall[si],0
+	mov ds,sysdat
+	sub cx,cx ! ret
+
+;============
+mlfree_entry:		; Free from Mem List
+;============
+;	input:	DX = MAU address
+;		BX = ML Root
+
+	mov si,dx
+	cmp m_plist[si],0 ! je mlf_freeone
+	    mov di,si
+	    mov si,m_plist[si]
+mlf_nmd:    cmp si,0 ! je mlf_endfree
+		push m_link[si] ! push bx ! push di
+		call ml_insert
+		pop di ! pop bx ! pop si ! jmps mlf_nmd
+mlf_endfree:
+	    mov bx,di ! call freemd
+	    jmps mlf_exit
+mlf_freeone:
+	call ml_insert
+mlf_exit:
+	sub bx,bx ! mov cx,bx ! ret
+
+ml_insert:
+;---------
+;	input:	SI = address of MD to insert
+;		BX = ML Root
+
+	mov di,m_link[bx]
+	cmp di,0 ! je mli_ins
+	    mov ax,m_start[di]
+	    cmp ax,m_start[si] ! ja mli_ins
+	    mov bx,di ! jmps ml_insert
+mli_ins:mov ax,m_link[bx] ! mov m_link[bx],si
+	mov m_link[si],ax
+	ret
+

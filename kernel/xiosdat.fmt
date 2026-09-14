@@ -1,0 +1,16 @@
+;*****************************************************
+;*
+;*	Concurrent CP/M XIOS Data Area
+;*
+;*****************************************************
+
+	DSEG
+
+org	0C0CH
+
+tick		rb	1
+				;see XIOS for format of the rest of the
+				;XIOS header, most of the variables
+				;are copied to the System Data Segment
+				;by GENSYS.
+

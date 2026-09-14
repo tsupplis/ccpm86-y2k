@@ -1,0 +1,2379 @@
+
+;************ bdos file system part 3 ************
+
+conv_rr:	;convert random record # 
+;-------
+	mov al,info_fcb+ranrec		;AL = fcb(ranrec(0))
+	mov dl,al
+	and dl,7fh			;record number
+	rcl al,1			;cy=lsb of extent#
+	mov al,info_fcb+ranrec+1	;AL = fcb(ranrec(1))
+	mov ch,al
+	rcl ch,1
+	and ch,11111b			;CH = extent #
+					;DL = record #
+	and al,11110000b
+	or al,info_fcb+ranrec+2
+	mov cl,4
+	rol al,cl
+	mov cl,ch
+	mov ch,al			;CH = mod#, CL = ext#
+	ret
+
+rseek:		;random access seek operation
+;-----
+;	fcb is assumed to address an active fcb
+;	(modnum has been set to 1100$0000b if previous bad seek)
+;	entry:	CL = true if read operation
+;		   = false if write operation
+;	exit:	Z flag set if successful
+
+	push cx				;save r/w flag (indexed on stack)
+	call conv_rr			;CH = mod #, CL = ext#, DL = record #
+
+	cmp byte ptr info_fcb+ranrec+2,3  ;r(3) field must
+					;be <= 3
+	mov bl,6			;zero flag, BL=6
+					;produce error 6,
+	jbe $+5				;seek past physical eod
+	  jmp seekerr			;random record out of range
+					;otherwise, high byte = 0
+	mov info_fcb+nxtrec,dl		;record number
+
+;	arrive here with CH=mod#, CL=ext#, SI=.fcb, rec stored
+;	the r/w flag is still stacked.	 compare fcb values
+
+	cmp fx_intrn,fxi99
+	je rseek3
+	call chk_inv_fcb
+	jz rseek3
+	  				;check module # first
+	  mov al,ch			;b=seek mod#
+					;could be overflow at eof,
+					;producing module# of 90h
+					;or 10h, so compare all
+					;but fwf
+	  sub al,info_fcb+modnum
+	  and al,3fh			;same modnum?
+	  jnz ranclose			; no
+	    mov al,info_fcb+extnum
+	    cmp al,cl
+	    jnz $+5
+	      jmp seekok1		;extents equal
+	    call compext
+	    jnz ranclose
+	      push cx
+	      call get_dir_ext
+	      pop cx
+	      cmp al,cl			;is dir_ext < new extent?
+	      jnb rseek2		;no
+	      test high_ext,80h		;is open mode unlocked?
+	      jnz rseek2		;yes
+		pop dx! push dx		;dl = read/write flag
+		inc dl			;is this a write fx?
+		jnz rseek2		;yes
+		  inc dl		;reset z flag
+		  pop dx		;discard read/write flag
+		  jmp set_lret1		;lret=1, reading unwritten data
+rseek2:
+	      mov info_fcb+extnum,cl	;fcb(ex) = new extent
+	      mov cl,al
+	      call restore_rc
+	      call set_rc
+	      jmps seekok1
+ranclose:
+	  push cx			;save seek ext# and mod#
+	  call close			;current extent closed
+	  pop cx			;recall ext# and mod#
+	  mov bl,3			;cannot close error #3
+	  mov al,lret
+	  inc al
+	  jz seekerr
+rseek3:
+	mov xdcnt,0ffffh		;reset xdcnt for make
+
+if BMPM
+	mov byte ptr sdcnt+1,0ffh
+endif
+
+	xchg info_fcb+extnum,cl		;fcb(extnum)=ext#
+	mov al,info_fcb+modnum
+	xchg ch,al
+	push cx				;save CL=extent and CH=module
+	and ch,40h			;copy file write flag
+	or al,ch
+	mov info_fcb+modnum,al		;fcb(modnum)=mod#
+	call open			;is the file present?
+	mov al,lret
+	inc al
+	jnz seekok			;open successful?
+					;cannot open file, read mode?
+	  mov bp,sp			;CL = r/w flag (=0ffh if read)
+	  mov cx,2[bp]			;everyone expects this
+					;item stacked
+	  mov bl,4			;seek to unwritten extent #4
+	  inc cl			;becomes 00 if read operation
+	  jz badseek			;error if read operation
+					;write, make new extent
+	  call make
+	  mov bl,5			;cannot create new extent #5
+	  mov al,lret
+	  inc al
+	  jz badseek			;no dir space
+					;file make successful
+
+if BMPM
+	  call fix_olist_item
+endif
+
+seekok:
+	pop cx				;discard ext and mod
+
+if BMPM
+	mov comp_fcb_cks,true
+endif
+if BCPM
+	call set_lsn
+endif
+
+seekok1:
+	pop cx				;discard r/w flag
+	xor al,al
+	jmp set_lret			;with Z flag set
+
+badseek:	;restore fcb(ext) and fcb(mod)
+	pop ax				;AL = extent, AH = module
+	mov info_fcb+extnum,al
+	mov info_fcb+modnum,ah
+seekerr:
+	pop cx				;discard r/w flag
+	mov lret,bl			;lret=#
+	or bl,bl			;Z flag reset
+	ret
+
+if BMPM
+
+test_disk_fcb:
+;-------------
+;	exit:	Z flag reset if file opened in unlock mode and
+;		  access of dir fcb was successful
+
+	test high_ext,80h		;was file opened in unlocked mode
+	jz ret13a			;no
+	test dont_close,0ffh		;return if dont_close false
+	jz ret13a
+	call close1			;fcb in memory
+test_disk_fcb1:
+	mov bx,offset lret
+	cmp b[bx],0ffh
+	jne not_err
+	  pop si			;discard return address
+	  mov al,11			;unallocated block verify error
+	  mov lock_shell,false		;in case called from check_rec
+	  jmp set_lret			;error - close operation unsuccessful
+not_err:
+	mov b[bx],0			;lret = 0
+	mov al,info_fcb+reccnt
+	mov rcount,al
+	xor al,al
+	mov dont_close,al		;dont_close = false
+	inc al				;successful operation, reset zero flag
+ret13a:	ret
+
+endif
+
+CHECK_NPRS:
+;----------
+;	DIR_CNT CONTAINS THE NUMBER OF 128 BYTE RECORDS
+;	TO TRANSFER DIRECTLY.  THIS ROUTINE SET DIR_CNT
+;	WHEN INITIATING A SEQUENCE OF DIRECT PHYSICAL I/O
+;	OPERATIONS.  DIR_CNT IS DECREMENTED EACH TIME CHECK_NPRS
+;	IS CALLED DURING SUCH A SEQUENCE.
+;	exit:	~C FLG & ~Z FLG - DIRECT PHYSICAL I/O OPERATION
+;		~C FLG &  Z FLG - INDIRECT(DEBLOCK) I/O OPERATION
+;		 C FLG		- NO PHYSICAL I/O OPERATION
+
+	MOV CH,blk_off			;CH = VRECORD & BLKMSK
+	MOV AL,DIR_CNT
+	CMP AL,2			;IS DIR_CNT > 1?
+	JC CHECK_NPR1			;NO
+	  DEC AL			;DIR_CNT = DIR_CNT - 1
+	  MOV DIR_CNT,AL		;we are in mid-multi sector i/o
+	  STC
+	  ret				;RETURN WITH C FLAG SET
+CHECK_NPR1:
+	MOV AL,PHYMSK			;CL = PHYMSK
+	MOV CL,AL
+	AND AL,CH			;AL = VRECORD & PHYMSK
+					;ARE WE IN MID-PHYSICAL RECORD?
+	JZ CHECK_NPR11			;NO
+CHECK_NPR1X:
+	  OR CL,CL			;IS PHYMSK = 0?
+	  JZ CHECK_NPR1Y		;YES
+	    XOR AL,AL			;RETURN WITH Z FLAG SET & C FLAG RESET
+	    RET
+CHECK_NPR1Y:
+	  OR AL,1			;RESET C & Z FLAGS
+	  RET
+CHECK_NPR11:
+	MOV DH,CL
+	not DH				;DH = ~ PHYMSK
+	MOV AL,MULT_NUM
+	CMP AL,2			;IS MULT_NUM < 2?
+	JC CHECK_NPR1X			;YES
+	TEST HIGH_EXT,80H		;WAS FILE OPENED IN UNLOCKED MODE?
+	JNZ CHECK_NPR1X			;YES
+	CMP FX_INTRN,FXI40		;DOES FX = F_WRITEZF?
+	JE CHECK_NPR1X			;YES
+	MOV BX,OFFSET VRECORD
+	MOV AH,[BX]			;AH = VRECORD
+	ADD AL,ah
+	CMP AL,80H
+	JC CHECK_NPR2
+	  MOV AL,80H
+CHECK_NPR2:				;AL = MIN(VRECORD + MULT_NUM,80H) = X
+	PUSH CX				;SAVE VRECORD & BLKMSK, PHYMSK
+	MOV B[BX],7FH			;VRECORD = 7F
+	PUSH BX! PUSH AX
+	MOV BL,AL			;BL = X
+	MOV AL,BLKMSK
+	MOV DL,AL
+	INC DL				;DL = BLKMSK + 1
+	not AL
+	AND AH,AL			;AH = VRECORD & ~BLKMSK
+	TEST RMF,0FFH			;READ FUNCTION?
+	JZ CHECK_NPR21			;NO
+	  MOV AL,RCOUNT
+	  AND AL,DH			;AL = RCOUNT & ~PHYMSK
+	  CMP AL,BL			;IS AL < X?
+	  JC CHECK_NPR23		;YES
+CHECK_NPR21:
+	MOV AL,BL			;AL = MIN(VRECORD + MULT_NUM,80H) = X
+CHECK_NPR23:
+	SUB AL,AH			;AL = AL - VRECORD & ~BLKMSK
+	CMP AL,DL			;IS AL < BLKMSK + 1?
+	JC CHECK_NPR9			;YES
+	  PUSH AX			;AL = MAX # OF RECORDS
+	  CALL DMPOSITION		;COMPUTE MAXIMUM DISK POSITION
+	  MOV CH,AL			;CH = MAX DISK POS
+	  MOV AL,DMINX			;AL = CURRENT DISK POS
+	  CMP AL,CH			;IS CURR POS = MAX POS?
+	  MOV DL,AL
+	  JZ CHECK_NPR5			;YES
+	    MOV CL,AL
+	    PUSH CX			;CL = CURR POS, CH = MAX POS
+	    MOV CH,0
+	    CALL GETDM			;BX = BLOCK NUMBER (CURR POS)
+CHECK_NPR4:
+	    PUSH BX
+	    INC CX			;CURR POS = CURR POS + 1
+	    CALL GETDM			;GET NEXT BLOCK(CURR POS)
+	    POP DX
+	    INC DX
+	    CMP BX,DX			;DOES CURR BLK = LAST BLK + 1?
+	    JZ CHECK_NPR4		;YES
+	    test rmf,0ffh		;write function?
+	    jnz check_npr45		; no
+	    or bx,bx! jnz check_npr45	;does curr blk = 0?
+	    cmp dx,maxall		;is last blk + 1 >= max alloc blk
+	    jae check_npr45		; yes
+	      push cx! push dx
+	      mov cx,dx
+	      call getallocbit
+	      pop bx! pop cx
+	      shr al,1! jnc check_npr4	;if blk not allocated it will be
+check_npr45:
+	    DEC CL			;CL = INDEX OF LAST SEQ BLK
+	    POP DX
+	    MOV AL,DH			;AL = MAX POS
+	    CMP AL,CL			;IS AL < LAST SEQ BLK POS
+	    JC CHECK_NPR5		;YES
+	      MOV AL,CL
+CHECK_NPR5:				;AL = LAST BLK POS
+	  SUB AL,DL			;AL = AL - STARTING POS
+	  MOV CH,AL
+	  INC CH			;CH = # OF CONSECUTIVE BLOCKS
+	  MOV AL,BLKMSK
+	  INC AL			;AL = BLKMSK + 1
+	  MUL CH			;AL = # OF CONSECUTIVE LOGICAL RECS
+	  POP CX			;CL = MAXIMUM # OF RECORDS
+	  XCHG AL,CL
+	  TEST RMF,0FFH			;READ FUNCTION?
+	  JZ CHECK_NPR8			;NO
+	    CMP AL,CL			;IS MAX < # OF CONS. RECS?
+	    JC CHECK_NPR9		;YES
+CHECK_NPR8:
+	  MOV AL,CL
+CHECK_NPR9:				;AL = # OF CONSECUTIVE RECS
+	POP CX
+	POP BX
+	MOV [BX],CH			;RESTORE VRECORD
+	POP CX
+	MOV DH,MULT_NUM
+	SUB AL,CH			;AL = AL - VRECORD & blkmsk
+	CMP AL,DH			;IS AL < MULT_NUM
+	JC CHECK_NPR10			;YES
+	  MOV AL,DH
+CHECK_NPR10:				;AL = # OF CONSECUTIVE RECS
+	not CL
+	AND AL,CL			;IF DIR_CNT = 0 THEN
+	JZ RET13B			;RETURN WITH Z FLAG SET, C FLAG RESET
+	MOV DIR_CNT,AL			;DIR_CNT = AL & ~PHYMSK
+	TEST RMF,0FFH			;READ FUNCTION?
+	JZ CHECK_NPR10X			;NO
+	  PUSH AX
+	  CALL flushx			;FLUSH BLOCKING/DEBLOCKING
+	  POP AX			;BUFFERS FOR DRIVE
+CHECK_NPR10X:
+	MOV CL,PHYSHF
+	SHR AL,CL			;AL = # OF CONSECUTIVE PHYSICAL RECS
+	mov mult_sec,al			;save multisector count for r/w
+	OR AL,1				;RETURN WITH C AND Z FLAGS RESET
+RET13B: RET
+
+diskread:	;enter here for sequential and random disk reads
+;--------
+	call tst_inv_fcb		;verify fcb has not been flagged
+	mov al,true			;as invalid
+	mov rmf,al			;read mode flag =
+					;true (open$reel)
+					;read the next record from
+					;the current fcb
+
+if BMPM
+	mov dont_close,al
+endif
+
+	call getfcb			;sets parameters for the read
+disk_read0:
+	mov al,vrecord
+	cmp al,rcount			;vrecord-rcount
+					;skip if rcount > vrecord
+	jb recordok
+
+if BMPM
+;	if fcb was opened in unlocked mode, check the directory fcb
+;	to make sure another process has not allocated a block to
+;	the fcb since this process opened the fcb
+
+	  call test_disk_fcb		;jump back to disk_read0 if dont_close
+	  jnz disk_read0		;true, file opened in unlocked mode,
+					;and access of dir fcb successful
+					;dont_close set to false
+	  mov al,vrecord
+endif
+					;not enough records in extent
+					;record count must be 128
+					;to continue
+	  cmp al,128			;vrecord = 128?
+	  jnz diskeof			;skip if vrecord<>128
+	  call openreel			;go to next extent if so
+					;now check for open ok
+	  cmp lret,0			;stop at eof
+	  jnz diskeof
+recordok:				;fcb addresses a record to read
+	call index			;error 2 if reading
+					;unwritten data
+					;(returns 1 to be compatible
+					;with 1.4)
+					;arecord=0000?
+if BMPM
+	jnz recordok1
+	  call test_disk_fcb		;jump back to disk_read0 if dont_close
+	  jnz disk_read0		;true, file opened in unlocked mode,
+					;and access of dir fcb successful
+endif
+	  jz diskeof
+recordok1:				;record has been allocated, read it
+
+if BMPM
+	call test_lock			;check if record locked by another
+endif
+	call atran			;arecord now a disk address
+	CALL CHECK_NPRS
+	JC RECORDOK2
+	  JNZ $+5
+	    JMP READ_DEBLOCK
+	  CALL SETDATA
+	  call seek			;to proper track,sector
+	  call rdbuff			;to dma address
+RECORDOK2:
+	jmp setfcb			;replace parameter
+
+diskeof:
+	jmp set_lret1			;lret = 1
+	;ret
+
+init_wzf:	;F_WRITEZF physical record  initialization routine
+;--------
+
+	MOV AL,PHYMSK
+	INC AL
+	XOR AH,AH
+	PUSH AX				;AX = PHYMSK + 1
+	xchg al,ah
+	shr ax,1			;times 128
+	mov cx,ax			;CX = # OF BYTES IN PHY RECORD
+
+	MOV di,DIR_BCBA
+	sub di,12
+FILL00:
+	mov di,12[di]
+	cmp word ptr 12[di],0		;check if last bcb
+	JNZ FILL00			;BX = OLDEST DIRECTORY BCB
+
+	MOV b[di],0ffh			;BCB(0) = 0FFH, DISCARD BCB
+	mov di,10[di]
+	mov cur_dma,di
+	mov cur_dma_seg,ds
+	XOR AL,AL			;ZERO PHYSICAL RECORD BUFFER
+	REP STOS AL
+	pop ax
+	ret
+
+diskwrite:	;enter here for sequential and random disk writes
+;---------
+	mov rmf,false			;read mode flag
+					;write record to currently
+					;selected file
+	call checkwrite			;in case write protected
+
+	mov al,info_fcb+modnum
+	rcl al,1! not al
+	test xfcb_read_only,al		;read/only error if xfcb_read_only true
+	mov ah,3			;xfcb_read_only true if file is
+	jz $+5				;password protected in write mode
+					;and password was not supplied
+					;when the file was opened.
+jmp_set_aret:
+	  jmp set_aret
+
+	test high_ext,40h		;read/only error if fcb opened
+	jnz jmp_set_aret		;in read/only mode
+
+	mov bx,offset info_fcb		;bx = .fcb(0)
+	call ckrofile			;may be a read-only file
+
+	call tst_inv_fcb		;test for valid fcb
+	call update_stamp
+	call getfcb			;to set local parameters
+	mov al,vrecord
+	cmp al,lstrec+1			;vrecord-128
+					;skip if vrecord > lstrec
+					;vrecord = 128, cannot open
+					;next extent
+	jb dskwr0
+	call openreel			;try to open next extent
+	test lret,true
+	jz dskwr0
+	  ret
+dskwr0:
+
+if BMPM
+	mov dont_close,true
+					;if file is opened unlocked,
+	call test_lock			; verify record is not locked
+					; by another process
+disk_write1:
+
+endif
+	call index
+	JZ DISK_WRITE2
+	  mov cl,0			;marked as normal write
+					;operation for wrbuff
+	  jmps dskwr1
+disk_write2:
+
+if BMPM
+	call test_disk_fcb		;jump back to disk_write1 if
+					;dont_close is true, file was opened
+					;in unlocked mode, and access of
+					;dir fcb was successful
+
+	jnz disk_write1
+endif
+	
+;	not allocated:
+;	the argument to getblock is the starting
+;	position for the disk search, and should be
+;	the last allocated block for this file, or
+;	the value 0 if no space has been allocated
+
+	call dmposition
+	mov dminx,al			;save for later
+	xor cx,cx			;may use block zero
+	or al,al
+	jz nopblock			;skip if no previous block
+					;previous block exists at a
+	  mov cl,al
+	  dec cx
+	  call getdm			;previous block # to bx
+	  mov cx,bx			;cx=prev block#
+nopblock:
+					;cx = 0, or previous block #
+	call getblock			;block # to bx
+					;arrive with block# or zero
+	or bx,bx
+	jnz blockok
+					;cannot find block to allocate
+	  mov al,2
+	  jmp set_lret			;lret=2
+blockok:
+
+if BMPM
+	mov comp_fcb_cks,true		;must recompute fcb checksum
+endif
+
+	mov arecord,bx			;bx contains allocated block #
+
+	mov dx,bx			;place unallocated block in
+	call ua_setup			; list for pre read check
+
+					;block number in dx preserved
+	mov bx,offset info_fcb+dskmap	;bx=.fcb(diskmap)
+	cmp single,0			;set flags for single byte dm
+	mov al,dminx			;recall dm index
+	mov ah,0
+	jz allocwd			;skip if allocating word
+					;allocating a byte value
+	  add bx,ax
+	  mov [bx],dl			;single byte alloc
+	  jmps dskwru			;to continue
+allocwd:
+	add bx,ax			;allocate a word value
+	add bx,ax			;bx=.fcb(dminx*2)
+	mov [bx],dx			;double wd
+	inc bx
+dskwru:			;disk write to previously unallocated block
+	mov cl,2			;marked as unallocated write
+dskwr1:			;continue the write operation of no allocation error
+			;c = 0 if normal write, 2 if to prev unalloc block
+	mov wflag,cl			;save the write flag
+	call atran			;arecord set
+diskwr10:
+	cmp fx_intrn,fxi40		;check random with 0 fill
+	jnz dskw11
+
+;	this is random write with zero fill
+
+	cmp wflag,2			;check for new allocation
+	jnz dskw11			;old allocation
+
+;	new alloction for random with zero fill
+
+	MOV WFLAG,0			;RESET WRITE FLAG
+	PUSH arecord			;SAVE ARECORD
+	call init_wzf
+	push ax				;AX = phymsk + 1
+	mov cl,blkmsk			;set high water mark for
+	call ua_preread			; pre read check
+	MOV ax,ARECORD1
+	MOV CL,2			;SET WRITE FLAG
+FILL2:
+	MOV ARECORD,ax
+	PUSH CX
+	call discard_data
+	CALL SEEK
+	POP CX
+	CALL WRBUFF
+	MOV ax,ARECORD			;ARECORD = ARECORD + PHYMSK + 1
+	POP bx
+	PUSH bx
+	ADD ax,bx
+	MOV bl,BLKMSK			;END OF BLOCK?
+	AND bl,al
+	MOV CL,0
+	JNZ FILL2			;NO
+	POP BX
+	POP ARECORD			;RESTORE ARECORD
+dskw11:
+	CALL CHECK_NPRS
+	JC DONT_WRITE
+	  JNZ WRITE
+	    MOV AH,2
+	    CALL DEBLOCK_DTA
+	    jmps write_done
+WRITE:
+	  CALL SETDATA
+	  call seek			;to proper file position
+	  call discard_data
+	  mov cl,blk_off		;set high water mark for
+	  call ua_preread		; preread check
+	  MOV CL,WFLAG			;(cl=2 if new block,0 if not)
+					;set wflag to zero if blk_off
+	  cmp blk_off,0			;does not specify 1st record of
+	  JZ WRITE0			;new block
+	    MOV CL,0
+WRITE0:
+	  call wrbuff			;written to disk
+					;inc rec count if rcount <= vrecord
+	  jmps write_done
+dont_write:
+	call discard_data		;discard existing block for phys write
+write_done:
+	mov al,vrecord
+	mov bx,offset rcount
+	cmp al,[bx]			;vrecord-rcount
+	jb dskwr2
+					;rcount <= vrecord
+	  mov [bx],al
+	  inc b[bx]			;rcount = vrecord+1
+
+if BMPM
+;disabling extention of reccnt to block size for unlocked files
+	  test high_ext,00h
+	  jz write1
+
+;	for unlocked file
+;	  rcount = vrecord & (~ blkmsk) + blkmsk + 1
+
+	    mov ch,blkmsk
+	    mov cl,ch
+	    not cl
+	    inc ch
+	    and al,cl
+	    add al,ch
+	    mov [bx],al
+write1:
+
+endif
+
+	  mov wflag,2			;mark as record count
+					;incremented
+dskwr2:
+	cmp wflag,2			;wflag=2 if new block or new record #
+	jnz noupdate
+	  and info_fcb+modnum,not fwfmsk
+
+if BMPM
+	  test high_ext,80h		;is file open mode unlocked?
+	  jz dskwr2a
+	    mov al,[bx]
+	    mov info_fcb+reccnt,al	;restore fcb(rcount)
+	    cmp mult_cnt,1
+	    jne dskwr2a
+	      call close
+	      call test_disk_fcb1
+dskwr2a:
+
+endif
+
+noupdate:
+	call getmodnum			;set file write flag if reset
+	and al,40h
+	jnz dskwr3
+	  or b[bx],40h
+	  and info_fcb+modnum,not fwfmsk  ;reset fcb write flag to ensure
+					;t3' gets reset by the close function
+dskwr3:
+	jmp setfcb			;replace parameters
+					;ret
+
+compute_rr:	;compute random record position for getfilesize/setrandom
+;----------
+;	entry:	BX = offset of fcb
+;		DX = index into fcb to pick record no. from
+;	exit:	AL,CX = random record number
+;		BX = offset of fcb
+
+	xchg bx,dx
+	add bx,dx
+					;dx=.buf(dptr) or .fcb(0),
+					;bx=.f(nxtrec/reccnt)
+	mov cl,[bx]			;pick up record no.
+	xor ch,ch			;cx = 0000 0000 ?rrr rrrr
+	mov bx,dx
+	mov ah,extnum[bx]
+	shr ax,1
+	and ax,0f80h
+	add cx,ax			;cx = 000? eeee errrr rrrr
+	mov al,modnum[bx]		;al = xxmm mmmm
+	and al,3fh
+	mov ah,16
+	mul ah				;ax = 0000 00mm mmmm 0000
+	add ch,al
+					;cx = mmmm eeee errr rrrr
+	mov al,0
+	adc al,ah			;al = 0000 0?mm
+ret19:	ret
+
+compare_rr:	;compare dir to fcb random records
+;----------
+;	entry:	AL,CX = directory random record #
+;	exit:	C flag set
+;		BX = .fcb(rndrec)
+
+	mov bx,offset info_fcb+ranrec
+	cmp al,2[bx]! jne ret19
+	cmp cx,[bx]			;carry if .fcb(ranrec) >
+	ret				;directory
+
+selectdisk:
+;----------
+;	select the disk drive given in AL, and fill
+;	the base addresses curtrka - alloca, then fill
+;	the values of the disk parameter block
+;	entry:	AL = disk to select
+;	exit:	C flag set if no error
+
+	push dx
+	mov cl,al			;current disk# to CL
+					;lsb of DL = 0 if not yet
+	mov al,io_seldsk		;logged in
+	call xiosif			;BX filled by call
+	pop dx				;BX = 0000 if error,
+	or bx,bx			;otherwise disk headers
+	jz ret19			;rz - carry flag reset
+	inc bx! inc bx
+	mov cdrmaxa,bx
+	inc bx! inc bx
+	mov drvlbla,bx			;media flag = drv lbl + 1
+	add bx,4			;lsn_add = drvlbl + 2
+	mov si,bx
+	MOV di,offset dpbaddr		;SI= source for move, DI=dest
+	mov cx,addlist			;addlist filled
+	rep movsb			;now fill the disk
+	mov si,dpbaddr			;parameter block
+
+if PCMODE
+	lodsw
+	cmp ax,0FFFFh ! jne cpm_format	;if format is PC-DOS
+	  add dpbaddr,(pclist + 2 - dpblist) ;DPBADDR -> CPM DPB
+	  mov di,offset nfats
+	  mov cx,pclist
+	  rep movsb			;copy extended DPB to local area
+	  test dl,1 ! jnz loggedin	;if disk is not logged in
+	    push ax
+	    call get_fat		;read FAT into hash table area
+	    pop ax
+	    or bx,bx ! jz ret4
+loggedin:
+	  mov al,1			; PC-DOS media format
+	  jmps sel_exit
+cpm_format:
+	mov di,offset sectpt		;DI is destination
+	stosw
+	mov cx,dpblist-2
+	rep movsb			;copy in CP/M DPB
+	xor al,al			; CP/M media format
+sel_exit:
+	mov media_format,al
+else
+	mov di,offset sectpt		;DI is destination
+	mov cx,dpblist
+	rep movsb			;copy in CP/M DPB
+endif
+					;set single/double map mode
+	mov al,byte ptr maxall+1	;largest allocation number
+	or al,al
+	jz retselect			;if high order of maxall not
+	  mov al,1			;zero then use double disk map
+retselect:
+	dec al
+	mov single,al			;true if single disk map mode
+	stc				;select disk function ok
+ret4:
+	ret
+
+if PCMODE
+
+get_fat:
+;-------
+;	Exit:	BX = 0 if no fats could be read
+
+	mov ax,fatadd			;AX = phys record offset of first FAT
+	mov cx,nfats			;get number of FATs for error retries
+get_fat1:
+	push ax ! push cx
+	xor dx,dx			;convert FAT record offset to
+	div sectpt			;sectors and tracks for I/O system
+	mov track,ax
+	mov sector,dx
+	mov al,byte ptr nfatrecs
+	mov mult_sec,al			;multi sector count = # FAT records
+	mov ax,hash_seg
+	mov cur_dma_seg,ax		;read FAT into hash table area
+	mov cur_dma,0
+	mov al,IO_READ
+	call rwxiosif			;call I/O system to read FAT
+	mov bx,1
+	pop cx ! pop dx
+	or al,al ! jz get_fat2		;if an error occured during the read
+	  mov ax,nfatrecs		; try reading the next FAT
+	  add ax,dx
+	  loop get_fat1
+	  xor bx,bx			;could'nt read any of the FAT's
+get_fat2:
+	ret
+
+update_fat:
+;----------
+	mov ax,fatadd			;AX = save physical record offset
+					; of first FAT
+	mov cx,nfats			;get number of FATs to update
+	xor bx,bx
+update_fat1:
+	push ax ! push bx ! push cx
+	xor dx,dx			;convert FAT record offset to
+	div sectpt			;sectors and tracks for I/O system
+	mov track,ax
+	mov sector,dx
+	mov al,byte ptr nfatrecs
+	mov mult_sec,al			;multi sector count = # FAT records
+	mov ax,hash_seg
+	mov cur_dma_seg,ax		;write FAT in hash table area
+	mov cur_dma,0
+	mov al,IO_WRITE
+	call rwxiosif			;call I/O system to write FAT
+	pop cx ! pop bx
+	or bx,ax			;save error code
+	pop ax
+	add ax,nfatrecs			;write the next FAT
+	loop update_fat1
+
+	mov al,bl
+	mov ah,true
+	jmp diocomp
+endif
+
+disk_select:
+;-----------
+;	entry:	AL = disk to select
+;	exit:	Z flag set if drive logged in
+
+	mov adrive,al
+disk_select1:
+	mov curdsk,al
+	mov dx,dlog
+	call test_vector		;dl = 1 if drive logged in
+	push dx				;save it for test below, send to seldsk
+	call selectdisk
+	pop bx				;recall dlog vector
+	jnc select0			;carry set if select ok
+	dec bl				;is the disk logged in?
+	ret
+
+tmp_select:
+;----------
+;	entry:	DL = drive to select (0-f)
+
+	mov seldsk,dl
+
+curselect:
+;---------
+	mov al,seldsk
+	cmp al,curdsk
+	jne select			;don't select if seldsk = curdsk
+	  inc al! jz select0
+ret19a:	  ret
+
+SELECT:		;select disk in info_fcb for subsequent input or output ops
+;------
+	cmp al,16 ! jb sel0
+select0:
+	  jmp selerror
+sel0:
+	call disk_select
+	jz ret19a			;rz
+					;return if bit is set
+if PCMODE
+	cmp media_format,0
+	jne sel_pc
+	  call initialize		;disk not logged in,
+	  jmps sel1
+sel_pc:
+	call initialize_pc
+sel1:					;set bit and initialize
+
+else
+	call initialize			;disk not logged in,
+endif
+
+	mov bx,offset dlog
+	call setcdisk			;dlog=set$cdisk(dlog)
+	cmp chksiz,8000h
+	je select2			;drive is permanent
+	  mov bx,offset rlog
+	  call setcdisk			;rlog=setcdisk(rlog)
+select2:
+	ret
+
+reselectx:
+;---------
+	xor al,al
+	mov high_ext,al
+	mov xfcb_read_only,al
+	jmps reselect1
+
+reselect:
+;--------
+	mov cx,807fh			;ch = 80h, cl = 7fh
+	mov bx,offset info_fcb+f7
+	mov al,[bx]			;if fcb(7) & 80h
+	and al,ch			;then xfcb_read_only = 80h
+	mov xfcb_read_only,al		;else xfcb_read_only = 00h
+	and [bx],cl			;fcb(7) = fcb(7) & 7fh
+	inc bx
+	mov al,[bx]
+	and al,cl			;fcb(8) = fcb(8) & 7fh
+	cmp al,[bx]
+	mov [bx],al			;if fcb(8) & 80h
+	mov al,60h			;then high_ext = 60h
+	jnz reselect0
+	  mov al,4[bx]			;else high_ext = fcb(12) & e0h
+	  and al,0e0h
+reselect0:
+	mov high_ext,al
+	call clr_ext
+reselect1:	;check current fcb to see if reselection necessary
+	mov resel,true			;mark possible reselect
+	mov al,info_fcb			;drive select code
+	mov fcbdsk,al			;save drive
+	and al,00011111b		;non zero is auto drive select
+	dec al				;drive code normalized to
+					;0...30, or 255
+	cmp al,0ffh
+	jz noselect			;auto select function,
+	  mov seldsk,al			;save seldsk
+noselect:
+	call curselect
+					;set user code
+	mov al,usrcode			;0...31
+	mov info_fcb,al
+noselect0:
+	CALL TST_LOG_FXS		;IS FX = 15,17,22,23,30?
+	JNZ noselect1
+	  mov rd_dir_flag,0f0h		; yes - must read directory to
+noselect1:
+	call check_media		;chk media change on current disk
+	;jmps check_all_media		;chk media change on other disks
+
+check_all_media:
+;---------------
+;	This routine checks all logged-in drives for
+;	a set DPH media flag and pending buffers. It reads
+;	the directory for these drives to verify the media
+;	has not changed. If the media has changed the drive
+;	gets reset (but not relogged-in).
+
+	xor al,al
+	xchg media_flag,al		;reset SCB media flag
+	test al,al			;was SCB media flag set
+	jz ret20			; no
+	mov bx,dlog			;test logged-in drives only
+	mov al,16
+chk_am1:
+	dec al
+	shl bx,1! jnc chk_am5		;is drive logged-in
+	  push ax! push bx		; yes
+	  call disk_select		;get DPH
+	  mov bx,dat_bcba
+	  mov bx,[bx]
+chk_am2:
+	  or bx,bx! jz chk_am4		;end of bcb list?
+	    test byte ptr 4[bx],0ffh	; no - is buffer pending
+	    jnz chk_am3			;  yes
+	      mov bx,12[bx]		;get next bcb
+	      jmps chk_am2
+chk_am3:
+	    call check_media		;write pending, chk media change
+chk_am4:
+	  pop bx! pop ax
+chk_am5:
+	or al,al! jnz chk_am1
+	jmp curselect
+
+check_media:	;chk media if DPH media flag set
+;-----------
+	mov bx,drvlbla
+	xor al,al
+	xchg 1[bx],al			;RESET MEDIA FLAG
+	or al,al			;was media flag set
+	JZ RET20			;NO
+					;DISCARD DIRECTORY BUFFERS
+	CALL discard_dir		;READ DIRECTORY TO TEST FOR MEDIA
+	CALL SETENDDIR			;CHANGE
+	push dcnt			;save dcnt incase media hasnt changed
+check_media1:
+	MOV CL,FALSE
+	CALL RDIR
+	xor al,al			;reset relog flag
+	xchg relog,al
+	test al,al			;HAS CHECKSUM ERROR BEEN DETECTED?
+	jz check_media2			; no
+	  cmp fx_intrn,fxi48		;is func# = flush buffer
+	  jz check_media3		; yes
+	  mov al,adrive			;is flush to another drive ?
+	  cmp al,seldsk
+	  jnz check_media3		; yes
+	  pop dcnt			;restore dcnt
+	  call drv_relog
+	  jmp chk_exit_fxs
+check_media2:
+	CALL COMPCDR			;HAS DIR HIGH WATER MARK BEEN REACHED
+	jc check_media1			; no
+check_media3:
+	pop dcnt			;restore dcnt media has not changed
+ret20:	ret
+
+copy_dma_in_8:
+;-------------
+	mov cl,8
+
+copy_dma_in:	;copy (cl) bytes from user's
+;-----------
+;	entry:	CL = number of bytes to copy
+
+	mov si,dma_ofst			;dma to common_dma
+	mov di,offset common_dma
+	push ds
+	mov ds,dma_seg
+	xor ch,ch
+	rep movs al,al
+	pop ds
+	ret
+
+get_dir_mode:
+;------------
+;	exit:	AL = directory label data byte
+
+	mov bx,drvlbla			;return dir lbl data byte in al
+	mov al,[bx]
+	ret
+
+get_xfcb:	;get xfcb (search mode)
+;--------
+;	exit:	Z flag set if no xfcb exists
+;		BX = .xfcb(pwmode)
+;		DX = .xfcb(0)
+;		AL = pwmode + 1
+
+	mov bx,offset info_fcb
+	mov al,[bx]
+	push ax
+	or b[bx],10h			;fcb(0) = fcb(0) | 10h
+	call search_ext			;returns with zero flag set if
+	pop ax				; xfcb not found
+	mov info_fcb,al			;restore fcb(0)
+	mov lret,0			;zero lret
+	jnz get_xfcb1
+	  ret				;xfcb not found - al = 0, zflag set
+get_xfcb1:
+	call get_dptra			;get directory pointer
+	mov dx,bx			;DX = .directory_xfcb(0)
+	add bx,extnum
+	mov al,[bx]
+	and al,0e0h
+	or al,1				;al = xfcb(extnum) & 0e0h + 1
+	ret				;xfcb found, zero flag reset
+
+init_xfcb:
+;---------
+	call setcdr			;may have extended the directory
+	mov cx,1014h			;ch = 16, cl = 20
+init_xfcb0:				;ch = fcb(0) logical or mask
+					;cl = zero count
+	push cx
+	call get_dptra			;does not use cx
+	mov si,offset info_fcb		;xfcb(0) = fcb(0) | ch
+	lodsb
+	or al,ch
+	mov [bx],al
+	inc bx
+	mov cl,11
+	mov dx,si
+	call move			;xfcb(1..11) = fcb(1..11)
+	mov dx,si			;dx = .fcb(12)
+	mov bx,di			;bx = .xfcb(12)
+	pop cx				;cl contains # of remaining bytes
+	sub ch,ch			;of xfcb to zero
+	xor al,al			;move sets di to addr of next char
+	rep stos al
+	ret
+
+chk_pw_error:
+;------------
+	mov byte ptr xdcnt+1,0		;disable special searches
+	mov si,offset info_fcb
+	mov di,offset save_fcb		;save info_fcb
+	mov cx,16
+	rep movsb
+	call get_dptra
+	mov si,bx! inc si
+	mov di,offset info_fcb+1	;info_fcb = dir_xfcb
+	mov cx,11
+	rep movsb
+	xor al,al! stos al		;fcb(extnum) = 0
+	inc di!stos al			;fcb(modnum) = 0
+	lods al				;save password mode
+	mov pw_mode,al
+	call search_name		;does fcb(ext=0,mod=0) exist
+	jz chk_pwe2			; no
+	  call get_dtba8		;does sfcb exist
+	  or al,al! jnz chk_pwe1	; no
+	    mov si,offset pw_mode
+	    mov ch,[si]			;CH = xfcb.pwmode
+	    mov al,[bx]			;AL = sfcb.pwmode
+	    mov [si],al			;pw_mode = sfcb.pwmode
+	    or al,al! jz chk_pwe2	;is sfcb password mode nonzero
+	    xor al,ch! and al,0e0h	; yes
+	    jz chk_pwe1			;do password modes match
+	    call get_xfcb		; no - update xfcb
+	    jz chk_pwe1			;error - no xfcb
+	    mov al,pw_mode
+	    mov [bx],al			;xfcb.pwmode = sfcb.pwmode
+	    call nowrite
+	    jnz chk_pwe1
+	    call wrdir
+chk_pwe1:
+	  call chk_pwe3
+	  mov al,fx_intrn		;is func# = open or make?
+	  cmp al,fxi15! je ret20a
+	  cmp al,fxi22! je ret20a
+pw_error:				; no
+	  mov ah,7			;password error
+	  jmp set_aret
+chk_pwe2:
+	mov pw_mode,0
+	call nowrite			;delete unused xfcb
+	jnz chk_pwe3
+	call get_xfcb			;get xfcb
+	jz chk_pwe3			; it should have been there
+	  or info_fcb,10h
+	  call delete11			;delete xfcb
+chk_pwe3:
+	mov si,offset save_fcb
+	mov di,offset info_fcb		;restore info_fcb
+	mov cx,16
+	rep movsb
+ret20a:	ret
+
+chk_password:
+;------------
+	call get_dir_mode		;al = dir lbl data byte
+	and al,80h
+	jz ret20a			;bit 0 on => passwords active
+	call get_xfcb			;al = xfcb password mode | 01h
+	jz ret20a			;zero set if no xfcb found
+
+cmp_pw:		;compare passwords
+;------
+;	entry:	BX = .xfcb(12)
+;	exit:	Z flag set if password is valid
+
+	inc bx
+	mov ch,[bx]			;fcb(13) = xfcb checksum
+	or ch,ch
+	jnz cmp_pw2			;jump if xfcb(13) ~= 0
+	  mov si,bx			;save bx
+	  add si,3			;because xfcb checksum is zero
+					;test for null password
+	  mov cl,9			;null passwords are all blanks and/or
+cmp_pw1:				;zeros that sum to zero
+	  lodsb				;any password matches a null password
+	  dec cl
+	  jz ret20a			;password is all blanks and/or zeros
+	  or al,al
+	  jz cmp_pw1
+	  cmp al,20h
+	  jz cmp_pw1			;password contains a value other
+					;than blank or zero
+cmp_pw2:				;bx = .xfcb(13)
+	lea si,10[bx]
+	lea dx,3[bx]			;dx = .xfcb(16)
+	mov bx,offset common_dma
+	mov cl,8
+	std				;lods decrements si
+cmp_pw3:
+	lods al
+	xor al,ch			;exclusive or password byte with cks
+	cmp al,[bx]
+	jnz cmp_pw4			;password mismatch
+	  inc bx
+	  dec cl
+	  jnz cmp_pw3
+	  cld
+	  ret				;password matches
+cmp_pw4:
+	cld
+	mov bx,offset df_password	;compare xfcb password to default pw
+	mov cl,8			;bx = .default pw, dx = .xfcb password
+	jmp compare
+
+chk_xfcb_password:
+;-----------------
+;	exit:	BX = .xfcb(12)
+
+	call get_xfcb1			;access xfcb in directory buffer
+					;al = (xfcb(ext) & e0h) | 1
+chk_xfcb_password1:
+	push bx				;bx = .xfcb(ex)
+	call cmp_pw			;check password
+	pop bx
+	ret				;return with bx = .xfcb(ex)
+
+set_pw:		;set password in xfcb
+;------
+;	entry:	BX = .xfcb(12)
+;		SI = .password in common dma area
+
+	mov cx,8			;ch = 0, cl = 8
+	lea di,11[bx]			;di = .xfcb(23)
+set_pw0:
+	sub ah,ah			;zero null password flag
+set_pw1:
+	lodsb
+	mov [di],al			;copy password char to xfcb
+	or al,al			;is password char zero?
+	jz set_pw2			;yes
+	cmp al,20h			;is password char blank?
+	je set_pw2			;yes
+	  inc ah			;password is not null
+set_pw2:
+	add ch,al			;add password char to xfcb chksum
+	dec di
+	dec cl
+	jnz set_pw1
+	or ah,ch			;if (ah | ch) = 0 then password is null
+	jnz set_pw3
+	  mov [bx],ah			;xfcb(ex) = 0, zero password mode
+set_pw3:
+	inc di
+	mov cl,8
+set_pw4:
+	xor [di],ch			;encrypt password chars in xfcb
+	inc di
+	dec cl
+	jnz set_pw4
+	mov 1[bx],ch			;bx + 1 = .xfcb(13)
+	ret				;ch = xfcb pasword checksum
+
+get_dtba8:	;get password mode address
+;---------
+	mov ch,8
+
+GET_DTBA:	;GET STAMP ADDRESS IN SFCB
+;--------
+;	entry:	CH = offset into sfcb
+;	exit:	BX = address of offset into sfcb
+
+	MOV AL,3			;RET WITH AL ~= 0 IF STAMP CANNOT
+	mov ah,byte ptr dcnt		;BE MADE
+	and ah,dskmsk
+	CMP AL,AH			;IS LRET = 3? (SFCB POSITION)
+	JZ RET21A			;YES
+	mov bx,buffa
+	add bx,96
+	MOV AL,[BX]
+	SUB AL,21H			;DOES DIR FCB(3) BEGIN WITH 21H?
+	JNZ RET21A			;NO
+	MOV AL,ah
+	MOV CL,10
+	MUL CL				;AL = LRET*10
+	INC AL				;     + 1
+	ADD AL,CH			;     + CH
+	ADD BX,AX			;RETURN WITH BX = STAMP ADDR
+	xor al,al
+RET21A:
+	RET
+
+QDIRFCB1:
+;--------
+;	exit:	Z flag reset if fcb is first dir fcb of file
+;		CL = preserved
+
+	mov bx,offset info_fcb+extnum	;IS FCB IN 1ST DIR FCB OF FILE?
+	MOV AL,[BX]
+	mov ah,extmsk
+	not ah
+	and al,ah
+	and al,01fh
+	JNZ RET21A			;NO
+	TEST BYTE PTR 2[BX],3FH		;IS FCB(MOD) = 0?
+	RET				;Z FLAG RESET IF NOT
+
+QSTAMP:
+;------
+;	exit:	Z flag reset if stamp is requested
+
+	CALL QDIRFCB1			;IS FCB IN 1ST DIR FCB OF FILE?
+	JNZ RET21A			;NO
+QSTAMP1:
+	call get_dir_mode		;ARE REQUIRED DIR LBL OPTIONS SET?
+	and al,cl! jz $+5		; NO
+	  JMP NOWRITE			; yes - VERIFY DISK NOT READ/ONLY
+	inc al				;return z flag reset
+	ret
+
+stamp1:
+;------
+	MOV CH,0
+	jmps stamp3
+
+stamp2:
+;------
+	MOV CH,4
+
+stamp3:
+;------
+;	entry:	CH = stamp offset
+
+	CALL GET_DTBA			;GET STAMP ADDRESS
+	OR AL,AL
+	JNZ ret21a			;NON-ZERO - CAN'T STAMP
+STAMP4:
+	mov dx,offset tod
+stamp45:
+	MOV CL,4
+	PUSH BX! PUSH DX
+	CALL COMPARE			;COMPARE EXISTING STAMP TO NEW STAMP
+	POP DX! POP BX
+	jz ret21a			;EQUAL - SKIP CALL TO WRDIR
+	MOV CL,4
+	call move
+	jmp wrdir
+
+STAMP5:		;DIR LBL STAMP ENTRY
+;------
+;	entry:	CX = stamp offset
+
+	CALL GET_DPTRA
+	ADD BX,CX
+	MOV AX,OFFSET FUNCRET
+	PUSH AX
+	jmps STAMP4
+
+update_stamp:
+;------------
+	mov cl,20h			;is update stamp requested
+	call qstamp1			; on drive
+	jnz ret21a			; no
+	test info_fcb+modnum,40h	;has file been written to since
+	jnz ret21a			; it was opened
+	mov ah,info_fcb+extnum		; yes - search for first
+	mov al,info_fcb+modnum		;  dir fcb
+	push ax				;save extnum and modnum
+	call search_1_name
+	jz $+5				;perform update stamp
+	  call stamp2			; if 1st dir fcb found
+	mov lret,0
+	pop ax				;restore extnum and modnum
+	mov info_fcb+extnum,ah
+	mov info_fcb+modnum,al
+	ret
+
+
+if BMPM
+
+pack_sdcnt:	;packed_dcnt = sdcnt
+;----------
+	mov ax,sdcnt
+	mov word ptr packed_dcnt,ax
+	mov byte ptr packed_dcnt+2,0
+	ret
+
+;
+;	olist element:
+;	    +------+------+------+------+------+------+
+;	00h |    LINK     | ATTS |        DCNT        |
+;	    +------+------+------+------+------+------+
+;	06h |   PDADDR    |   OPNCNT    |
+;	    +------+------+------+------+
+;
+;	link = 0 -> end of list
+;
+;	atts - 8x - open in locked mode
+;	       4x - open in unlocked mode
+;	       2x - open in read/only mode
+;	       1x - PC media function 116 update stamp flag
+;	       xN - drive code (0-f)
+;
+;	dcnt = packed sdcnt+sdblk
+;	pdaddr = process descriptor addr
+;	opncnt = # of open calls - # of close calls
+;		 olist item freed by close when opncnt = 0
+;
+;	llist element:
+;	    +------+------+------+------+------+------+
+;	00h |    LINK     | DRV  |       RECORD       |
+;	    +------+------+------+------+------+------+
+;	06h |     CNT     | .OLISTITEM  |
+;	    +------+------+------+------+
+;
+;	link = 0 -> end of list
+;
+;	drive - 0x - Prevent Other Reads + Writes
+;		8x - Prevent All Writes - allow reads if PAW locked
+;		xN - drive code (0-f)
+;
+;	record = starting record number of locked records
+;	count = # of locked records starting at record
+;	.olist_item = address of file's olist item
+;
+search_olist:
+;------------
+	mov bx,offset open_root! jmps search_listo
+
+search_llist:
+;------------
+	mov bx,offset lock_root! jmps search_listo
+
+searchn_list:
+;------------
+	mov bx,cur_pos
+
+search_listo:
+;------------
+	mov prv_pos,bx
+
+;search_olist, search_llist, searchn_list conventions
+;
+;	entry:	CH = 0 -> return next item
+;		CH = 1 -> search for matching drive
+;		CH = 3 -> search for matching dcnt
+;		CH = 5 -> search for matching dcnt + pdaddr
+;
+;	exit:	Z flag set if found and
+;		  prv_pos -> previous list element
+;		  cur_pos -> found list element
+;		  BX = cur_pos
+;		else prv_pos -> list element to insert after
+;
+;	olist and llist are maintained in drive order
+;
+srch_list1:
+	mov bx,[bx]
+	or bx,bx! jnz srch_list2	;if (end of list)
+	  or al,1			; return( NZ )
+	  ret
+srch_list2:
+	or ch,ch! je srch_list5
+	  mov cl,2[bx]! and cl,0fh
+	  mov si,offset curdsk
+	  lods al
+	  cmp al,cl! jne srch_list4	;do drive # match?
+	    cmp ch,1! je srch_list5	; is search for matching drive only?
+					;SI = offset packed_dcnt
+	    mov cl,ch
+	    push cx
+	    xor al,al
+	    xchg al,5[bx]		;save f1' env switch
+					;set dcnt+2 to zero
+	    xor ch,ch			;do items match?
+	    lea di,3[bx]		;DI = offset item.dcnt
+	    repe cmps al,al
+	    mov 5[bx],al		;restore f1' env switch
+	    pop cx
+	    jz srch_list5
+srch_list3:
+	    mov prv_pos,bx		; no - check next item
+	    jmps srch_list1
+srch_list4:
+	  jae srch_list3		;no need to continue if curdsk < drv
+srch_list5:
+	mov cur_pos,bx
+	ret
+
+delete_item:
+;-----------
+;	entry:	BX = item to be deleted
+
+	pushf! cli
+	mov si,[bx]
+	mov di,prv_pos
+	mov cur_pos,di			;prv_pos.link = delete_item.link
+	mov [di],si
+	mov si,free_root
+	mov free_root,bx		;delete_item.link = previous free_root
+	mov [bx],si
+	popf
+	mov cl,2[bx]! and cl,0fh	;get drive of deleted entry
+	mov bx,offset open_root
+chk_open1:
+	mov bx,[bx]			;do any open files
+	or bx,bx! jz chk_open2		; exist on drive
+	  mov al,2[bx]! and al,0fh
+	  cmp al,cl
+	  jne chk_open1
+	  ret
+chk_open2:
+	mov bx,offset open_vector	; no - zero drive bit
+	jmps remove_drive1		; in open file vector
+	;ret
+
+remove_drive:
+;------------
+	mov cl,curdsk
+
+remove_drive1:	;reset bit in vector at bx
+;-------------
+;	entry:	BX = address of vector
+;		CL = bit in vector to reset
+
+	mov ax,1! shl ax,cl
+	not ax! and [bx],ax
+	ret
+
+remove_locks:
+;------------
+;	entry:	BX = offset of olist_item
+;	exit:	BX = preserved
+
+	test byte ptr 2[bx],40h! jz retl25
+	push prv_pos
+	push bx
+	mov ax,offset lock_root
+	mov cur_pos,ax
+remove_lock1:
+	mov ch,0
+	call searchn_list
+	jnz remove_lock2
+	pop dx! push dx
+	cmp 8[bx],dx
+	jnz remove_lock1
+	call delete_item
+	jmps remove_lock1
+remove_lock2:
+;
+;	**3.1M**	Record locking patch
+;
+;	remove item from list
+;
+	pop	ax			;AX = .olist
+	push	ax
+	mov	bx,offset name_root	;BX = .name_root
+dl0:
+				;for(;;)
+				; {
+	mov	si,[bx]		;  SI = BX-> link		1st item
+	cmp	2[si],ax	;  if (2[si] == .olist)
+	jnz	dl1		;  {
+	mov	di,[si]		;   DI = SI->link		2nd item
+	mov	ax,[di]		;				link
+	mov	[bx],ax		;   BX->link = DI-> link	new name_root
+	mov	ax,free_root
+	mov	[di],ax		;   DI-> = free_root		old free root
+	mov	free_root,si	;   free_root = SI		new free root
+	jmps	dl2
+;
+dl1:
+	mov	bx,[si]		; BX-> next item
+	jmps	dl0		; }
+dl2:
+;
+;	**3.1M**	End of record locking patch
+;
+	pop bx! pop prv_pos
+retl25:
+	ret
+
+compare_pds:
+;-----------
+;	exit:	Z flag set if proccess descriptors match
+
+	mov ax,pdaddr
+	cmp 6[bx],ax
+	ret
+
+tst_olist:
+;---------
+	mov chk_olist_flag,false
+	jmps chk_olist0
+
+chk_olist:
+;---------
+	mov chk_olist_flag,true
+chk_olist0:
+	mov ax,dcnt
+	mov sdcnt,ax
+	call pack_sdcnt! mov ch,3
+	call search_olist! jnz retl25
+
+;	if in compatibility mode f1', r/o mode is the default open mode
+;	otherwise default is locked mode.  branch to openx06 if the open
+;	mode is not the default mode.
+
+	call get_cmp_mode
+	rol al,1! mov al,2[bx]
+	jnb chk_olist01
+	  rol al,1! rol al,1
+chk_olist01:
+	rol al,1! jnb chk_olist05
+	  call compare_pds
+	  jnz chk_olist05
+
+;	verify another process does not have the file open when
+;	the default open mode is r/o as a result of compatibility
+;	attribute f1' = 1.
+
+	    call get_cmp_mode
+	    rol al,1! jnb chk_olist02
+	      mov ch,3! call searchn_list
+	      jz chk_olist05
+	      mov ch,3! call search_olist
+chk_olist02:
+	    test chk_olist_flag,true! jz retl1
+
+;	check to see if the lock list item is extended and if the interface
+;	attribute requesting that the lock item continue to be extended is
+;	set. if so, control is returned to the routine calling chk$olist and
+;	the lock item is retained.  otherwise, the lock item is deleted and
+;	pd_cnt is incremented unless an extended lock was placed on the file.
+
+	    cmp byte ptr 9[bx],0ffh
+	    jne chk_olist07
+	    test attributes,080h
+	    js retl1
+	    jmp delete_item
+
+chk_olist05:
+	jmp openx06
+
+chk_olist07:
+
+	call delete_item
+
+inc_pdcnt:
+;---------
+	mov al,pd_cnt
+	and al,0f0h
+chk_olist1:
+	add al,16! jz chk_olist1
+	mov pd_cnt,al
+retl1:	ret
+
+pr_term:
+;-------
+	mov ax,offset open_root
+	mov cur_pos,ax
+pr_term1:
+	mov ch,0
+	call searchn_list
+	jnz pr_term2
+	  mov ax,pdaddr
+	  cmp 6[bx],ax
+	  jnz pr_term1
+	  call remove_locks
+	  call delete_item
+	  jmps pr_term1
+pr_term2:
+	call flush0
+retl2:	ret
+
+flush_files:
+;-----------
+	mov al,true
+	xchg flushed,al
+	test al,al! jnz retl2
+flush_file0:
+	mov ax,offset open_root
+	mov cur_pos,ax
+flush_file1:
+	mov ch,1
+	call searchn_list! jnz retl2
+	call remove_locks
+	call delete_item
+	jmps flush_file1
+
+free_files:
+;----------
+;	free_mode = 1 - remove curdsk files for process
+;		    0 - remove all files for process
+
+	mov ax,offset open_root
+	mov cur_pos,ax
+free_files1:
+	mov ch,free_mode
+	call searchn_list
+	jnz retl2
+	mov ax,pdaddr
+	cmp 6[bx],ax
+	jnz free_files1
+	cmp word ptr 3[bx],0ffffh! jnz free_files2
+	cmp byte ptr 5[bx],0ffh! jz free_files3
+free_files2:
+	mov incr_pdcnt,true
+free_files3:
+	call remove_locks
+	call delete_item
+	jmps free_files1
+
+create_item:
+;-----------
+;	exit:	BX = offset of new item if successful
+;		Z flag set if no free items
+
+	mov bx,free_root
+	or bx,bx! je retl2
+	mov cur_pos,bx			;free_root = free_root.link
+	mov si,[bx]! mov free_root,si
+	mov si,prv_pos! mov di,[si]	;create_item.link = prv_pos.link
+	mov [bx],di			;prv_pos.link = .create_item
+	mov [si],bx
+	ret
+
+create_olist_item:
+;-----------------
+	mov ch,1! call search_olist
+	call create_item
+create_olist_item1:
+	mov al,curdsk
+	or al,attributes
+	mov 2[bx],al			; set drive and attributes
+	mov si,offset packed_dcnt
+	lea di,3[bx]
+	mov cx,5
+	rep movsb			;copy dcnt and pd_addr
+	xor ax,ax! stosw		;open_cnt = 0;
+	mov cl,curdsk
+	inc ax! shl ax,cl		;set curdsk bit in
+	or open_vector,ax		; open file vector
+	ret
+
+create_llist_item:
+;-----------------
+;	exit:	BX = llist item address
+;		DI = offset l_item.rec
+
+	mov ch,1! call search_llist
+	call create_item
+	lea di,3[bx]
+	mov ax,file_id
+	mov 8[bx],ax
+	ret
+
+count_opens:
+;-----------
+	mov open_cnt,0
+	mov ax,offset open_root
+	mov cur_pos,ax
+count_open1:
+	mov ch,0! call searchn_list
+	jnz count_open2
+	  mov ax,pdaddr
+	  cmp 6[bx],ax
+	  jnz count_open1
+	  inc open_cnt! jmps count_open1
+count_open2:
+	mov al,open_cnt
+	sub al,open_max
+retl3:
+	ret
+
+check_free0:
+check_free:	;check for required # of entries in free list
+;----------
+;	entry:	DL = required # of free entries
+
+	mov bx,offset free_root
+	xor dh,dh			;for (free_entries = 0;
+check_free1:
+	mov bx,[bx]
+	or bx,bx! jz check_free2	; (next_free_item ~= end_of_flist) &&
+	  inc dh			; (free_entries < required_#);
+	  cmp dh,dl! jb check_free1	; free_entries++);
+retl4:
+	  ret
+check_free2:
+	pop bx				;remove return address
+	mov al,14			;(end_of_flist) return(error -
+	jmp set_lret			; no room in sys lock list);
+
+move_arecord:	;packed_dcnt = arecord
+;------------
+	mov dx,offset arecord
+	mov bx,offset packed_dcnt
+	mov cl,3! jmp move
+
+chk_rec:
+;-------
+;	exit:	Z flag reset if unwritten data
+
+	call index
+	jz chk_rec1			;error - unwritten data
+	mov al,vrecord
+	cmp al,rcount
+	jnb chk_rec1
+	  xor al,al
+	  ret
+chk_rec1:
+	or al,1
+	ret
+
+check_rec:
+;---------
+	mov lock_sp,sp
+	mov lock_shell,true
+
+if PCMODE
+	cmp media_format,0
+	je $+5
+	jmp pc_chkrec
+endif
+
+	mov cl,true			;assume read operation for rseek
+	call rseek
+	mov lock_shell,false
+	call getfcb
+	test lret,0ffh
+	jnz retl6
+
+;	verify that the block has not been allocated by another
+;	process before returning error code 1 (reading unwritten data)
+
+	call chk_rec
+	jz retl6
+	mov dont_close,true
+	mov lock_shell,true
+	call test_disk_fcb
+	mov lock_shell,false
+	jz lock_err1			;error - unwritten data
+	  call chk_rec
+	  jnz lock_err1
+lock_err:
+;--------
+retl6:
+	  ret
+lock_err1:
+	jmp set_lret1
+
+cmp_recs:	;compare l_item.rec(+l_item.cnt) and rand_rec(+mult_cnt)
+;--------
+;	entry:	SI = l_item.rec (1st record #) offset
+;		DI = rand_rec   (2nd record #) offset
+;		CL = 00h - no counts added
+;		   = 01h - add mult_cnt to rand_rec
+;		   = 02h - add l_item.cnt to l_item.rec
+;	exit:	Z,C flags set
+;		SI,DI = preserved
+
+	mov bl,[si]! mov ax,1[si]	;AX,BL = l_item.rec
+	mov bh,[di]! mov dx,1[di]	;DX,BH = rand_rec
+	test cl,02h! jz cmp_rec1
+	  add bl,3[si]
+	  adc ax,0			;AX,BL = l_item.rec + l_item.cnt
+cmp_rec1:
+	test cl,01h! jz cmp_rec2
+	  add bh,mult_cnt
+	  adc dx,0			;DX,BH = rand_rec + mult_cnt
+cmp_rec2:
+	cmp ax,dx! jne cmp_rec3
+	  cmp bl,bh
+cmp_rec3:
+	ret
+
+srch_llist:	;search lock list for matching item
+;----------
+;	exit:	AL = 0ffh - end of llist
+;		   = 0feh - incompatable lock type
+;		   = 001h - complete overlap
+;		   = 002h - subset overlap
+;		   = 004h - pre partial overlap
+;		   = 008h - post partial overlap
+;		BX = cur_pos  if AL ~= 0ffh
+;		DI = o_item.pdaddr  if AL ~= 0ffh
+
+	mov ch,1! call searchn_list	;search for matching drive
+	jz srch_l1			;while(not_end_of_llist) and
+	  mov al,0ffh
+	  ret
+srch_l1:
+	mov di,file_id			; if (file_id.dcnt == o_item.dcnt);
+	mov cx,3
+	mov si,8[bx]			;  SI = o_item
+	add si,cx! add di,cx
+	repe cmpsb
+	jne srch_llist
+
+	lea si,3[bx]			;  SI = l_item.rec
+	mov di,offset info_fcb+ranrec
+
+	;check for no overlap
+	mov cl,01h! call cmp_recs	;if (l_item.rec >=
+	jae srch_llist			;    rand_rec + mult_cnt) or
+	mov cl,02h! call cmp_recs	;   (l_item.rec + cnt <= rand_rec)
+	jbe srch_llist			; no_olap - search for next l_item
+
+	;check for complete overlap
+	mov cl,00h! call cmp_recs	;else if (l_item.rec >= rand_rec)
+	jnae srch_l3
+	  mov cl,03h! call cmp_recs	; if (l_item.rec + cnt <=
+	  jnbe srch_l2a			;     rand_rec + mult_cnt)
+	    mov al,01h			;  srch_ret = complete_olap;
+	    jmps srch_l4
+srch_l2a:				; else ;(l_item.rec + cnt >
+	  mov al,04h			;       rand_rec + mult_cnt)
+	  jmps srch_l4			;  srch_ret = pre_part_olap;
+srch_l3:
+	;check for subset overlap
+	mov cl,03h			;else ;(l_item.rec < rand_rec)
+	call cmp_recs			; if (l_item.rec + cnt >
+	jna srch_l3a			;     rand_rec + mult_cnt)
+	  mov al,02h			;  srch_ret = subset_olap;
+	  jmps srch_l4
+srch_l3a:				; else ;(l_item.rec + cnt <=
+					;        rand_rec + mult_cnt)
+	mov al,08h			;  srch_ret = post_part_olap;
+srch_l4:
+	;check for incompatable lock type
+	mov bx,cur_pos			;BX = l_item;
+	mov si,8[bx]			;SI = o_item;
+	mov di,6[si]			;DI = o_item.pd_addr
+	cmp pdaddr,di			;if (o_item.pd_addr == pd_addr)
+	je srch_l7			; return(srch_ret);
+
+	test attributes,80h
+	jz srch_l6			;if (l_item.attrib ~= paw_lock) or
+	test byte ptr 2[bx],80h
+	jnz srch_l7			;   (request_type ~= paw_lock)
+srch_l6:
+	mov al,0feh			; return(incompatable_lock_type);
+srch_l7:
+	ret
+;
+;
+;	**3.1M** Patch for record locking
+;
+chk_name:
+	mov	al,6[si]		;
+	cmp	al,curdsk		;does SI ->drive = curdsk ?
+	jnz	cn2a			;no
+;	cmp	media_format,0		;PC media ?
+;	jz	cn2			;no
+;	mov	ax,4[si]		;is file in same directory - .chdblk
+;	mov	bx,hdsaddr		;
+;	or	bx,bx
+;	jz	cn1
+;	mov	bx,6[bx]
+;cn1:
+;	cmp	ax,bx
+;	jnz	cn2a			;no
+;cn2:
+	lea	di,7[si]		;do first 3 chars pf name match
+	mov	bx,offset info_fcb+1
+	mov	cx,3
+	call	namecmp			;
+	jnz	cn2a			;no
+	mov	cx,8
+	mov	dx,si			;does rest of name match
+	mov	si,[si]			; SI -> item2
+	lea	di,2[si]		; DI -> olist item
+	call	namecmp
+	jnz	cn3			;no
+;
+;name has matched
+;
+	mov	bx,dx			; BX -> item1
+	mov	ax,2[bx]		; AX = file_id = .olist
+	mov	file_id,ax		; set file id
+	mov	es,uda_save
+	mov	u_nameitem,bx		;save name item addr in UDA
+	push	ds
+	pop	es
+	ret
+;
+cn2a:
+	mov	si,[si]		; SI -> item2
+cn3:
+	mov	si,[si]		;SI now points to next file is and name
+	ret
+;
+cn4:
+	mov	bx,dx
+	ret
+;
+namecmp:
+	mov	al,[di]
+	xor	al,[bx]
+	inc	bx
+	inc	di
+	and	al,7fh
+	loopz	namecmp
+	ret
+;
+;	**3.1M** End of patch for record locking
+;
+test_lock:	;check llist for records with an incompatable lock type
+;---------
+	test high_ext,80h		;was file opened in unlocked mode?
+	jz retl7			; no
+;
+;	**3.1*** Record locking patch
+;
+	cmp	file_id,0		;is file_id zero
+	jnz	gf3			;no
+	mov	es,uda_save		
+	mov	si,u_nameitem		;is UDA nameitem addr zero
+;	mov	es,ds
+	push	ds
+	pop	es
+	or	si,si			;no
+	jz	gf0
+	call	chk_name		;does it match FCB
+	jz	gf3			;yes
+gf0:
+	mov	si,name_root		;no search name list
+gf1:
+	or	si,si
+	jnz	gf2
+	pop	bx
+	mov	al,0bh
+	jmp	set_lret
+gf2:
+	call	chk_name
+	jz	gf3
+	jmps	gf1
+gf3:
+;
+;	**3.1M** End of record locking patch
+;
+	cmp fx_intrn,fxi22
+	jnb rand_op
+	  call func36			;set random record #
+rand_op:
+	mov ax,offset lock_root
+	mov cur_pos,ax
+test_lock1:
+	push word ptr mult_cnt
+	mov mult_cnt,1
+	call srch_llist			;while(not_end_of_llist);
+	pop word ptr mult_cnt
+	cmp al,0ffh! jne test_lock2
+retl7:
+	  ret				; return(no errors)
+test_lock2:
+	cmp al,0feh			; if (incompatable_lock_type)
+	je test_lock3			;  return(error)
+	  test rmf,true
+	  jnz test_lock1		; if (write) and
+	  mov bx,cur_pos
+	  test byte ptr 2[bx],80h	;    (l_item.attrib == paw_lock)
+	  jz test_lock1
+test_lock3:
+	pop bx				;  remove return address
+	mov al,8			;  return(error -
+	jmp set_lret			;  locked by an other proccess);
+
+lock:		;record lock or unlock
+;----
+	mov cl,2
+	call copy_dma_in
+	call get_atts			;get & clear atts f5' - f8'
+	call check_fcb
+	test high_ext,80h		;if (open mode ~= unlocked)
+	jz retl7			; yes - return ok
+
+	mov bx,word ptr common_dma
+	mov ax,pdaddr
+	cmp 6[bx],ax! jz lock01		;if (olist.pd_addr ~= pdaddr)
+	  mov al,13! jmp set_lret	; yes - invalid file id
+lock01:
+	mov file_id,bx
+
+	test lock_unlock,true		;if (~lock_unlock)
+	jnz lock01a
+	  test attributes,80h		; if (attributes && 80h)
+	  jz lock01a
+	    jmp remove_locks		;  remove all locks
+lock01a:
+
+	mov al,info_fcb+ranrec		;if (fcb(ranrec) > 3ffffh)
+	mov bx,word ptr info_fcb+ranrec+1
+	cmp bh,4			; return with lret = 6
+	jae lock01b
+	mov ah,mult_cnt
+	dec ah
+	add al,ah			;if fcb(ranrec)+mult_cnt > 3ffffh
+	adc bx,0			; return with lret = 6
+	cmp bh,4
+	jb lock01c
+lock01b:
+	mov lret,6			;error - random record #
+	ret				; out of range
+lock01c:
+	;mov olap_type,0		;olap_type = no_olap;
+
+	; check llist for records with an incompatable lock type
+	mov ax,offset lock_root
+	mov cur_pos,ax
+lock02a:
+	call srch_llist			;while(not_end_of_llist);
+	cmp al,0ffh! je lock04a
+	  cmp al,0feh! jne lock03a	; if (incompatable_lock_type)
+	    test lock_unlock,true	;  yes - if (lock)
+	    jz lock02a
+	    mov al,8! jmp set_lret	;   yes - return(error -
+					;   locked by an other proccess);
+lock03a:				; else
+	  cmp pdaddr,di			; if (o_item.pdaddr == pdaddr)
+	  jne lock02a
+	  or olap_type,al		;  olap_type |= llist_ret;
+	  jmps lock02a
+lock04a:
+	;determine number of lock entries required by overlap type
+	mov bx,offset required_table	;CS over ride on table in const area
+	mov al,olap_type
+	xlat required_table		;AL = required_table[olap_type];
+	test lock_unlock,true
+	jnz lock05a			;if (unlock) && 
+	or al,al! jz lock05a		;   (required_# ~= 0)
+	  dec al			; required_#--;
+lock05a:
+	;check if max entries / proccess will be exceeded
+	mov dx,file_id
+	mov cur_pos,offset lock_root
+	xor ah,ah			;lock_cnt = 0;
+count_lock1:
+	mov ch,0
+	push ax! push dx
+	call searchn_list		;get next llist item
+	pop dx! pop ax
+	jnz count_lock2			;while(not_end_of_llist)
+	  cmp 8[bx],dx
+	  jnz count_lock1		; if (l_item.olist == file_id)
+	  inc ah			;  lock_cnt++;
+	  jmps count_lock1
+count_lock2:
+	mov dl,al			;DL = required #, for check_free
+	add al,ah! jb lock02		;if (lock_max <
+	cmp lock_max,al! jae lock05	;   (lock_cnt + required_#))
+lock02:
+	  mov al,12! jmp set_lret	; return(error - lock limit exceeded);
+lock05:
+	;check for required # of entries in free list
+;
+;	3.1M patch for deleting lock list item after all items used
+;
+;
+;	call check_free
+;
+
+	;check for record in file if required
+	test lock_unlock,true
+	jz lock4			;if (lock) &&
+;
+	call check_free			;check for items only if locking
+;
+;	end of 3.1M patch
+;
+	test attributes,40h		; (lock_type == rec_required_in_file)
+	jnz lock4
+	  mov ah,mult_cnt
+lock2:					;for (i = 0; i < mult_cnt; i++);
+	  push ax
+	  call check_rec		; check_for_record(rand_rec + i);
+	  pop ax
+	  test lret,0ffh		; if (record_not_in_file)
+	  jz $+5
+	    jmp reset_rr		;  return(error - unwritten data);
+	  dec ah! jz lock4
+	    call incr_rr! jmps lock2
+lock4:
+	call reset_rr
+
+	;remove over lapping records from lock list
+	test olap_type,00Fh		;if (olap_type ~= no_olap)
+	jnz $+5
+	jmp lock08a
+	  mov ax,offset lock_root
+	  mov cur_pos,ax
+lock06a:
+	  call srch_llist
+	  cmp al,0ffh! jne $+5		; while(not_end_of_llist);
+	  jmp lock08a
+	  cmp pdaddr,di			; if (o_item.pdaddr == pdaddr)
+	  jne lock06a
+	  test al,01h			;  if (llist_ret && complete_olap)
+	  jz lock07a
+	    call delete_item		;   delete(cur_item);
+	    jmps lock06a
+lock07a:				;  else
+	  test al,04h			;  if (llist_ret && pre_part_olap)
+	  jz lock07b
+	    mov ch,3[bx]		;   l_item.cnt = (l_item.rec+cnt) -
+	    add ch,6[bx]		;                (rand_rec+mult_cnt);
+	    mov cl,info_fcb+ranrec	;   CH = low(l_item.rec + l_item.cnt);
+	    mov ax,word ptr info_fcb+ranrec+1
+	    add cl,mult_cnt
+	    adc ax,0			;   AX,CL = rand_rec + mult_cnt
+	    sub ch,cl
+	    mov 6[bx],ch		;   store l_item.cnt
+
+	    mov 3[bx],cl		;   l_item.rec = rand_rec + mult_cnt;
+	    mov 4[bx],ax		;   store l_item.rec
+	    jmps lock06a
+lock07b:				;  else
+	  test al,08h			;  if (llist_ret && post_part_olap)
+	  jz lock07c
+	    mov cl,info_fcb+ranrec	;   l_item.cnt = rand_rec-l_item.rec;
+	    sub cl,3[bx]		;   CL = low(rand_rec - l_item.rec);
+	    mov 6[bx],cl		;   store l_item.cnt
+	    jmps lock06a
+lock07c:				;  else ;(llist_ret && subset_olap)
+	  push bx			;   save current item address
+	  call create_llist_item	;   create new llist item
+	  pop si
+	  mov al,2[si]! mov 2[bx],al	;   set attributes and drive
+	  mov cl,info_fcb+ranrec	;   rec = (rand_rec + mult_cnt)
+	  mov ax,word ptr info_fcb+ranrec+1
+	  add cl,mult_cnt
+	  adc ax,0			;   AX,CL = rand_rec + mult_cnt
+	  mov 3[bx],cl
+	  mov 4[bx],ax			;   store new l_item.rec
+
+	  mov ch,3[si]! add ch,6[si]	;   cnt = (l_item + cnt) -
+	  sub ch,cl			;         (rand_rec+mult_cnt)
+	  mov 6[bx],ch			;   store new l_item.cnt
+
+	  mov cl,info_fcb+ranrec	;   l_item.cnt = rand_rec -
+	  sub cl,3[si]			;                l_item.rec;
+	  mov 6[si],cl			;   store l_item.cnt
+	  jmp lock06a
+lock08a:				; end of while
+	test lock_unlock,true		;if (lock)
+	jz lock09a
+	  call create_llist_item	; create(rand_rec,mult_cnt);
+	  mov al,curdsk
+	  or al,attributes
+	  mov 2[bx],al			; set drive and attributes
+	  mov si,offset info_fcb+ranrec
+	  mov cx,3
+	  rep movsb			; copy record #
+	  mov al,mult_cnt
+	  mov 6[bx],al			; l_item.cnt = mult_cnt;
+lock09a:
+	ret
+
+fix_olist_item:
+;--------------
+	mov ax,xdcnt
+	cmp ax,sdcnt		; is xdcnt < sdcnt?
+	jae retl8		; no
+	;yes - update olist entries
+	call swap
+	mov ax,xdcnt
+	mov sdcnt,ax
+	mov ax,offset open_root
+	mov cur_pos,ax
+	;find file's olist entries & change dcnt values
+fix_ol1:
+	call swap
+	call pack_sdcnt
+	call swap
+	mov ch,3
+	call searchn_list! jnz retl8
+;		update olist item with new dcnt value
+	push bx! call pack_sdcnt! pop bx
+	add bx,3
+	mov dx,offset packed_dcnt
+	mov cl,3
+	call move
+	jmps fix_ol1
+
+diskreset:
+;---------
+;	exit:	Z flag reset if TLOG has been setup
+
+	xor ax,ax
+	mov ntlog,ax
+	mov set_ro_flag,al
+	mov bx,info
+intrnl_disk_reset:
+	cmp open_root,0
+	jz retl8
+	mov al,curdsk! push ax
+	mov ch,0
+dskrst1:
+	shr bx,1! jb dskrst3
+dskrst2:
+	  inc ch
+	  cmp bx,0! jnz dskrst1
+	  pop ax! mov curdsk,al
+	  mov bx,ntlog
+	  or tlog,bx
+	  inc al
+retl8:
+	  ret
+dskrst3:
+	push cx! push bx
+	mov curdsk,ch! mov cl,ch
+	mov dx,tlog
+	call test_vector1! push dx
+	mov dx,rlog
+	call test_vector1! push dx
+	mov dx,rodsk
+	call test_vector1! pop bx
+	or bl,set_ro_flag
+	or bl,dl! pop dx
+	or bl,dl! mov check_disk,bl
+	mov bx,offset open_root
+	mov cur_pos,bx
+dskrst4:
+	mov ch,1
+	call searchn_list! jnz dskrst6
+	test check_disk,true
+	jz dskrst5
+	push bx
+	call compare_pds! jz dskrst45
+	pop dx
+	xor al,al! jmps dskrst6
+dskrst45:
+	mov bx,offset ntlog
+	call setcdisk
+	pop bx! jmps dskrst4
+dskrst5:
+	mov bx,offset info
+	call remove_drive
+	or al,1
+dskrst6:
+	pop bx! pop cx
+	jz $+5
+	  jmp dskrst2
+
+;	error - olist item exists for another process
+;		on a removeable or read/only drive to be reset
+;		or any kind of drive if function is write protect disk
+
+	pop ax! mov curdsk,al
+	cmp error_mode,0ffh
+	je dskrst7
+	  mov err_drv,ch
+	  mov bx,dx! mov ax,6[bx]
+	  mov err_pd_addr,ax
+	  mov err_type,0ffh
+dskrst7:
+	pop bx! mov aret,0ffffh
+	ret
+endif
+if BCPM
+
+chk_reset:
+;---------
+;	exit:	AX = accumulated vector of drives to not be reset
+
+	xor ax,ax
+	push es
+	mov es,tlr
+chk_rst0:
+	cmp p_status,ps_term		;if process environment status
+	je chk_rst1			; is <> terminated
+	  or ax,p_alc_vec		; OR in processes alloc block vector
+chk_rst1:
+	mov cx,p_thread			;CX = next process environment address
+	mov es,cx
+	or cx,cx! jnz chk_rst0		;check next process if not zero
+
+	pop es
+	ret
+
+chk_drv:
+;-------
+;	exit: Z flag set if file is being written on CURDSK
+
+	call chk_reset
+	not ax! mov dx,ax
+	jmp test_vector
+endif
+
+;********** end bdos file system part 3 **********
+

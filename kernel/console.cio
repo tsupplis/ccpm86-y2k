@@ -1,0 +1,449 @@
+;*****************************************************
+;*
+;*	Character I/O ownership routines
+;*
+;*****************************************************
+
+;===============
+lstattach_entry:
+;===============
+	xor cx,cx			;unconditional attach code
+	jmps lcb_verify
+
+;===============
+clstattch_entry:
+;===============
+	mov cx,0ffffh			;conditional attach code
+
+lcb_verify:
+;----------
+	push cx
+	mov si,u_lstccb			;U_LSTCCB=0 if not yet initialized
+	test si,si ! jnz lcb_ok
+	  call getlcbadr
+	  mov u_lstccb,si
+lcb_ok:
+	pop cx				;restore attach code
+	jmps cioattach
+
+;===============
+conattach_entry:
+;===============
+	xor cx,cx			;unconditional attach code
+	jmps ccb_verify
+
+;===============
+cconattch_entry:
+;===============
+	mov cx,0ffffh			;conditional attach code
+ccb_verify:
+	push cx
+	mov si,u_conccb
+	test si,si ! jnz ccb_ok
+	  call getccbadr
+	  mov u_conccb,si
+ccb_ok:
+	pop cx			;conditional attach if 0ffffh
+	;jmps cioattach
+
+;=========
+cioattach:		;NOTE: PIN does attaches also for ^P
+;=========
+;	Attach calling process to default ciodev.
+;	if ciodev is being used, sleep on c_queue
+;	until another process detaches from device
+;	and calling process is next in queue.
+;	input:  SI = CCB address of device
+;		DI = offset of dev number in PD
+;		CX = 0ffffh if conditional
+
+	mov ax,rlr ! mov bx,ax
+		; BX = PD addr
+		; SI = CCB addr
+		; CX = Condition Flag
+	pushf ! cli
+	cmp bx,c_attach[si] ! je ca_ret		;we already own it
+	    cmp c_attach[si],0 ! je ca_atch	;nobody owns it, we'll take it
+		jcxz ca_sleep			;somebody else owns it
+		    popf ! mov bx,0ffffh	;or it is a mimic list (0ffffh)
+		    mov cx,e_no_attach ! ret	;- no attach in either case
+ca_sleep:
+		push dx				;save DH=cons #
+		lea dx,c_queue[si]		;unconditional if CX=0
+		mov bl,ps_ciowait
+		push si
+		mov cx,f_sleep ! call osif
+		pop si ! pop dx ! popf ! xor cx,cx
+		jmps cioattach
+ca_atch:    mov c_attach[si],bx
+ca_ret:	popf ! xor bx,bx ! ret
+
+;===============
+lstdetach_entry:
+;===============
+	call lcb_verify		;ensure U_LSTCCB is non zero
+
+lst_det:
+        mov bx,rlr
+        pushf ! cli
+        cmp c_attach[si],0 ! je cd_ret
+         cmp c_attach[si],bx ! je ld_detach
+          popf ! mov bx,0ffffh
+          mov cx, e_not_owner ! ret
+ld_detach:
+        mov ax,c_queue[si]
+        mov c_attach[si],ax
+        mov cx,f_wakeup
+        lea dx,c_queue[si]
+        call osif
+         jmps cd_ret
+
+;===============
+condetach_entry:
+;===============
+	call ccb_verify		;ensure U_CONCCB is non zero
+	;jmps ciodetach
+
+;=========
+ciodetach:		;NOTE PIN also does detaching for ^P
+;=========
+;	Detach Calling process from default ciodev.
+;	If current owner of ciodev then zero c_attach
+;	and wakeup the c_queue list to give another
+;	process the ciodev.
+;	input:	SI = CCB addr of device
+
+	mov bx,rlr
+		; SI = CCB address
+		; BX = PD address
+	pushf ! cli
+	cmp c_attach[si],0 ! je cd_ret
+	    cmp c_attach[si],bx ! je cd_detach
+		popf ! mov bx,0ffffh
+		mov cx,e_not_owner ! ret
+cd_detach:
+            and c_state[si],not (csm_suspend ); turn off suspend mode         
+	    mov ax,c_queue[si]
+	    mov c_attach[si],ax
+	    mov cx,f_wakeup
+	    lea dx,c_queue[si]
+	    call osif
+cd_ret:
+	popf
+	xor bx,bx ! ret		
+
+
+;===============
+conassign_entry:
+;===============
+;	Attach specified console to specified process
+;
+;	entry:	U_WRKSEG:DX -> ACB
+;
+;	+-----+-----+-----+-----+
+;	| CNS |Match|  PD Addr  |
+;	+-----+-----+-----+-----+-----+-----+-----+-----+
+;	|                     Name                      |
+;	+-----+-----+-----+-----+-----+-----+-----+-----+
+;
+;		CNS	- console to assign
+;		Match	- if not 0,
+;			  PD's default console must match acb_cns
+;		PD Addr	- PD address to assign to
+;		Name	- use PD name to assign, if PD addr=0
+;		Name	- use PD name to assign, if PD addr=1,
+;			  but also ensure DSKLD flag is off
+;			  (DiSK LoaD is set when PD was created
+;			  from disk transient, RSPs have DSKLD=0)
+;			  Should check for DSKLD=1 if PD addr = 0
+;			  but we may have compatibility issues
+;
+;	exit:	BX = 0 if success, 0ffffh if failure
+;		CX = Error Code
+
+	push dx				;save ACB
+	mov bx,offset thrd_spb		;get ownership of thread
+	mov cx,f_sync
+	call osif
+	pop di				;U_WRKSEG:DI->ACB
+	mov indisp,true			;stop dispatching
+
+	push ds				;save SYSDAT
+	mov ds,u_wrkseg
+	cmp acb_pd[di],1		;name or address match ?
+	jbe as_name
+
+	  mov bx,acb_pd[di]		;find by PD address
+	  pop ds			;DS=SYSDAT
+	  mov si,(offset thrdrt)-p_thread
+as_next1:				;verify PD is on thread
+	  mov si,p_thread[si]
+	  test si,si ! jz as_nom	;no match if end of thread
+	    cmp bx,si ! je as_found_id
+	    jmps as_next1
+as_found_id:
+	  call as_chk			;check console match
+	  jcxz as_mok			;match ok
+	    jmps as_nom			;no match
+
+as_name:				;look for PD by name on thread
+	pop ds				;DS=SYSDAT
+	mov bx,(offset thrdrt)-p_thread
+as_next2:				;look for PD by name on thread
+	push di				;save ACB
+	lea dx,acb_name[di]		;U_WRKSEG:DI->ACB
+	mov ds,u_wrkseg			;DS:DX->ASCII name
+	mov cx,f_findpdname
+	call osif
+	mov ds,sysdat
+	pop di				;ACB
+	jcxz as_okname			;CX<>0 if no match
+
+as_nom:
+	  mov cx,e_no_pdname		;couldn't find PD specified
+	  jmps as_err			;by ACB on thread list
+as_okname:
+					;matched PD by name check by ACB
+	  call as_chk			;BX->PD matched by name
+	  jcxz as_mok
+					;console or DSKLD didn't match
+	    jmps as_next2		;search for another PD
+
+as_mok:					;match OK, found the PD
+	push bx ! push di		;BX=matched PD, DI=ACB
+	mov bx,offset thrd_spb
+	mov cx,f_unsync
+	call osif
+	pop di ! pop ax			;DI=ACB, AX=matched PD
+	mov ds,u_wrkseg
+	push ax				;save matched PD
+	mov al,acb_cns[di]
+	mov ds,sysdat
+	call getccbadr_spec		;SI=CCB on return
+	mov bx,rlr			;BX=running process
+	pop ax				;AX=matched PD
+
+	cmp c_attach[si],0		;and change CCB
+	je as_ok			;CCB must be unused (0) or
+	  cmp c_attach[si],bx		;running process must own it
+	  je as_ok
+	    mov cx,e_not_owner
+as_err:
+	    push cx			;save error code
+	    call as_ok_disp
+	    mov bx,offset thrd_spb
+	    mov cx,f_unsync
+	    call osif
+	    pop cx
+	    mov bx,0ffffh
+	    ret
+as_ok:
+	mov c_attach[si],ax		;new owner
+	push ax ! push si		;save owner and CCB
+	call as_ok_disp			;allow dispatches
+	pop si ! pop ax
+	mov bx,ax			;AX=BX=new owner
+	add si,c_queue-p_link		;go down CCB queue for PD
+	mov di,si			;DI=SI=address of CCB.QUEUE
+as_nqpd:
+	cmp p_link[si],0		;look on C_QUEUE for PD being
+	jz as_gexit			;assigned the console
+	  cmp p_link[si],bx
+	  je as_qfix
+	    mov si,p_link[si]
+	    jmps as_nqpd		;next PD
+as_qfix:
+	  mov ax,p_link[bx] 		;take PD out of C_QUEUE
+	  mov p_link[si],ax
+	  mov si,p_link[di]		;SI = first PD on C_QUEUE
+	  mov p_link[di],bx		;put PD in front of C_QUEUE
+	  mov p_link[bx],si		;attach rest of list
+	  mov dx,di			;pass C_QUEUE address to wakeup
+	  mov cx,f_wakeup
+	  call osif
+as_gexit:
+	xor bx,bx
+	ret
+
+as_ok_disp:
+;----------
+;	entry:	none
+;	exit:	none
+;	Allow dispatching
+
+	mov indisp,false
+	pushf ! cli
+	cmp drl,0 ! je as_nwake
+	  mov cx,f_dispatch
+	  call osif
+as_nwake:
+	popf ! ret
+
+as_chk:
+;------
+;	check PD against Assign Control Block parameters
+;	entry:	BX = PD to check
+;		U_WRKSEG:DI = ACB
+;	exit:	CX = 0 if assign match
+;		CX <> 0 if no match
+;		CX,AX used
+
+	xor cx,cx
+	push es				;save UDA
+	mov es,u_wrkseg
+	mov ax,es:acb_pd[di]
+	cmp ax,1			;if >1 then matching on PD address
+	ja asc_cns
+	  dec ax
+	  jnz asc_cns
+	    test p_flag[bx],pf_dskld	;RSP, DSKLD must be off
+	    jnz asc_no
+asc_cns:
+	cmp es:acb_match[di],0		;console match requested ?
+	je asc_ok
+	  mov al,es:acb_cns[di]		;must match on console
+	  cmp al,p_cns[bx]
+	  je asc_ok
+asc_no:
+	inc cx
+asc_ok:
+	pop es				;ES=UDA
+	ret
+
+;===============	=====================
+getdefcon_entry:	; Get Default Console
+;===============	=====================
+
+	mov si,rlr
+	xor bh,bh ! mov bl,p_cns[si]
+	ret
+
+;===============	==================
+getdeflst_entry:	; Get Default List
+;===============	==================
+
+	mov si,rlr
+	xor bh,bh ! mov bl,p_lst[si]
+	ret
+
+;===============	=====================
+setdefcon_entry:	; Set Default Console
+;===============	=====================
+
+	cmp dl,ncondev
+	jb sd_good
+	  mov cx,e_ill_cns
+	  mov bx,0ffffh ! ret
+sd_good:
+	mov si,rlr
+	mov p_cns[si],dl
+	call getccbadr
+	mov u_conccb,si
+	xor bx,bx
+	ret
+
+;===============	==================
+setdeflst_entry:	; Set Default List
+;===============	==================
+
+	cmp dl,nlstdev
+	jb sdl_good
+	  mov cx,e_ill_lst
+	  mov bx,0ffffh ! ret
+sdl_good:
+	mov si,rlr
+	mov p_lst[si],dl
+	call getlcbadr
+	mov u_lstccb,si
+	xor bx,bx
+	ret
+
+
+getccbadr:
+;---------
+; get CCB for calling process' console device
+;	input:	None
+;	output:	SI = address of CCB
+;		BX = running PD address
+
+	mov bx,rlr
+	mov al,p_cns[bx]
+
+getccbadr_spec:				;AL is console number
+	xor ah,ah			;when called from ASSIGN
+	mov si,ccb
+	mov cl,2
+	shl ax,cl
+	add si,ax			;+4
+	add si,ax			;+4 = 8
+	add si,ax			;+4 =12
+	mov cl,3
+	shl ax,cl
+	add si,ax			;+32 =44
+	ret
+
+getlcbadr:
+;---------
+; Get LCB for calling process list device
+;	entry:	None
+;	output:	SI = address of LCB
+;		BX = PD address
+
+	mov bx,rlr
+	xor ah,ah
+	mov al,p_lst[bx]
+        cmp al,nlst                    ; range check on # legal list dev's
+         jbe lcb_cont
+        mov al,0                       ; if out of range, normalize to zero
+        mov p_lst[bx],al
+lcb_cont:
+	mov si,lcb
+	push ax				;lcb#
+	shl ax,1			;2*lcb#
+	add si,ax			;lcbadr + 2*lcb#
+	pop ax				;lcb#
+	mov cl,3
+	shl ax,cl			;8*lcb#
+	add si,ax			;lcbadr + 2*lcb# + 8*lcb#
+	ret
+
+
+;=======
+cioterm:
+;=======
+;	Detach Calling process from all character devices.
+;	Called only from the dispatcher
+
+	mov al,ncondev
+	mov si,ccb
+nxtccb:	cmp al,0 ! je ct_dlcb
+	    cmp si,u_conccb ! jne ct_dccb
+		and c_flag[si],not (cf_conout + cf_vout + cf_bufp)
+		mov cx,f_wakeup	;release proc waiting for XIOS conout
+		lea dx,c_cosleep[si]
+		push ax ! push si
+		call osif
+		pop si ! pop ax
+ct_dccb:
+		push ax ! push si
+		call ciodetach
+		pop si ! pop ax
+		dec al
+		add si,ccblen
+		jmps nxtccb
+
+ct_dlcb:
+	mov al,nlstdev
+	mov si,lcb
+ct_nlcb:
+	cmp al,0 ! je ct_ret
+	    push ax ! push si
+            call lst_det	
+            ;call ciodetach
+	    pop si ! pop ax
+	    dec al
+	    add si,lcblen
+	    jmps ct_nlcb
+
+ct_ret: xor bx,bx ! ret
+

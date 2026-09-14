@@ -1,0 +1,40 @@
+
+
+
+	include cpyright.def
+
+;*****************************************************
+;*
+;*	BDOS - Basic Disk Operating System
+;*
+;*****************************************************
+;
+;	generation of BDOS.CON file
+;
+;	RASM86 bdos
+;	LINK86 bdos.con = bdos [data[origin[0]]]
+;
+;*****************************************************
+
+	eject ! include equ.bdo		; symbol definitions
+	eject ! include system.dat
+	eject ! include pd.def
+	eject ! include qd.def
+	eject ! include modfunc.def
+	eject ! include xioscb.def
+	eject 
+
+PCMODE	equ	false
+
+	        include bdosif.bdo	; system initialization
+	eject ! include file1.bdo	; file system part 1
+	eject ! include file2.bdo	; file system part 2
+	eject ! include file3.bdo	; file system part 3
+	eject ! include file4.bdo	; file system part 4
+	eject ! include file5.bdo	; file system part 5
+	eject ! include const.bdo
+	eject ! include patch.cod
+	eject ! include uda.cic		; User Data area
+	eject ! include sysdat.bdo
+	eject ! include data.bdo
+	end

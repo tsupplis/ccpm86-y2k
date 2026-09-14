@@ -1,0 +1,40 @@
+
+;*****************************************************
+;*
+;*	XIOS function jump table offsets
+;*
+;*****************************************************
+
+io_const	equ	0
+io_conin	equ	1
+io_conout	equ	2
+io_listst	equ	3		;not used
+io_list	 	equ	4
+io_auxin	equ	5		;not used
+io_auxout	equ	6		;not used
+io_switch	equ	7
+io_statline	equ	8
+io_seldsk	equ	9
+io_read		equ	10
+io_write	equ	11
+io_flush	equ	12
+io_polldev	equ	13
+io_int13_read	equ	35
+io_int13_write	equ	36
+
+dio_13_read_op	equ	0
+dio_13_write_op	equ	1
+dio_25_read_op	equ	2
+dio_26_write_op	equ	3
+
+;*****************************************************
+;*
+;*	XIOS Parameter Block for CALL XIOS functions
+;*
+;*****************************************************
+
+xcb_func	equ	0
+xcb_cx		equ	word ptr xcb_func + byte
+xcb_dx		equ	word ptr xcb_cx + word
+xcblen		equ	xcb_dx + word
+

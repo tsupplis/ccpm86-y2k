@@ -1,0 +1,159 @@
+
+;************ bdos file system part 5 ************
+
+;	BDOS functions which do not require
+;	 ownership of the MXdisk queue
+
+func24:		;return the login vector
+;======
+	mov bx,dlog
+	ret
+
+func25:		;return selected disk number
+;======
+
+if BCPM
+	mov bl,p_dsk
+endif
+if BMPM
+	mov si,rlr
+	mov bl,p_dsk[si]
+endif
+	ret
+
+func26:		;set the subsequent dma address to info
+;======
+
+if BCPM
+	mov p_dma_off,dx
+endif
+if BMPM
+	mov u_dma_ofst,dx
+endif
+	ret
+
+func29:		;return r/o bit vector
+;======
+	mov bx,rodsk
+	ret
+
+func32:		;set user code
+;======
+
+if BCPM
+	mov al,dl
+	cmp al,0ffh
+	jnz setusrcode
+	  mov bl,p_user			;interrogate user code instead
+	  ret
+setusrcode:
+	and al,0fh
+	mov p_user,al
+	ret				;jmp goback
+endif
+if BMPM
+	mov si,rlr
+	cmp dl,0ffh ! jne setusrcode
+	  mov bl,p_user[si]
+	  ret
+setusrcode:
+	and dl,0fh
+	mov p_user[si],dl
+	ret
+endif
+
+func44:		;set multi-sector count
+;======
+	xor bx,bx
+	or dl,dl
+	jz return_not_ok
+	cmp dl,129
+	jnb return_not_ok
+if BCPM
+	  mov p_mult_cnt,dl
+endif
+if BMPM
+	  mov u_mult_cnt,dl
+endif
+	  ret
+return_not_ok:
+	dec bx				;return BX = 0ffffh
+	ret
+
+func45:		;set bdos error mode
+;======
+
+if BCPM
+	mov p_error_mode,dl
+endif
+if BMPM
+	mov u_error_mode,dl
+endif
+	ret
+
+func51:		; set dma base
+;======
+
+if BCPM
+	mov p_dma_seg,dx
+endif
+if BMPM
+	mov u_dma_seg,dx
+endif
+	ret
+
+func52:		; get dma
+;======
+
+if BCPM
+	mov ax,p_dma_seg
+	mov p_user_es,ax
+	mov bx,p_dma_off
+endif
+if BMPM
+	mov ax,u_dma_seg
+	mov u_retseg,ax
+	mov bx,u_dma_ofst
+endif
+	ret
+
+func104:	;set current date and time
+;=======
+	mov si,dx
+	mov di,offset tod
+	pushf! cli
+	push es! push ds		;save DS and ES
+if BCPM
+	mov ds,p_user_ds
+endif
+if BMPM
+	mov ds,u_wrkseg
+endif
+	pop es
+	movsw! movsw
+	push es
+	pop ds! pop es			;restore DS and ES
+	mov byte ptr tod+4,0
+	popf
+	ret
+
+func105:	;get current date and time
+;=======
+	mov di,dx
+	mov si,offset tod
+	push es
+if BCPM
+	mov es,p_user_ds
+endif
+if BMPM
+	mov es,u_wrkseg
+endif
+	pushf! cli
+	movsw! movsw
+	mov bl,tod+4
+	popf
+	pop es
+	ret
+
+;********** end bdos file system part 5 **********
+

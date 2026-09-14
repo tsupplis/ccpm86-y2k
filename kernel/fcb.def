@@ -1,0 +1,17 @@
+;*****************************************************
+;*
+;*	File Control Block Format
+;*
+;*****************************************************
+
+fcb_dr		equ	byte ptr 00h
+fcb_name	equ	byte ptr 01h
+fcb_type	equ	byte ptr 09h
+
+fcb_pwd		equ	byte ptr 010h
+fcb_pptr	equ	word ptr 018h
+fcb_plen	equ	byte ptr 01ah
+
+fcb_cr		equ	byte ptr 020h
+fcb_r0		equ	word ptr 021h
+

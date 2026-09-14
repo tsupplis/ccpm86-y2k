@@ -1,0 +1,8 @@
+;
+;	Character Block (CP/M 3.0 Character Control Block)
+;
+cb_off		equ	word ptr 0
+cb_seg		equ	word ptr cb_off + word
+cb_len		equ	word ptr cb_seg + word
+
+

@@ -1,0 +1,31 @@
+;*****************************************************
+;*
+;*	MEM Common Functions
+;*
+;*****************************************************
+
+
+getmd:		; get MD from MDUL
+;-----		------------------
+;	output:	BX = MD address
+;		     0 if none found
+;		CX = Error Code
+
+	pushf ! cli
+	mov cx,e_no_umd ! mov bx,mdul
+	cmp bx,0 ! je gmd_ret
+	    xor cx,cx
+	    mov si,m_link[bx] ! mov mdul,si
+	    mov m_link[bx],cx ! mov m_start[bx],cx
+	    mov m_length[bx],cx ! mov m_plist[bx],cx
+gmd_ret:popf ! ret
+
+
+freemd:		; put MD on MDUL
+;------		----------------
+;	input:	BX = MD address
+
+	pushf ! cli
+	mov si,mdul ! mov mdul,bx
+	mov m_link[bx],si ! popf ! ret
+

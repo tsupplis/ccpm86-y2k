@@ -1,0 +1,41 @@
+
+;*****************************************************
+;*
+;*	PATCH AREA  --  128 bytes long
+;*
+;*****************************************************
+
+patch:
+	nop ! nop ! nop ! nop ! nop ! nop  ;00-0f
+	nop ! nop ! nop ! nop ! nop ! nop
+	nop ! nop ! nop ! nop
+
+	nop ! nop ! nop ! nop ! nop ! nop  ;10-1f
+	nop ! nop ! nop ! nop ! nop ! nop
+	nop ! nop ! nop ! nop
+
+	nop ! nop ! nop ! nop ! nop ! nop  ;20-2f
+	nop ! nop ! nop ! nop ! nop ! nop
+	nop ! nop ! nop ! nop
+
+	nop ! nop ! nop ! nop ! nop ! nop  ;30-3f
+	nop ! nop ! nop ! nop ! nop ! nop
+	nop ! nop ! nop ! nop
+
+	nop ! nop ! nop ! nop ! nop ! nop  ;40-4f
+	nop ! nop ! nop ! nop ! nop ! nop
+	nop ! nop ! nop ! nop
+
+	nop ! nop ! nop ! nop ! nop ! nop  ;50-5f
+	nop ! nop ! nop ! nop ! nop ! nop
+	nop ! nop ! nop ! nop
+
+	nop ! nop ! nop ! nop ! nop ! nop  ;60-6f
+	nop ! nop ! nop ! nop ! nop ! nop
+	nop ! nop ! nop ! nop
+
+	nop ! nop ! nop ! nop ! nop ! nop  ;70-7f
+	nop ! nop ! nop ! nop ! nop ! nop
+	nop ! nop ! nop ! nop
+
+

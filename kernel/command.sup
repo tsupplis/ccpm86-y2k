@@ -1,0 +1,736 @@
+
+;*****************************************************
+;*
+;*	Command Line Interpreter, Program Chain
+;*
+;*****************************************************
+;=========
+chain_ent:
+;=========
+
+	xor dx,dx
+
+;=======
+cli_ent:
+;=======
+; Create a process based on an Ascii Command Line.
+; The command Line is first parsed and an FCB is
+; initialized as a result.
+; An attempt is made to open a queue with the filename
+; of the FCB, and with the RSP flag on.
+; The command tail is written to the queue if it is found.
+; If the queue cannot be opened or is not and RSP type then
+; we try and load the command from disk.
+; If the write queue fails we return e_q_full error code and
+; do not look on the disk.
+; After the queue write, an console assign call attempted to
+; a process with the same name and the PF_DSKLD flag off.
+; Irregardless of the success of the assign we then return.
+;
+; If the RSP queue cannot be opened, or is not an RSP type queue then
+; we make the name type in the
+; FCB to be 'CMD' and attempt to open the file.  If this fails,
+; so do we.
+; We then obtain a Process Descriptor from the
+; PD table.  Again we fail if it does.
+; On a successful open, we call the BDOS load function.
+; If the load fails, so do we.  The PD is
+; initialized, the default console is assigned to the
+; PD, the PF_DSKLD flag turned on,
+; and a create process call is made.
+;
+;	input:	DX -> command buffer in u_wrkseg
+;		It is assumed that the calling process
+;		is attached to its default console
+;		and is willing to lose it since it
+;		will be handed to the newly created
+;		process.
+;		if DX = 0, assume chain w/command in DMA
+;
+;	output:	BX = 0 if successful
+;		   = 0ffffh if failure has occured
+;		CX = error code
+
+	mov bx,rlr ! mov ax,p_flag[bx]
+	push ax				;save flags on stack
+if netversion
+        or ax,pf_noctls
+endif
+if not netversion
+	or ax,pf_tempkeep + pf_noctls
+endif
+	mov p_flag[bx],ax
+if netversion
+        mov cx,f_no_abort
+        call osif
+endif  
+	push dx				;save parameter
+	call cli_sync			;rentrancy stops with sync call
+	pop dx				;we can save the flags
+	pop cli_pflag			;and other variables in the CLI
+					;data area
+		; we have CLI SYNC
+		; Check for Chain
+
+	mov cli_chain,false
+	cmp dx,0 ! jne cli_cli
+	    mov cli_chain,true
+	    mov cli_term,false
+cli_cli:
+		; initialize defaults from parent PD
+
+	mov cli_dfil,false
+	cmp dayfile,0ffh ! jne nodf
+	    push dx ! mov cx,f_cconattch
+	    call osif ! pop dx
+	    cmp cx,0 ! jne nodf
+		mov cli_dfil,true
+		push dx
+		call prtime
+		pop dx
+nodf:	mov bx,rlr
+	mov cli_ppd,bx
+	mov cl,p_dsk[bx]
+	mov cli_dsk,cl
+	mov cl,p_user[bx]
+	mov cli_user,cl
+	mov cl,p_cns[bx]
+	mov cli_cns,cl
+	mov cl,u_error_mode
+	mov cli_err_mode,cl
+	mov cx,u_dma_ofst
+	mov cli_dma_ofst,cx
+	mov cx,u_dma_seg
+	mov cli_dma_seg,cx
+	mov clierr,0
+
+		; copy command into local area
+
+	cmp cli_chain,true ! jne cli_cpy
+	    push es ! push ds
+	    mov es,sysdat
+	    mov si,cli_dma_ofst
+	    mov di,offset cli_cmdtail
+	    mov ds,cli_dma_seg
+	    mov cx,040H
+	    rep movsw
+	    pop ds ! pop es
+	    jmp cli_parse
+
+cli_cpy:
+	push es ! push ds
+	mov ds,u_wrkseg ! pop es
+		; DS=Wrkseg, ES=Sysdat, SP->UDA
+		; copy clicb_net
+	mov si,dx ! mov di,offset cli_net
+	movsb
+		; copy command
+	mov si,dx ! add si,clicb_cmd
+	mov di,offset cli_cmdtail
+	mov cx,clicblen-clicb_cmd
+	rep movsb
+	push es ! pop ds ! pop es
+
+		;parse the command
+cli_parse:
+	call pfn ! jcxz cli_gprs
+	    mov clierr,cx
+	    jmp cli_exit
+cli_gprs:
+
+	call shtal
+
+		;fcb has parsed filename
+		;if not explicit disk then
+		;   if not RSP try CMD
+		;else try CMD
+
+	cmp cli_fcb,0 ! jne cli_ffload
+	    mov bx,(offset cli_fcb)
+	    cmp fcb_plen[bx],0 ! jne cli_ffload
+		call cli_checkque ! jnz cli_ffload
+				;successful RSP access
+cli_qful:
+		    cmp cli_chain,true ! jne cli_exit2
+			mov cli_term,true
+cli_exit2:	    jmp cli_exit
+cli_ffload:
+	cmp cx,e_q_full ! jne cli_fload
+	    mov clierr,cx ! jmps cli_qful
+
+cli_checkque:
+;------------
+;	output: z flag on if successful
+
+		;copy fcb.name to qpb.name
+
+	mov si,(offset cli_fcb)+fcb_name
+	mov di,(offset cli_cuspqpb)+qpb_name
+	mov cx,qnamsiz/2 ! push es ! push ds ! pop es
+	push si ! rep movsw
+
+		;copy fcb.name to acb.name
+
+	pop si ! mov cx,qnamsiz/2
+	mov di,(offset cli_acb)+acb_name
+	rep movsw ! pop es
+
+		;open queue
+
+	mov cx,f_qopen ! mov dx,(offset cli_cuspqpb)
+	call osif ! jcxz cli_goodq
+retcli1:    cmp cx,0 ! ret		;CX = 0ffffh on error
+
+		;we successfully opened the queue
+		;now check RSP flag
+cli_goodq:
+	mov bx,offset cli_cuspqpb
+	mov bx,qpb_qaddr[bx]
+	test q_flags[bx],qf_rsp ! jnz cli_gq
+	    mov cx,e_no_queue ! jmps retcli1
+
+		;write command tail to queue
+
+cli_gq:	mov cx,f_cqwrite ! mov dx,offset cli_cuspqpb
+	call osif ! jcxz cli_qw
+	    mov cx,e_q_full ! jmps retcli1
+
+		;successful queue write, assign console
+
+cli_qw:	cmp cli_dfil,true ! jne noqm
+	    call prcusp
+noqm:	mov bx,offset cli_acb
+	mov al,cli_cns ! mov acb_cns[bx],al
+	mov acb_match[bx],false
+	mov acb_pd[bx],1		;match on PD with DSKLD flag off
+	call conasn ! xor cx,cx ! ret
+
+cli_fload:
+;---------
+; Try to Load a file for execution
+; The Command Line Parsed correctly and we have an FCB
+; set up.  We already know there isn't a queue and a
+; process by the same name  as the command.
+
+		; Obtain a Process Descriptor
+
+	pushf ! cli ! mov bx,pul
+	cmp bx,0 ! jne cli_gpd
+	    popf ! mov clierr,e_no_pd
+	    jmp cli_exit
+cli_gpd:
+	mov si,p_link[bx] ! mov pul,si
+	popf ! mov cli_pd,bx
+		; zero PD
+	push es ! push ds ! pop es
+	mov di,bx ! mov cx,pdlen/2
+	xor ax,ax ! rep stosw
+	pop es
+
+		; Initialize the PD for Load
+
+	mov bx,cli_pd
+	mov p_flag[bx],pf_table
+	mov di,bx ! add di,p_name
+	mov si,offset cli_fcb ! add si,fcb_name
+	push es ! mov ax,ds ! mov es,ax
+	mov cx,pnamsiz/2 ! rep movsw	
+	pop es
+	mov si,rlr
+	mov al,cli_dsk ! mov p_dsk[bx],al	;inherit parents drive/user
+	mov al,cli_user ! mov p_user[bx],al	;even if we load off another
+						;drive or user
+
+						;this should be in
+						;process create ?
+
+	mov al,cli_cns ! mov p_cns[bx],al
+	mov al,p_lst[si]
+;if mpm
+;	 sub al,ncondev
+;endif
+	mov p_lst[bx],al
+
+		; 3. Open the file
+
+	mov si,(offset cli_fcb)+fcb_pwd
+	mov di,offset cli_dma
+	push es ! mov es,sysdat
+	mov cx,4 ! rep movsw
+	pop es
+	mov u_dma_ofst,offset cli_dma
+	mov u_dma_seg,ds
+
+	mov si,offset cli_fcb
+	mov byte ptr fcb_type[si],'C'
+	mov byte ptr fcb_type+1[si],'M'
+	mov byte ptr fcb_type+2[si],'D'
+
+		; Open the CMD file
+
+	mov u_error_mode,0feh
+	call flopn
+	cmp bl,0ffh ! jne cli_gopen
+
+		; on failure,
+		; if default is not system disk
+		;    and not an explicit disk then
+ 		;	try CMD file on System disk
+
+	    cmp bh,0 ! jne cli_bo		;extended error 
+	    mov cl,srchdisk
+	    cmp cl,cli_dsk ! je cli_bo		;already on system disk
+	    cmp cli_fcb,0 ! jne cli_bo		;check for explicit
+						;select
+			; try system disk
+
+;		mov bx,rlr
+;		mov p_dsk[bx],cl
+		inc cl
+		mov cli_fcb,cl			;set drive byte to
+		call flopn			;system disk
+		cmp bl,0ffh ! je cli_bo
+
+			;make sure SYS attribute is on...
+
+		    mov bx,offset cli_fcb
+		    test byte ptr fcb_type+1[bx],080h ! jnz cli_gopen
+
+			;We opened a NON-SYS file.  Do explicit open
+			;on user zero if not already
+
+			call flclse
+			mov bx,rlr
+			cmp p_user[bx],0 ! je cli_boe
+			    mov p_user[bx],0
+			    call flopn
+			    cmp bl,0ffh ! je cli_bo
+				mov bx,offset cli_fcb
+				test byte ptr fcb_type+1[bx],080h
+				jnz cli_gopen
+				    call flclse
+				    jmps cli_boe
+
+			;could not find CMD file
+
+cli_bo:		    cmp bh,0 ! jne cli_rmpd2
+cli_boe:		mov clierr,e_bad_open
+cli_rmpd2:	    jmp cli_rmpd
+cli_gopen:
+
+		; 8. Call the load function
+
+	mov bx,rlr
+	test p_flag[bx],pf_ctlc ! jz cli_ld1
+	    mov bx,0ffffh ! mov cx,e_abort
+	    jmp cli_cl
+cli_ld1:
+	cmp cmod,true !  jne not_cmod
+	    mov bx,cli_pd
+	    mov si,offset cli_fcb
+
+		;test F1 bit
+	    mov p_cmod[bx],0
+	    test byte ptr fcb_name[si],080h ! jz not_f1
+		or p_cmod[bx],080h
+
+		;test F2 bit
+not_f1:	    test byte ptr fcb_name+1[si],080h ! jz not_f2
+		or p_cmod[bx],040h
+
+		;test F3 bit
+not_f2:
+
+;if mpm		dave brown test
+	    test byte ptr fcb_name+2[si],080h
+	    jz not_f3
+;endif
+
+ 		or p_cmod[bx],020h
+
+		;test F4 bit
+not_f3:	    test byte ptr fcb_name+3[si],80h ! jz not_cmod
+		or p_cmod[bx],070h
+not_cmod:
+
+	cmp cli_chain,true ! jne cli_kuda
+	    mov bx,cli_pd
+	    mov p_uda[bx],es
+	    mov ax,offset inituda
+	    mov cl,4 ! shr ax,cl
+	    add ax,sysdat
+	    mov bx,es ! mov es,ax ! mov di,0
+	    mov ds,bx ! mov si,di
+	    mov cx,ulen/2
+	    rep movsw
+	    pushf ! cli ! pop dx
+	    mov ax,es
+	    mov ds,sysdat
+	    mov ss,ax
+	    mov bx,rlr
+	    mov p_uda[bx],ax
+	    push dx ! popf	    
+cli_kuda:
+	cmp cli_dfil,true ! jne noprfil
+	    call prfilnam
+	    call crlf
+
+noprfil:mov bx,cli_pd
+	mov dx,offset cli_fcb
+	mov cx,f_load
+	cmp cli_chain,true ! jne cli_ld
+	    mov cli_term,true
+            mov cx,f_cload
+             call osif
+              jcxz cli_cl
+            mov cli_term,false
+        jmp cli_cl
+cli_ld:	call osif
+cli_cl:	push bx ! push cx
+	mov u_error_mode,0
+	call flclse
+	pop cx ! pop bx
+	jcxz cli_gload
+	    cmp cx,e_abort ! jne cli_lnab
+		jmp cli_rmpd
+cli_lnab:   mov clierr,cx
+	    jmp cli_rmpd
+cli_gload:
+	mov cli_bpage,bx
+
+		; 9a. Parse Command Tail
+
+		;	copy cmdtail to user DMA buffer
+
+	push es ! mov es,cli_bpage
+	mov di,offset bpg_dma+1
+	mov si,offset cli_cmdtail
+	mov cx,127
+	rep movsb ! pop es	
+
+		;	count cmd length and convert
+		;	to upper case
+
+	push ds ! mov ds,cli_bpage
+	mov cl,0 ! mov di,offset bpg_dma+1
+ncmdchar:
+	cmp byte ptr [di],0 ! je endtail
+
+		; convert CMD tail to UPPER CASE
+
+	    cmp byte ptr [di],'a' ! jb nlow
+		cmp byte ptr [di],'z' ! ja nlow
+		    and byte ptr [di],05fh
+nlow:
+
+
+	    inc di ! inc cl ! jmps ncmdchar
+endtail:
+	mov bpg_dma,cl ! pop ds
+
+		;	load disk init, location 50H
+		;	of base page is done in LOAD
+
+	push es ! mov es,cli_bpage
+
+		;	init default fcb
+
+	mov di,offset bpg_fcb0
+	xor ax,ax ! stosb			;default disk
+	mov al,' '
+	mov cx,11 ! rep stosb			;name,type
+	xor ax,ax
+	mov cx,2 ! rep stosw			;other
+	push ds ! push es ! pop ds
+	mov si,offset bpg_fcb0
+	mov cx,8 ! rep movsw
+	pop ds ! pop es	
+
+		;	if cmdtail, parse
+
+	cmp cli_cmdtail,0 ! je ctdone
+	    call pfn
+	    cmp bx,0ffffh ! je ctdone
+
+		;	copy fcb to user fcb front
+
+		push es ! mov es,cli_bpage
+		mov di,offset bpg_fcb0
+		mov si,offset cli_fcb
+		mov ax,fcb_pptr[si]
+			; AX->password in CLI_CMDTAIL
+		sub ax,offset cli_cmdtail
+		add ax,offset bpg_dma + 1
+			; AX->password in Base Page
+		mov es:bpg_pw1ptr,ax
+		mov al,fcb_plen[si]
+		mov es:bpg_pw1len,al
+		mov cx,8 ! rep movsw ! pop es
+
+		;	if more cmdtail, parse
+
+		cmp bx,0 ! je ctdone
+		    push cli_pcb ! inc bx
+		    mov cli_pcb,bx
+		    call pfn
+		    pop cli_pcb
+		    cmp bx,0ffffh ! je ctdone
+
+		;	copy 2nd fcb front
+
+			push es ! mov es,cli_bpage
+			mov di,offset bpg_fcb1
+			mov si,offset cli_fcb
+			mov ax,fcb_pptr[si]
+				; AX->password in CLI_CMDTAIL
+			sub ax,offset cli_cmdtail
+			add ax,offset bpg_dma + 1
+				; AX->password in Base Page
+			mov es:bpg_pw2ptr,ax
+			mov al,fcb_plen[si]
+			mov es:bpg_pw2len,al
+			mov cx,8
+			rep movsw
+			pop es
+ctdone:
+
+		; 10. Create the process
+
+	cmp cli_chain,true ! jne nprior
+	    mov cx,f_setprior
+	    mov dx,1 ! call osif
+nprior:
+	mov si,cli_pd ! or p_flag[si],pf_dskld	;from disk, to differ 
+	mov dx,si ! mov cx,f_createproc		;from RSP with same name
+	call osif
+
+		; 11. Assign Console to new process
+
+	mov bx,rlr
+	and p_flag[bx],not pf_ctlc
+
+		; Check to see if user hit CTRL D
+	test p_flag[bx],pf_ctld ! jz asgn
+	    and p_flag[bx],not pf_ctld
+	    mov bx,cli_pd
+	    or p_flag[bx],pf_ctld
+	    jmp cli_exit
+asgn:	mov bx,offset cli_acb
+	mov al,cli_cns ! mov acb_cns[bx],al
+	mov ax,cli_pd ! mov acb_pd[bx],ax
+	mov acb_match[bx],true
+	call conasn
+	mov clierr,cx
+
+	jmps cli_exit
+
+		; 12. All Done
+
+cli_rmpd:	; release PD
+
+	mov si,cli_pd
+
+		; Release any memory that might still be
+		; associated with the PD.  This could
+		; happen from a CTRL C.
+
+	cmp p_mem[si],0 ! je rmpd1
+	    push ds ! push es
+	    push si
+	    mov si,p_mem[si]
+	    push ms_start[si]
+	    mov cx,f_memfree
+	    mov dx,sp
+	    mov ax,ss ! mov ds,ax
+	    call osif
+	    pop ax ! pop si
+	    pop es ! pop ds
+	    jmps cli_rmpd
+
+		; Place empty PD on PUL.
+
+rmpd1:	pushf ! cli
+	mov bx,pul
+	mov p_link[si],bx ! mov pul,si
+	popf
+
+		; Normal EXIT
+
+cli_exit:	; close file and release CLI SYNC
+	mov bx,rlr
+	mov cl,cli_dsk ! mov p_dsk[bx],cl
+	mov cl,cli_user ! mov p_user[bx],cl
+	mov cl,cli_err_mode ! mov u_error_mode,cl
+	mov cx,cli_dma_ofst ! mov u_dma_ofst,cx
+	mov cx,cli_dma_seg ! mov u_dma_seg,cx
+	cmp cli_chain,true ! jne clirls
+	    mov bx,rlr ! mov si,cli_pd		;inherit calling PD's
+	    mov ax,p_parent[bx]			;parent if chaining
+	    mov p_parent[si],ax
+	    cmp cli_term,true ! jne clirls
+		and p_flag[bx],not (pf_keep+pf_sys+pf_tempkeep+pf_ctlc)
+if netversion
+                mov p_tkcnt[bx],0
+endif
+		mov cx,f_terminate		;TERM_ACT in dispatcher
+		jmp osif			;releases CLI_SYNC
+clirls:
+	push cli_pflag
+	push cli_err
+	call cli_unsync
+if netversion
+        mov cx,f_ok_abort
+        call osif
+endif        
+	pop dx
+if netversion
+        pop ax ! and ax,pf_noctls
+endif
+if not netversion  
+	pop ax ! and ax,pf_tempkeep+pf_noctls
+endif
+	mov bx,rlr ! mov cx,p_flag[bx]
+if netversion
+        and cx,not pf_noctls
+endif
+if not netversion
+	and cx,not pf_tempkeep+pf_noctls
+endif
+	or cx,ax ! mov p_flag[bx],cx
+	test p_flag[bx],pf_ctlc ! jz cli_nctl
+	    mov cx,f_terminate ! xor dx,dx
+	    call osif
+	    and p_flag[bx],not pf_ctlc
+	    mov dx,e_abort
+
+		; setup error return if needed
+cli_nctl:
+
+	mov cx,dx
+	xor bx,bx
+	jcxz cli_gexit
+	    mov bx,0ffffh
+
+cli_gexit:
+	ret
+
+shtal:
+;---------
+; setup command tail to be parsed
+;	input:	AX = output of previous parsefilename
+
+	cmp ax,0 ! je ntail
+
+		;shift command tail to beginning
+		;of command buffer
+
+	    push ax ! sub ax,offset cli_cmdtail
+	    mov cx,128 ! sub cx,ax ! shr cx,1
+	    pop si ! mov di,offset cli_cmdtail
+	    push es ! push ds ! pop es
+	    rep movsw ! pop es
+	    ret
+ntail:
+	mov cli_cmdtail,0
+	ret
+
+;============================
+;  Various string subroutines
+
+crlf:	mov dl,13 ! call prchar
+	mov dl,10
+	;jmps prchar
+
+prchar:	
+	mov si,u_conccb
+	mov di,rlr
+	cmp [si],di ! jne prr
+	    mov cx,f_conout ! jmp osif
+prr:	ret
+
+prtime:	mov dl,tod_hr ! call prnum
+	mov dl,':' ! call prchar
+	mov dl,tod_min ! call prnum
+	mov dl,':' ! call prchar
+	mov dl,tod_sec ! call prnum
+	mov dl,' ' ! jmps prchar
+
+prnum:	push dx ! mov cl,4
+	shr dl,cl ! add dl,'0'
+	call prchar
+	pop dx ! and dl,0fh
+	add dl,'0' ! jmps prchar
+
+prfilnam:
+	call prdisk
+	mov dx,(offset cli_fcb)+fcb_name
+	call prnam
+	mov dl,'.' ! call prchar
+	mov dx,(offset cli_fcb) + fcb_type
+	call prtyp
+	mov dl,' ' ! call prchar
+	mov bx,offset cli_fcb
+	test byte ptr fcb_name+7[bx],080h ! jnz pruser
+	    cmp cli_user,0 ! je pret
+		mov bx,rlr
+		cmp p_user[bx],0 ! je pruser
+pret:	    ret
+
+pruser: mov dx,offset userstr
+	jmps prcsm
+
+prdisk:	mov dl,cli_fcb
+	cmp dl,0 ! je prpddsk
+	    dec dl ! jmps prdsk1
+prpddsk:
+	mov bx,rlr
+	mov dl,p_dsk[bx]
+prdsk1:	add dl,'A' ! call prchar
+	mov dl,':' ! jmp prchar
+
+prcusp:	mov dx,(offset cli_cuspqpb) + qpb_name
+	call prnam ! mov dx,offset questr
+	call prcsm ! jmp crlf
+
+prcsm:	mov si,u_conccb
+	mov di,rlr
+	cmp [si],di ! jne prr1
+	    xor bx,bx ! push ds
+	    mov ax,cs ! mov ds,ax
+	    call cprnt1 ! pop ds
+prr1:	ret
+
+prtyp:  mov bh,3 ! jmps prn1
+prnam:	mov bh,8
+prn1:	mov bl,' '
+	mov si,u_conccb
+	mov di,rlr
+	cmp [si],di ! jne prr1
+cprnt1:	    mov cx,f_conprint ! jmps jos
+
+flclse:
+	mov cx,f_fclose ! mov dx,offset cli_fcb
+	jmps fo1
+flopn:
+	mov cx,f_fopen
+	mov si,offset cli_fcb
+	or byte ptr fcb_name+5[si],080h		;f6`=open read-only
+	mov dx,si
+fo1:	push es ! call osif ! pop es ! ret
+
+cli_sync:mov cx,f_sync
+	jmps mx1
+
+cli_unsync: mov cx,f_unsync
+mx1:	mov bx,offset cli_spb
+jos:	jmp osif
+
+pfn:	mov dx,offset cli_pcb ! mov cx,f_parsefilename
+	jmps jos
+
+conasn:	mov cx,f_conassign ! mov dx,offset cli_acb
+	jmps jos
+
+questr		db	' Msg Qued',0
+userstr		db	'(User 0)',0
+

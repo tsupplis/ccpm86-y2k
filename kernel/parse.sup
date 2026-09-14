@@ -1,0 +1,155 @@
+;*****************************************************
+;*
+;*	Parse Filename Function
+;*
+;*****************************************************
+
+;=========		=========================
+parse_ent:		; Parse filename into FCB
+;=========		=========================
+;	input:	DX -> PCB in u_wrkseg
+;	output:	BX = 0ffffh on error
+;		   = 0      on last name in string
+;		   = offset of delimiter following name
+;		CX = Error Code
+;
+;	PCB:	+----+----+----+----+
+;		| NAMEADR | FCBADR  |
+;		+----+----+----+----+
+;
+;	NAMEADR = offset of String to parse
+;	FCBADR  = offset of FCB in u_wrkseg
+;
+;	Parsed FCB:
+;	 0	=> drive, 0=default, 1=A, 2=B, ...
+;	 1- 8	=> name, converted to upper case,
+;			padded w/blanks
+;	 9-11	=> type, converted to upper case,
+;			padded w/blanks
+;	12-15	=> set to zero
+;	16-23	=> password, convered to upper case,
+;			padded w/blanks
+;	24-25	=> address of password field in 'filename',
+;			set to zero if password length=0
+;	26	=> length of password (0-8)
+;	27-31	=> left as is
+
+	mov ax,u_wrkseg
+	push ds ! mov ds,ax			;DS->u_wrkseg
+	push es ! mov es,ax			;ES->u_wrkseg for string ops
+	mov bx,dx ! mov si,pcb_flnmptr[bx]	;SI->nxt char in parse string
+	mov bx,pcb_fcbptr[bx]			;BX -> FCB
+	call fcbi ! call debl			;init FCB, deblank parse str
+	mov bp,e_badfname			;BAD FILENAME
+						;BP=error code if error
+	call delim ! jnz prs1			;chk 1st char
+	    jmp pfn_endp
+prs1:	mov ch,al ! inc si ! mov al,[si]	;see if Disk spec
+	cmp al,':' ! jne prs2
+	    mov bp,e_illdisk			;drive specified
+	    mov al,ch ! sub al,'A' ! jc pfn_err	;see if legal
+	    cmp al,16 ! jge pfn_err
+		inc al ! mov fcb_dr[bx],al	;good drv, set fcb_dr field
+		mov bp,e_badfname
+		inc si ! call delim ! jnz prs3	;check nxt char
+		    cmp al,'.' ! je pfn_err		;hit delim
+		    cmp al,':' ! je pfn_err		;  see if legal
+		    cmp al,';' ! je pfn_err
+			jmp prs3
+prs2:	dec si					;use default disk
+
+prs3:						;parse filename
+	mov di,bx ! lea bx,fcb_name[di]
+	mov ch,8 ! call setfld			;fill in FCB
+	cmp ch,0 ! jne prs4
+	    call delim ! jz prs4		;see if more than 8 chars
+pfn_err:	mov cx,bp
+		mov bx,0ffffh ! pop es ! pop ds ! ret
+prs4:	cmp al,'.' ! jnz prs5				;see if filetype
+	    mov bp,e_badftype
+	    mov ch,3 ! lea bx,fcb_type[di]
+	    inc si ! call setfld			;fill in FCB
+	    cmp ch,0 ! jne prs5
+		call delim ! jz prs5
+		   jmp pfn_err
+
+		;parse passwd
+prs5:	
+	cmp al,';' ! jnz prs8			;see if password delim
+	    mov bp,e_ill_passwd
+	    mov ch,8 ! lea bx,fcb_pwd[di]
+	    inc si
+	    mov fcb_pptr[di],si			;pointer to password if any
+	    call setfld 			;yes
+	    mov cl,8 ! sub cl,ch
+	    mov fcb_plen[di],cl
+	    cmp cl,0 ! jne prs51
+		mov fcb_pptr[di],0		;no password
+prs51:	    cmp ch,0 ! jne prs8
+		call delim ! jz prs8
+		    jmp pfn_err
+
+prs8:	mov bx,si ! call debl			;see if more to parse
+	call delim ! jnz pfn_out		;if yes,exit
+	    mov bx,si
+	    cmp al,0 ! je pfn_endp
+	    cmp al,cr ! jne pfn_out
+pfn_endp:	mov bx,0			;NOPE
+pfn_out:sub cx,cx ! pop es ! pop ds ! ret	;exit
+
+setfld:		; fill in a field until end of field or delim
+;------
+	pop dx ! call delim ! push dx
+	jz setret
+	    cmp al,'*' ! jnz setfld1
+		mov byte ptr [bx],'?'
+		inc bx ! dec ch ! jnz setfld
+		    jmp setfld2
+setfld1:    mov [bx],al ! inc bx ! dec ch
+setfld2:    inc si ! cmp ch,0 ! jne setfld
+setret:	ret
+
+delim:		; see if char is delim, if not UPPER it, err if illegal
+;-----
+;	input:	SI -> next char in parse string
+;	output:	'z' flag on if delimiter found
+;		character converted to UPPER if 'a'-'z'
+;		AL = converted char
+
+	mov cl,ndelims ! mov al,[si]		;See if Delimiter
+	push di ! mov di,offset delims		;look at delim string
+delnxt:	cmp cl,0 ! je no_del			;if end of delims,not delim
+	    cmp cs:[di],al ! je delret		;if delim, ret w/ z set
+		dec cl ! inc di ! jmps delnxt	;try next delim
+no_del:	cmp al,' ' ! ja del_up			;not delim, check graphic
+	    pop di ! pop bx ! mov cx,e_badfname	;not graphic, err
+	    jmp pfn_err				;go directly out, bypass ret
+del_up:	cmp al,'a' ! jb delret			;if below 'a', no high bit,ret
+	    cmp al,'z' ! ja del_noup		;if above 'z', 
+		and al,05fh			;make 'a'-'z' UPPER CASE
+del_noup:   and al,07fh				;strip high bit
+delret:	pop di ! ret
+
+delims	db	0,tab,cr,'.:;=,/[]<> '
+ndelims	equ	(offset $)-(offset delims)
+
+debl:			;strip leading blanks
+;-------
+;	input:	SI -> parse string
+;	output:	SI -> first non-blank or tab char
+
+	cmp byte ptr [si],' ' ! je blnk
+	    cmp byte ptr [si],tab ! je blnk
+		ret
+blnk:	inc si ! jmps debl
+
+fcbi:		; Initialize FCB
+;-------
+	mov di,bx ! sub ax,ax
+	sub cx,cx ! stosb			; 0   =0
+	mov al,' ' ! mov cl,11 ! rep stosb	; 1-11=' '
+	mov al,0 ! mov cl,2 ! rep stosw		;12-15=0
+	mov al,' ' ! mov cl,8 ! rep stosb	;16-23=' '
+	mov al,0 ! mov cl,3 ! rep stosb		;24-26=0
+	ret
+
