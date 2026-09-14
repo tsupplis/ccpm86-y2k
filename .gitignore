@@ -23,6 +23,7 @@ asm/*.lib
 private/**
 local/**
 **/*.img
-src/*.cmd
+**/*.cmd
+**/*.con
 **/.*.swp
 **/.DS_Store
