@@ -58,6 +58,7 @@ open$output$files: procedure;
 end open$output$files;
 
 userbreak: proc byte;  /* test if keyboard break from user */
+  return false;
   if not constat then return false; /* test console status */
   if readconsole then;  /* skip first break key */
   do forever;

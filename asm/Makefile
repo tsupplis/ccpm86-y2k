@@ -19,7 +19,7 @@ LIB_OBJS=brexpr.obj cm.obj cm2.obj cmac1.obj cmac2.obj cmac3.obj cmac4.obj \
 all: $(TOOLS)
 
 asm86.cmd: c86lnk.obj mainp.obj asm86.lib
-	$(LINK86) asm86=c86lnk,mainp,'asm86.lib[search,data[ori[0],max[1000],add[200]]]'
+	$(LINK86) asm86=c86lnk,mainp,'asm86.lib[search,data[ori[0],max[1000],add[500]]]'
 
 # LIB-86's command line can't hold this many modules, so drive it from a
 # response file (see doc/plm.pdf sec. 8.5): LIB86 asm86 [INPUT] reads

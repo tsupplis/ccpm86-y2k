@@ -25,11 +25,11 @@ flag_sec   equ	2	      ; flag 1 = second flag
 flag_min   equ	3	      ; flag 2 = minute flag
 ldtabsiz   equ	0aah	      ; ldtablen=11, 10 entries
 
-mpm	equ	true          ; MP/M-86 or
+mpm	equ	false          ; MP/M-86 or
 ccpm	equ	not mpm       ; CCP/M-86
 
-BCPM	equ	false	      ; CP/M-86 BDOS
+BCPM	equ	fasle	      ; CP/M-86 BDOS
 BMPM	equ	not BCPM      ; multi-process BDOS
 
-netversion equ  true          ; includes network changes
-
+netversion equ  false          ; includes network changes
+
