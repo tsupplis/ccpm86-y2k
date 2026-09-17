@@ -1,11 +1,11 @@
-SUBDIRS=tools asm ddt86 kernel rsps genccpm
+SUBDIRS=tools commands kernel rsps genccpm
 
 DISTDIR=dist
 DISTZIP=dist.zip
 Y2KDISTZIP=y2k-dist.zip
 
 all clean:
-	@for d in $(SUBDIRS); do \
+	for d in $(SUBDIRS); do \
 		$(MAKE) -C $$d $@; \
 	done
 

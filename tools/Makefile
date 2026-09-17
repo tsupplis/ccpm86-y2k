@@ -14,7 +14,7 @@ DRC86=drccpm_cc
 DRCLINK86=drccpm_link
 
 TOOLS=date.cmd era.cmd eraq.cmd gencmd.cmd ed.cmd help.cmd show.cmd \
-    set.cmd dir.cmd tod.cmd type.cmd pip3.cmd pip4.cmd sdir.cmd ren.cmd \
+    set.cmd dir.cmd type.cmd pip3.cmd pip4.cmd sdir.cmd ren.cmd \
     submit.cmd vcmode.cmd systat.cmd chset.cmd initdir.cmd
 
 SNIPPETS=

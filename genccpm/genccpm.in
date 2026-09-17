@@ -1,4 +1,4 @@
-verbose=n destdrive=a: deletesys=y
+verbose=y destdrive=a: deletesys=y
 sysparams
 sysdrive=a: tmpdrive=a: cmdlogging=n osstart=8008
 
