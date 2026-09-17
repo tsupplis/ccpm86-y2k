@@ -25,7 +25,7 @@ flag_sec   equ	2	      ; flag 1 = second flag
 flag_min   equ	3	      ; flag 2 = minute flag
 ldtabsiz   equ	0aah	      ; ldtablen=11, 10 entries
 
-mpm	equ	false          ; MP/M-86 or
+mpm	equ	true          ; MP/M-86 or
 ccpm	equ	not mpm       ; CCP/M-86
 
 BCPM	equ	false	      ; CP/M-86 BDOS

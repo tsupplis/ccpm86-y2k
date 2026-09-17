@@ -11,6 +11,11 @@ bdos.con: bdos.obj
 	$(LINK86) $@=$< '[data[origin[0]]]'
 	@cmdinfo $@
 
+xios.con: xios.h86
+	$(GENCMD) $< 8080
+	mv $(basename $@).cmd $@
+	@cmdinfo $@
+
 %.h86: %.loc
 	$(INTEL_OH86) $^
 	mv $*.hex $*.h86

@@ -3,9 +3,18 @@ DRCLINK86=drccpm_link
 
 TOOLS=genccpm.cmd
 
-SNIPPETS=
+SNIPPETS= ccpm.sys
+
+CONS=bdos.con cio.con mem.con rtm.con sup.con sysdat.con xios.con
+RSPS=abort.rsp clock.rsp dir.rsp echo.rsp pin.rsp serin.rsp serout.rsp tmp.rsp vout.rsp
 
 all: $(TOOLS) $(SNIPPETS)
+
+
+ccpm.sys: genccpm.cmd $(CONS) $(RSPS)
+	#@cp ../kernel/*.con .
+	#@cp ../rsp*/*.rsp .
+	@emu2 genccpm.cmd < genccpm.in
 
 genccpm.cmd: genc1.obj genc2.obj genc3.obj genc4.obj genc5.obj genc6.obj
 	$(DRCLINK86) genccpm[map]=genc1,genc2,genc3,genc4,genc5,genc6 [libsyms]
@@ -19,5 +28,18 @@ genccpm.cmd: genc1.obj genc2.obj genc3.obj genc4.obj genc5.obj genc6.obj
 %.obj: %.c
 	$(DRC86) -o$@ $^
 
+ccpm86.img: ccpm.sys ccpm86base.img
+	cp ccpm86base.img ccpm86.img
+	cpmcp -f ibmpc-514ss ccpm86.img ccpm.sys 0:
+	cpmcp -f ibmpc-514ss ccpm86.img startup.0 0:
+	cpmls -F -f ibmpc-514ss ccpm86.img 0:*.*
+
+test: ccpmtest
+
+ccpmtest: ccpm86.img 
+	@./ccpm86
+
 clean:
-	rm -f *.sys *.cmd *.obj *.h86 *.sym *.lin *.lst *.prn ccpmtest.img
+	rm -f *.sys *.cmd *.obj *.h86 *.sym *.lin *.lst *.prn 
+	rm -f *.con *.rsp
+	rm -f ccpm86.img ccpmtest.img

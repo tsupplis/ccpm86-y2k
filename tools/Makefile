@@ -9,6 +9,7 @@ RASM86=pcdev_rasm86
 LINK86=pcdev_linkcmd
 PLI86=drpli_pc
 PLILINK86=drpli_link
+PLIOBJFIX=drpli_objfix
 DRC86=drccpm_cc
 DRCLINK86=drccpm_link
 
@@ -27,6 +28,10 @@ submit.cmd: submit.h86
 initdir.cmd: initdir.obj initdira.obj diomod.obj
 	$(PLILINK86) initdir [locals],initdira,diomod
 	cmdinfo $@
+
+initdir.obj: initdir.pli
+	$(PLI86) $< \$$dl
+	$(PLIOBJFIX) $@
 
 diomod.obj: diomod.a86
 	$(RASM86) $^

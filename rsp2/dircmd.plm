@@ -1,0 +1,13 @@
+$TITLE('CONCURRENT CP/M 86 --- DIR 1.0 ')
+$compact
+
+/* Conditional compile: 
+	rsp=0ffh        produce a DIR.RSP type of file
+	rsp=0	        produce a DIR.CMD file
+ */
+$set(rsp=0h)
+
+$include(dirm.plm)
+
+
+

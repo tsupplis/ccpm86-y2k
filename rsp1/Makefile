@@ -2,15 +2,17 @@ INTEL_PLM86=intel_plm86
 INTEL_ASM86=intel_asm86
 INTEL_LOC86=intel_loc86
 INTEL_LINK86=intel_link86
+INTEL_OH86=intel_oh86
 ASM86=cpm86_asm86
 GENCMD=cpm86_gencmd
 
-SNIPPETS= clock.rsp echo.rsp serin.rsp serout.rsp tmp.rsp pin.rsp vout.rsp
+SNIPPETS= serin.rsp serout.rsp tmp.rsp pin.rsp vout.rsp 
 
 all: $(SNIPPETS)
 
-pin.cmd: pin.loc
+pin.rsp: pin.h86
 	$(GENCMD) $< 'data[b1000]'
+	mv $(basename $@).cmd $@
 	cmdinfo $@
 
 pin.loc: rhpin.obj pxios.obj pin.obj 
@@ -18,11 +20,15 @@ pin.loc: rhpin.obj pxios.obj pin.obj
 	$(INTEL_LOC86) $(basename $@).lnk 'od(sm(code,dats,data,stack,const))' \
 		'ad(sm(code(0),dats(10000h)))' 'ss(stack(0))'  to $(basename $@).loc
 
-pin.rsp: pin.h86
+vout.rsp: vout.h86
+	$(GENCMD) $< 'data[b1000]'
+	mv $(basename $@).cmd $@
+	cmdinfo $@
 
-pin.h86: rhpin.obj pxios.obj pin.obj
-
-vout.h86: rhvout.obj pxios.obj vout.obj
+vout.loc: rhvout.obj pxios.obj vout.obj 
+	$(INTEL_LINK86) rhvout.obj, pxios.obj, $(basename $@).obj to $(basename $@).lnk
+	$(INTEL_LOC86) $(basename $@).lnk 'od(sm(code,dats,data,stack,const))' \
+		'ad(sm(code(0),dats(10000h)))' 'ss(stack(0))'  to $(basename $@).loc
 
 %.h86: %.loc
 	$(INTEL_OH86) $^

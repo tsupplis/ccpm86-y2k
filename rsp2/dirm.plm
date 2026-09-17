@@ -1,0 +1,531 @@
+/* dirm: 
+	This is the module included by DIRRSP or DIRCMD.
+
+  Revised:
+    Jan  80  by Thomas Rolander
+    July 81  by Doug Huskey
+    June 82  by Bill Fitler
+    July 82  by Danny Horovitz (made an RSP)
+    Dec  82  by Fran Borda     (conditional comp)
+    Mar  83  by Bill Fitler    (   "         "  )
+    Mar  83  by Danny Horovitz (control C fixes)
+
+  Conditional compile: 
+	rsp=0ffh        produce a DIR.RSP type of file
+	rsp=0	        produce a DIR.CMD file
+ */
+
+/**** Vax commands to compile DIR.RSP and DIR.CMD:
+
+	$ ccpmsetup
+	$ plm86 dircmd.plm 'p1' 'p2' 'p3' 'p4' optimize(3) debug
+	$ link86 f1:scd.obj, dircmd.obj  to dircmd.lnk
+	$ loc86 dircmd.lnk od(sm(code,dats,data,stack,const))-
+		  ad(sm(code(0), dats(10000h)))  ss(stack(+32)) to dircmd.
+	$ h86 dircmd
+	$ ! DIR.RSP
+	$ ! Note: separate code and data
+	$ asm86 rhdir.a86		!Rsp Header DIR
+	$ plm86 dirrsp.plm 'p1' 'p2' 'p3' 'p4' optimize(3) debug
+	$ link86 rhdir.obj, dirrsp.obj  to dirrsp.lnk
+	$ loc86 dirrsp.lnk od(sm(code,dats,data,stack,const))-
+		  ad(sm(code(0), dats(10000h)))  ss(stack(0)) to dirrsp.
+	$ h86 dirrsp
+
+**** Then, on a micro:
+	A>vax dircmd.h86 $fans
+	A>vax dirrsp.h86 $fans
+	A>gencmd dircmd data[b1000]
+	A>ren dir.cmd=dircmd.cmd
+	A>gencmd dirrsp data[b1000]
+	A>ren dir.rsp=dirrsp.cmd
+
+**** Notes: Both DIRCMD.PLM and DIRRSP.PLM include DIRM.PLM, after setting
+		RSP flag appropriately.
+
+****/
+
+
+dir:
+do;
+
+$include (:f1:copyrt.lit)
+
+$include (:f1:comlit.lit)
+
+$include (:f1:mfunc.lit)
+
+$include (:f1:proces.lit)
+
+$include (:f1:qd.lit)
+
+  /**************************************
+   *                                    *
+   *       B D O S   INTERFACE          *
+   *                                    *
+   **************************************/
+
+
+  mon1:
+    procedure (func,info) external;
+      declare func byte;
+      declare info address;
+    end mon1;
+
+  mon2:
+    procedure (func,info) byte external;
+      declare func byte;
+      declare info address;
+    end mon2;
+
+  mon3:
+    procedure (func,info) address external;
+      declare func byte;
+      declare info address;
+    end mon3;
+
+  mon4:
+    procedure (func,info) pointer external;
+      declare func byte;
+      declare info address;
+    end mon4;
+
+
+
+patch: procedure public;	/* dummy area for patching code segments */
+  declare i address;
+  /* first statement = 9 bytes, rest are 5 bytes */
+	i=i+5;  i=i+5;  i=i+5;  i=i+5;  i=i+5;
+	i=i+5;  i=i+5;  i=i+5;  i=i+5;  i=i+5;
+	i=i+5;  i=i+5;  i=i+5;  i=i+5;  i=i+5;    /* about 79 bytes */
+  end patch;
+
+
+$if rsp
+  declare fcb (36) byte;                  /* 1st default fcb    */
+  declare fcb16 (1) byte at (@fcb(16));   /* 2nd default fcb    */
+$else
+  declare fcb (1)   byte    external;	  /* 1st default fcb    */
+  declare fcb16 (1) byte    external;	  /* 2nd default fcb    */
+$endif
+
+  write$console:
+    procedure (char);
+      declare char byte;
+      call mon1 (2,char);
+    end write$console;
+
+  print$buf:
+    procedure (buffer$address);
+      declare buffer$address address;
+      call mon1 (9,buffer$address);
+    end print$buf;
+
+  check$ctrl$c:
+    procedure byte;
+$if rsp
+      if (dir$pd.flag and pf$ctlC) <> 0 then
+      do;
+         dir$pd.flag = dir$pd.flag and not double(pf$ctlC);
+         return(true);
+      end;
+$endif
+      return (false);
+    end check$ctrl$c;
+
+  search$first:
+    procedure (fcb$address) byte;
+      declare fcb$address address;
+      return mon2 (17,fcb$address);
+    end search$first;
+
+  search$next:
+    procedure (fcb$address) byte;
+      declare fcb$address address;
+      return mon2 (18,fcb$address);
+    end search$next;
+
+  setdma: procedure(dma);
+    declare dma address;
+    call mon1(26,dma);
+    end setdma;
+
+ 
+  get$user$code:
+    procedure byte;
+      return mon2 (32,0ffh);
+    end get$user$code;
+  
+   set$user$code:
+    procedure(user);
+      declare user byte;
+      call mon1 (32,user);
+    end set$user$code;
+  
+terminate:
+    procedure;
+      call mon1 (0,0);
+    end terminate;
+
+declare
+    parse$fn structure (
+      buff$adr  address,
+      fcb$adr   address),
+    delimiter based parse$fn.buff$adr byte;
+  declare tail$len address;
+
+  parse: procedure address;
+    return mon3(152,.parse$fn);
+    end parse;
+
+
+    crlf:
+    procedure;
+      call write$console (0dh);
+      call write$console (0ah);
+    end crlf;
+
+
+/* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
+
+
+                * * *  GLOBAL VARIABLES  * * *
+
+
+ * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */
+
+
+
+declare dir$title (*) byte initial
+  ('Directory for User  x:','$');
+
+declare (sys,temp,dcnt,cnt,user) byte;
+declare 
+   i          byte,
+   new$user   byte,
+   sys$exists byte,
+   incl$sys   byte,
+   option     byte;
+
+declare 
+   dirbuf (128) byte;
+
+
+/* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
+
+
+                * * *  DIRECTORY DISPLAY  * * *
+
+
+ * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */
+
+
+                  /* display directory heading */
+heading: procedure;
+
+    if user > 9 then
+    do;
+      dir$title(19) = '1';
+      dir$title(20) = user - 10 + '0';
+    end;
+    else
+    do;
+      dir$title(19) = ' ';
+      dir$title(20) = user + '0';
+    end;
+    call print$buf (.dir$title);
+    end heading;
+
+/* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
+
+/*
+help: procedure;
+    call mon1(m$prt$buf, .(cr, lf, tab, tab, tab ,'DIR EXAMPLES$'));
+    call mon1(m$prt$buf, .(cr, lf, lf, 'dir', tab, tab,
+      '(show all directory files on current drive and user)
+    call mon1(m$prt$buf, .(cr, lf, 'dir [g3]', tab, tab, tab, tab,
+      '(show non system files under user 3)$'));
+    call mon1(m$prt$buf, .(cr, lf, 'dir a: b: [s]', tab, tab, tab,
+      tab, '(show all files under current user on a: and b:)$'));
+    call terminate;
+end help;
+*/
+
+/* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
+
+                  /* do next directory display */
+directory: procedure boolean;
+
+    shown$nothing = false;
+    if new$user then do;
+        call heading;
+        new$user = false;
+        end;
+    sys$exists = false;
+    cnt = -1;
+    /* if drive is 0 (default) 
+       then set to current disk */
+    if fcb(0) = 0
+      then fcb(0) = mon2 (m$curdsk,0) + 1;
+    if fcb(1) = ' ' then
+    /* check for blank filename => wildcard */
+    do i = 1 to 11;
+      fcb(i) = '?';
+    end;
+    /* get first file */
+    if (dcnt := search$first (.fcb)) <> 0ffh then
+    do while dcnt <> 0ffh;
+      temp = shl(dcnt,5);
+      sys = ((dirbuf(temp+10) and 80h) = 80h);
+      if (dirbuf(temp) = user) and
+         (incl$sys or not sys) then
+      do;
+        if ((cnt:=cnt+1) mod 4) = 0 then
+        do;
+          call crlf;
+          call write$console ('A'+fcb(0)-1);
+        end;
+        else
+        do;
+          call write$console (' ');
+        end;
+        call write$console (':');
+        call write$console (' ');
+        do i = 1 to 11;
+          if i = 9 then call write$console (' ');
+          call write$console
+            (dirbuf(temp+i) and 7fh);
+          if check$ctrl$c then
+            return(false);
+        end;
+      end;
+      else if sys then
+        sys$exists = true;
+      dcnt = search$next (.fcb);
+    end;
+    if cnt = -1 then
+    do;
+      call print$buf (.(0dh,0ah,
+        'File not found.','$'));
+    end;
+    if sys$exists then 
+      call print$buf (.(0dh,0ah,
+        'System Files Exist','$'));
+    return(true);
+    end directory;
+
+/* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
+
+
+                    * * *  PARSING  * * *
+
+
+ * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */
+
+
+      /* parse one file name, return true if got one */
+parse$file: procedure boolean;
+  dcl i address;
+  dcl buf based parse$fn.buff$adr (1) byte;
+  dcl parse$ret address;
+
+  if (parse$ret := parse$fn.buff$adr) = 0 then
+    return(false);
+  fcb(0), i = 0;
+  parse$ret = parse;                        /* kludge around        */ 
+  do while parse$ret = 0 and buf(i) = '[';  /* parse file name bugs */
+    if (i := findb(@buf(i), ']', tail$len - i)) <> 0ffffh then
+    do;
+      parse$fn.buff$adr = .buf(i) + 1;        /* skip right bracket */
+      i = 0;
+      parse$ret = parse;
+    end;
+    else
+      buf(i) = 0;
+  end;
+  parse$fn.buff$adr = parse$ret;
+
+
+  if parse$fn.buff$adr <> 0ffffh then
+  do;
+    if fcb(1) <> ' ' then
+    do;
+      if parse$fn.buff$adr <> 0 and delimiter <> '[' and delimiter <> 0 then
+        parse$fn.buff$adr = parse$fn.buff$adr + 1;
+      return(true);             /* parse$fn.buff$adr could = 0 */
+    end;
+    else if fcb(0) <> 0 and fcb(1) = ' ' then  /* drive spec */
+    do;
+      call setb('?', @fcb(1), 11);
+      return(true);
+    end;
+  end;
+  else /* if parse$fn.buff$adr = 0ffffh then */
+  do;
+    call print$buf(.(cr, lf, 'Invalid filespec.$'));
+    shown$nothing = false;         /* don't show directory */
+    return(false);    /* also if parse$fn.buf$adr = 0 and fcb(0) = ' ' */
+  end;
+end parse$file;
+
+
+/* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
+
+
+            /* parse & interpret all options - assume global */
+parse$options: procedure boolean;
+  dcl (n,i) word;
+  dcl (options, in$brackets, error) boolean;
+  i = 0;          /* parse file name doesn't work with delimiters */
+  parse$fn.fcb$adr = .dirbuf;
+  error = false;
+  options = true;
+  do while options and not error;
+    if (n := findb(@tbuff(i), '[', tail$len - i)) = 0ffffh then
+      options = false;
+    else
+    do;
+      i = i + n + 1;
+      parse$fn.buff$adr = .tbuff(i);
+      in$brackets = true;
+      do while in$brackets and not error;
+        if (parse$fn.buff$adr := parse) <> 0ffffh then
+        do;
+          if dirbuf(1) = 'S' then
+            incl$sys = true;
+          else if dirbuf(1) = 'G' then
+          do;
+            if dirbuf(3) <> ' ' then
+              temp = dirbuf(3) - '0' + 10;
+            else if dirbuf(2) <> ' ' then
+              temp = dirbuf(2) - '0';
+            if temp < 16 then
+            do;
+              call mon1(m$setusr, (user:=temp));
+              new$user = true;
+            end;
+          end;
+          else
+            error = true;
+        end;  /* if parse */
+        if delimiter = ']' or parse$fn.buff$adr = 0 or
+          parse$fn.buff$adr = 0ffffh then
+          in$brackets = false;
+      end;  /* while in$brackets */
+    end;  /* else               */
+  end;  /* while options       */
+
+  if error then
+  do;
+    call print$buf(.(cr, lf, 'Invalid Command Option$'));
+    return(false);
+    /* call help; */
+  end;
+  return(true);
+end parse$options;
+
+
+
+/* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
+
+
+             * * *  M A I N   P R O G R A M  * * *
+
+
+ * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */
+
+$if rsp
+ declare cpd$pointer pointer;             /* Calling PD pointer stuff */
+ declare cpd$ptr structure (
+    offset address, segment address) at (@cpd$pointer);
+ declare calling$pd based cpd$pointer pd$structure;
+ declare dpd$pointer pointer;            /* DIR RSP PD pointer stuff */
+ declare dpd$ptr structure (
+    offset address, segment address) at (@dpd$pointer);
+ declare dir$pd based dpd$pointer pd$structure;
+ declare qdbuf (131) byte;
+ declare dirqd qd$structure initial
+   (0, 0, 0, qf$keep + qf$rsp, 'DIR     ', 131, 1, 0, 0, 0, 0, .qdbuf);
+ declare qpbbuf (131) byte;
+ declare cpd$offset address at (@qpbbuf(0));
+ declare tbuff (128) byte at (@qpbbuf(2));
+ declare dirqpb qpb$structure initial
+   (0, 0, 0, 0, .qpbbuf, 'DIR     ');
+$else
+ declare tbuff (128) byte external;
+$endif
+
+declare shown$nothing boolean;
+
+plmstart: procedure public;
+
+  /* initialization */
+
+$if rsp
+  call mon1(m$make$q, .dirqd);      
+  call mon1(m$open$q, .dirqpb);
+  call mon1(m$set$prior, 200);      /* Set priority same as other transients*/
+$else  
+  user = get$user$code;			/* ?????   whf */
+  incl$sys = (fcb(1) = 'S');		/* ?????  why exclude if rsp?  whf */
+$endif
+
+  call setdma(.dirbuf);                        
+$if rsp
+  cpd$pointer,dpd$pointer = mon4(m$sysdat, 0);
+  dpd$ptr.offset = mon3(m$getpd,0);
+  /* Don't allow control S, turn on tempkeep for control C checking */
+  dir$pd.flag = dir$pd.flag or pf$noctls or pf$tempkeep;
+  /* Read RSP Queue forever */
+  do forever;
+     call mon1(m$readq, .dirqpb);
+     dir$pd.flag = dir$pd.flag and not double(pf$ctlC);
+     /* Could be on from last DIR */
+     /* set defaults same as calling process's, have both PDs so will poke */
+     /* and not call O.S. */         
+     cpd$ptr.offset = cpd$offset;
+     call mon1(m$setcns, calling$pd.cns);
+     call mon1(m$setusr, (user := calling$pd.user));
+     call mon1(m$select, calling$pd.dsk);
+$endif
+     new$user = true;
+     sys$exists, incl$sys = false;
+     tail$len = findb(@tbuff, 0, 128);
+
+     /* scan for options - all are global */
+
+     if not parse$options then
+       goto done;                  /* option error */
+
+     /* do command line */
+
+     shown$nothing = true;
+$if rsp 
+     parse$fn.buff$adr = .tbuff;
+$else
+     parse$fn.buff$adr = (.tbuff) + 1;/* Skip # of bytes in buffer */
+$endif 
+     parse$fn.fcb$adr = .fcb;
+     do while parse$file;           /* false when no more files, sets */
+       if not directory then        /* shown$nothing=false if parsing error */
+         goto done;                 /* directory = false if console inpute */
+     end;
+
+     if shown$nothing then          /* no files specified on command line */
+     do;
+       call setb('?', @fcb(1), 11);
+       if not directory then
+         goto done;                 /* false on console input */
+     end;
+done:
+$if rsp
+    call mon1(m$detach, 0);
+    end; /* do forever */
+$else   
+    call terminate;
+$endif
+  
+end plmstart;
+
+end dir;
+

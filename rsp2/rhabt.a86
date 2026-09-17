@@ -1,0 +1,101 @@
+;	Code and Data Interface	for ABORT.RSP
+;	August 10, 1981
+;	July   27, 1982      (updated)
+;	Jan 1983  whf - added reg save to xdos
+;	Mar 1983  dh  - shrunk to resonable size
+
+name	rhabt		;Rsp Header ABorT
+
+cgroup	group	code
+dgroup  group   dats 
+	public	xdos,mon1,mon2,mon3,mon4
+	public rsplink
+	extrn  plmstart:near
+
+assume   cs:cgroup,ds:dgroup
+
+dats	segment 'DATA'
+org	0
+rsphdr_len	equ	16
+pd_len		equ	30H
+uda_len		equ	100H
+rsp_top		equ	0
+rsp_pd		equ	rsp_top + rsphdr_len
+rsp_uda		equ	rsp_pd + pd_len
+rsp_bottom	equ	rsp_uda + uda_len
+	org	rsp_top
+				;RSP header
+rsplink	dw	0		;becomes system data page paragraph
+sdatvar dw	0
+ncopies db	0
+	dw	0,0,0,0, 0
+	db	0
+	org	rsp_pd
+pd	dw	0,0		;link fields
+	db	0		;status
+	db	190		;priority
+	dw	3		;flags - system and keep
+	db	'ABORT   '	;name
+	dw	rsp_uda/10h	;uda paragraph
+	db	0,0		;disk,user
+        db	0,0		;ldisk,luser
+	dw	0		;puremem - not re-entrant
+				;rest of pd
+
+org	rsp_uda			;start of uda
+uda	dw	0
+	dw	0		;DMA must be explicitly set
+	dw	0,0,0,0, 0,0,0,0, 0,0,0,0
+	dw	0,0,0,0, 0,0,0,0, 0,0,0,0
+	dw	offset stk_top
+org	rsp_uda + 60H
+	db	1		;insys = 1, always use UDA stack
+	db	0
+        dw	0cccch,0cccch,0cccch,0cccch	;62
+        dw	0cccch,0cccch,0cccch,0cccch	;6A
+        dw	0cccch,0cccch,0cccch,0cccch	;72
+        dw	0cccch,0cccch,0cccch,0cccch	;7A
+        dw	0cccch,0cccch,0cccch,0cccch	;82
+        dw	0cccch,0cccch,0cccch,0cccch	;8A
+        dw	0cccch,0cccch,0cccch,0cccch	;92
+        dw	0cccch,0cccch,0cccch,0cccch	;9A
+        dw	0cccch,0cccch,0cccch,0cccch	;A2
+        dw	0cccch,0cccch,0cccch,0cccch	;AA
+        dw	0cccch,0cccch,0cccch,0cccch	;B2
+        dw	0cccch,0cccch,0cccch,0cccch	;BA
+        dw	0cccch,0cccch,0cccch,0cccch	;C2
+        dw	0cccch,0cccch,0cccch,0cccch	;CA
+        dw	0cccch,0cccch,0cccch,0cccch	;D2
+        dw	0cccch,0cccch,0cccch,0cccch	;DA
+        dw	0cccch,0cccch,0cccch,0cccch	;E2
+        dw	0cccch,0cccch,0cccch,0cccch	;EA
+	dw	0cccch,0cccch,0cccch,0cccch	;F2
+stk_top	dw	plmstart,0,0			;initial IRET
+
+org	rsp_bottom
+
+datsend equ	offset $
+dats ends
+
+code	segment public 'CODE'
+        org     0
+
+	db	'COPYRIGHT (C) 1982,'
+	db	' DIGITAL RESEARCH '
+
+xdos	proc	
+	push	bp
+	mov	bp,sp
+	mov	dx,[bp+4]
+	mov	cx,[bp+6]
+	int	224
+	pop	bp
+	ret	4
+xdos	endp
+
+mon1	equ	xdos
+mon2	equ	xdos
+mon3	equ	xdos
+mon4    equ     xdos
+code	ends
+end

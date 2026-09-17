@@ -1,3 +1,4 @@
+
 /* Concurrent CP/M function numbers */
 
 dcl           m$prtbuf              lit       '9',
@@ -28,6 +29,7 @@ dcl           m$prtbuf              lit       '9',
               m$delay               lit       '141',
               m$dispatch            lit       '142',
               m$setprior            lit       '145',
+              m$attach              lit       '146',
               m$detach              lit       '147',
               m$setcns              lit       '148',
               m$parse               lit       '152',
@@ -40,3 +42,5 @@ dcl           m$prtbuf              lit       '9',
 
 dcl           mi$sleep              lit       '0212H',
               mi$wakeup             lit       '0213H';
+              
+

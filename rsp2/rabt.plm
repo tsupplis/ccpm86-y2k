@@ -1,0 +1,148 @@
+$ title ('CCP/M-86 1.0, Abort a Program - RSP')
+$ compact
+abort:
+do;
+
+/* Modified 3/15/83 to force an ATTACH console call */
+
+$include (:f2:copyrt.lit)
+$include (:f2:comlit.lit)
+$include (:f2:mfunc.lit)
+
+/**** Vax commands for generation:
+
+	$ ccpmsetup					!Set up environment
+	$ asm86 rhabt.a86				!Rsp Header ABorT
+	$ plm86 rabt.plm 'p1' 'p2' 'p3' 'p4' optimize(3) debug	!Rsp ABorT
+	$ link86 rhabt.obj, rabt.obj to rabt.lnk
+	$ loc86 rabt.lnk od(sm(code,dats,data,stack,const))-
+		  ad(sm(code(0), dats(10000h)))  ss(stack(0)) to rabt.
+	$ h86 rabt
+
+**** Then, on a micro:
+	A>vax rabt.h86 $fans
+	A>gencmd rabt data[b1000]
+	A>ren abort.rsp=rabt.cmd
+
+**** Notes:
+	The stack is declared in the assemble module, RSPABT.A86.
+	The const(ants) come last to force hex generation.
+****/
+
+
+  mon1:
+    procedure (func,info) external;
+      declare func byte;
+      declare info address;
+    end mon1;
+
+  mon2:
+    procedure (func,info) byte external;
+      declare func byte;
+      declare info address;
+    end mon2;
+
+  mon3:
+    procedure (f,a) address external;
+      dcl f byte, a address;
+    end mon3;
+
+patch: procedure public;	/* dummy area for patching code segments */
+  declare i address;
+  /* first statement is 9 bytes, rest are 5 bytes */
+	i=i+5;  i=i+5;  i=i+5;  i=i+5;  i=i+5;
+	i=i+5;  i=i+5;  i=i+5;  i=i+5;  i=i+5;     /* about 54 bytes */
+  end patch;
+
+$include (:f2:proces.lit)
+
+  dcl pd$pointer pointer;
+  dcl pd$ptr structure (offset word, segment word) at(@pd$pointer);
+  dcl pd based pd$pointer pd$structure;
+
+  dcl rsplink word external;
+
+$include (:f2:qd.lit)
+
+  dcl abt$qd$buf (131) byte;
+  dcl abt$cmd structure(
+    pd address, tail (129) byte);
+  dcl abt$qpb qpb$structure initial(0,0,0,1,.abt$cmd,'ABORT   ');
+  dcl abt$qd qd$structure initial (
+    0,0,0,qf$keep + qf$rsp,'ABORT   ',131,1,0,0,0,0,.abt$qd$buf);
+
+  dcl fcb (32) byte;
+  dcl pfcb structure (
+    filename address,
+    fcbadr address) initial (.abt$cmd.tail, .fcb);
+
+  declare abort$pb structure (
+    pd address,
+    term address,
+    cns byte,
+    net byte,
+    pname (8) byte) initial (
+    0,00ffh,0,0,'        ');
+
+  dcl i byte;
+  dcl console word;
+  dcl mpm$86 lit '1130h';
+
+  /*
+    Main Program
+  */
+
+plm$start:
+  procedure public;
+
+    call mon1(m$makeq,.abt$qd);	        /* make ABORT queue     */
+    call mon1(m$openq,.abt$qpb);        /* open it              */
+    pd$ptr.segment = rsplink;
+    call mon1(m$setprior,200);          /* back to the same as transients */
+
+    do while true;
+      call mon1(m$readq,.abt$qpb);
+      pd$ptr.offset = abt$cmd.pd;       /* set console to same       */
+      call mon1(m$setcns, pd.cns);	/* of who typed ABORT        */
+      abort$pb.cns = pd.cns;
+      pfcb.filename = mon3(m$parse, .pfcb); 
+                                       /* get name of program to abort */
+      call move (8,.fcb(1),.abort$pb.pname);
+      /*      fcb(9)='$';   DEBUG
+              call mon1(m$prtbuf, .fcb(1)); */
+      if pfcb.filename <> 0 then       /* console number specified     */
+      do;
+        pfcb.filename = mon3(m$parse, .pfcb);
+        i = 1; console = 0;
+        do while fcb(i) <> ' ' and i < 4;  
+          if (fcb(i) := fcb(i) - '0') <= 9 then
+          do;
+            console = fcb(i) + 10 * console;
+            i = i + 1;
+          end;
+          else
+            i = 255;                           /* non - numeric */
+        end;
+        if console > 253 or i = 255 then
+        do;
+          call mon1(m$prtbuf, .(cr,lf, 'Illegal Console, Use 0-253 $'));
+          abort$pb.cns = 0ffh;
+        end;
+        else
+          abort$pb.cns = low(console);
+      end;
+
+      if abort$pb.cns <> 0ffh then
+        if mon2(m$abort, .abort$pb) = 0ffh then
+        do;
+          call mon1(m$prtbuf, .(cr,lf, 'Abort Failed.','$'));
+        end;
+                    /* abort first PD found with same name and console */
+                    /* consistent with MP/M-80 II but not MP/M 1.x     */
+      call mon1(m$attach,0);    /* make sure we own the console before */
+      call mon1(m$detach, 0);   /* calling detach                      */
+      pfcb.filename = .abt$cmd.tail;
+    end;
+end plmstart;
+end abort;
+
