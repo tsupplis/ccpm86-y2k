@@ -15,6 +15,8 @@ SNIPPETS=
 
 all: $(TOOLS) $(SNIPPETS)
 
+#  the value for the minimum code group required comes from the start of
+#  the ??seg as listed in ass86.mp2
 ddt86.cmd: ddt86m.h86
 	$(GENCMD) $< 8080 'code[m379]'
 	mv ddt86m.cmd ddt86.cmd
@@ -60,8 +62,8 @@ cpmif.obj: cpmif.a86
 	$(INTEL_PLM86) $^ debug 'optimize(2)' 'pagewidth(100)' xref
 
 clean:
-	rm -f *.sys *.cmd *.obj *.exe *.map *.h86 *.abs *.lnk *.sym 
-	rm -f *.lin *.lst *.prn ccpmtest.img ddt86m.h86 *.abs *.lnk *.mp1
+	rm -f *.sys *.cmd *.obj *.exe *.map *.h86 *.sym 
+	rm -f *.lin *.lst *.prn ccpmtest.img ddt86m.h86 *.abs *.lnk *.mp?
 
 ccpmtest.img: $(TOOLS) Makefile startup.0
 	cp cpmbase.img ccpmtest.img

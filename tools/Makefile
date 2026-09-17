@@ -216,6 +216,7 @@ gencmd.loc: gencmd.obj scd.obj
 
 clean:
 	rm -f *.sys *.loc *.cmd *.obj *.h86 *.sym *.lin *.lst *.prn ccpmtest.img
+	rm -f *.loc *.mp? *.lnk
 
 ccpmtest.img: $(TOOLS) Makefile startup.0
 	cp cpmbase.img ccpmtest.img

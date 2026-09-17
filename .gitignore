@@ -9,6 +9,7 @@ dist/**
 **/*.log
 **/*.sys
 asm/*.lib
+asm/*.mod
 **/.*.swp
 **/*.obj
 **/*.o
