@@ -1,0 +1,191 @@
+
+;
+;	ECHO - Resident System Process
+;	Print Command tail to console
+;
+
+;
+;	DEFINITIONS
+;
+
+ccpmint		equ	224	;ccpm entry interrupt
+c_writebuf	equ	9	;print string
+c_detach	equ	147	;detach console
+c_setnum	equ	148	;set default console
+q_make		equ	134	;create queue
+q_open		equ	135	;open queue
+q_read		equ	137	;read queue
+q_write		equ	139	;write queue
+p_priority	equ	145	;set priority
+
+pdlen		equ	48	;length of Process
+				;  Descriptor
+
+p_cns		equ	byte ptr 020h	;default cns
+p_disk		equ	byte ptr 012h	;default disk
+p_user		equ	byte ptr 013h	;default user
+p_list		equ	byte ptr 024h	;default list
+ps_run		equ	0	;PD run status
+pf_keep		equ	2	;PD nokill flag
+
+rsp_top		equ	0	;rsp offset
+rsp_pd		equ	010h	;PD offset
+rsp_uda		equ	040h	;UDA offset
+rsp_bottom	equ	140h	;end rsp header
+
+qf_rsp		equ	08h	;queue RSP flag
+
+;
+;	CODE SEGMENT
+;
+	CSEG
+	org 0
+
+ccpm:	int ccpmint
+	ret
+
+main:		;create ECHO queue
+	mov cl,q_make ! mov dx,offset qd
+	call ccpm
+		;open ECHO queue
+	mov cl,q_open ! mov dx,offset qpb
+	call ccpm
+		;set priority to normal
+	mov cl,p_priority ! mov dx,200
+	call ccpm
+
+		;ES points to SYSDAT
+	mov es,sdatseg
+
+loop:	;forever
+		;read cmdtail from queue
+	mov cl,q_read ! mov dx,offset qpb
+	call ccpm
+
+		;set default values from PD
+	mov bx,pdadr
+;	mov dl,es:p_disk[bx]	;p_disk=0-15
+;	inc dl ! mov disk,dl	;make disk=1-16
+;	mov dl,es:p_user[bx]
+;	mov user,dl
+;	mov dl,es:p_list[bx]
+;	mov list,dl
+	mov dl,es:p_cns[bx]
+	mov console,dl
+
+		;set default console
+;	mov dl,console
+	mov cl,c_setnum ! call ccpm
+
+		;scan cmdtail and look for '$' or 0.
+		;when found, replace w/ cr,lf,'$'
+
+	lea bx,cmdtail ! mov al,'$' ! mov ah,0
+	mov dx,bx ! add dx,131
+nextchar:
+	cmp bx,dx ! ja endcmd
+	cmp [bx],al ! je endcmd
+	cmp [bx],ah ! je endcmd
+	    inc bx ! jmps nextchar
+endcmd:
+	mov byte ptr [bx],13
+	mov byte ptr 1[bx],10
+	mov byte ptr 2[bx],'$'
+
+		;write command tail
+	lea dx,cmdtail ! mov cl,c_writebuf
+	call ccpm
+		;detach console
+	mov dl,console
+	mov cl,c_detach ! call ccpm
+		;done, get next command	
+	jmps loop
+
+;
+;	DATA SEGMENT
+;
+
+	DSEG
+	org	rsp_top
+
+sdatseg		dw	0,0,0
+		dw	0,0,0
+		dw	0,0
+
+	org	rsp_pd
+
+pd		dw	0,0		; link,thread
+		db	ps_run		; status
+		db	190		; priority
+		dw	pf_keep		; flags
+		db	'ECHO    '	; name
+		dw	offset uda/10h	; uda seg
+		db	0,0		; disk,user
+		db	0,0		; load dsk,usr
+		dw	0		; mem
+		dw	0,0		; dvract,wait
+		db	0,0
+		dw	0
+		db	0		; console
+		db	0,0,0
+		db	0		; list
+		db	0,0,0
+		dw	0,0,0,0
+
+	org	rsp_uda
+
+uda		dw	0,offset dma,0,0	;0
+		dw	0,0,0,0
+		dw	0,0,0,0			;10h
+		dw	0,0,0,0
+		dw	0,0,0,0			;20h
+		dw	0,0,0,0
+		dw	0,0,offset stack_tos,0	;30h
+		dw	0,0,0,0
+		dw	0,0,0,0			;40h
+		dw	0,0,0,0
+		dw	0,0,0,0			;50h
+		dw	0,0,0,0
+		dw	0,0,0,0			;60h
+
+	org	rsp_bottom
+
+qbuf		rb	131		;Queue buffer
+
+qd		dw	0		;link
+		db	0,0		;net,org
+		dw	qf_rsp		;flags
+		db	'ECHO    '	;name
+		dw	131		;msglen
+		dw	1		;nmsgs
+		dw	0,0		;dq,nq
+		dw	0,0		;msgcnt,msgout
+		dw	offset qbuf	;buffer addr.
+
+dma		rb	128	
+
+stack		dw	0cccch,0cccch,0cccch
+		dw	0cccch,0cccch,0cccch
+		dw	0cccch,0cccch,0cccch
+		dw	0cccch,0cccch,0cccch
+		dw	0cccch,0cccch,0cccch
+stack_tos	dw	offset main	; start offset
+		dw	0		; start seg
+		dw	0		; init flags
+
+pdadr		rw	1		; QPB Buffer
+cmdtail		rb	129		; starts here
+		db	13,10,'$'
+
+qpb		db	0,0		;must be zero
+		dw	0		;queue ID
+		dw	1		;nmsgs
+		dw	offset pdadr	;buffer addr.
+		db	'ECHO    '	;name to open
+
+console		db	0
+;disk		db	0
+;user		db	0
+;list		db	0
+
+	end

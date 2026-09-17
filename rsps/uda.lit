@@ -1,0 +1,26 @@
+
+/* MP/M-86 II  User Data Area format - August 8, 1981 */
+
+declare uda$pointer pointer;
+declare uda$ptr structure (offset word, segment word) at (@uda$pointer);
+declare uda based uda$pointer structure (
+	dparam			word,
+	dma$ofst		word,
+	dma$seg			word,
+	func			byte,
+	searchl			byte,
+	searcha			word,
+	searchabase		word,
+	dcnt			word,
+	dblk			word,
+	error$mode		byte,
+	mult$cnt		byte,
+	df$password		(8) byte,
+	pd$cnt			byte,
+        uspace1                 byte,
+        uspace2                 (8) word,
+        uspace3                 (8) word,
+        uspace4                 (8) word,
+        uspace5                 (8) word,
+        uspace6                 (2) word,
+        dinsys                   byte);

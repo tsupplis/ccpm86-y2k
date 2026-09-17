@@ -1,0 +1,37 @@
+/* Queue Descriptor */
+
+dcl qnamsiz lit '8';
+
+dcl qd$structure lit 'structure(
+  link  word,
+  net byte,
+  org byte,
+  flags word,
+  name(qnamsiz) byte,
+  msglen word,
+  nmsgs word,
+  dq word,
+  nq word,
+  msgcnt word,
+  msgout word,
+  buffer word)';
+
+/* queue flag values */
+
+dcl	qf$mx		lit	'001h';	/* Mutual Exclusion	*/
+dcl	qf$keep		lit	'002h';	/* NO DELETE		*/
+dcl	qf$hide		lit	'004h';	/* Not User writable	*/
+dcl	qf$rsp		lit	'008h';	/* rsp queue		*/
+dcl	qf$table	lit	'010h';	/* from qd table	*/
+dcl	qf$rpl		lit	'020h';	/* rpl queue		*/
+dcl	qf$dev		lit	'040h';	/* device queue		*/
+
+/* Queue Parameter Block */
+
+dcl qpb$structure lit 'structure(
+  flgs    byte,
+  net     byte,
+  qaddr   word,
+  nmsgs   word,
+  buffptr word,
+  name (qnamsiz) byte )';

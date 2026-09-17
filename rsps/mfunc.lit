@@ -1,0 +1,42 @@
+/* Concurrent CP/M function numbers */
+
+dcl           m$prtbuf              lit       '9',
+              m$select              lit       '14',
+              m$openf               lit       '15',
+              m$closef              lit       '16',
+              m$deletef             lit       '19',
+              m$readf               lit       '20',
+              m$writef              lit       '21',
+              m$makef               lit       '22',
+              m$getlogin            lit       '24',
+              m$curdsk              lit       '25',
+              m$setdma              lit       '26',
+              m$setatt              lit       '30',
+              m$setusr              lit       '32',
+              m$readrf              lit       '33',
+              m$writerf             lit       '34',
+              m$resetdrv            lit       '37',
+              m$errmode             lit       '45',
+              m$dirbios             lit       '50',
+              m$makeq               lit       '134',
+              m$openq               lit       '135',
+              m$deleteq             lit       '136',
+              m$readq               lit       '137',
+              m$creadq              lit       '138',
+              m$writeq              lit       '139',
+              m$cwriteq             lit       '140',
+              m$delay               lit       '141',
+              m$dispatch            lit       '142',
+              m$setprior            lit       '145',
+              m$detach              lit       '147',
+              m$setcns              lit       '148',
+              m$parse               lit       '152',
+              m$getcns              lit       '153',
+              m$sysdat              lit       '154',
+              m$getpd               lit       '156',
+              m$abort               lit       '157';
+
+/* Internal calls */
+
+dcl           mi$sleep              lit       '0212H',
+              mi$wakeup             lit       '0213H';

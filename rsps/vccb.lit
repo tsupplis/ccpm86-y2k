@@ -1,0 +1,80 @@
+
+
+/*              +---------+---------+---------+---------+
+       00       |      attach       |       queue       |
+                +---------+---------+---------+---------+
+       04       |  flag   | startcol| column  |  nchar  |
+                +---------+---------+---------+---------+
+       08       |  mimic  | msource |   pc    |    vc   |
+                +---------+---------+---------+---------+
+       0C       |  btmp   | resrvd  |       state       |
+                +---------+---------+---------+---------+
+       10       |     maxbufsiz     |       vinq        |
+                +---------+---------+---------+---------+
+       14       |       voutq       |       vcmxq       |     
+                +---------+---------+---------+---------+
+       18       | qpbflgs | qpbfill |      qpbqaddr     |
+                +---------+---------+---------+---------+
+       1C       |      qpbnmsgs     |     qpbbuffptr    |
+                +---------+---------+---------+---------+
+       20       |       qbuff       |      cosleep      |
+                +---------+---------+---------+---------+
+       24       |      usleep       |       vsleep      |
+                +---------+---------+---------+---------+
+       28       |            ... reserved ...           |
+                +---------+---------+---------+---------+
+
+
+
+
+*/   
+
+dcl ccb$structure lit 'structure (attach address, queue address,
+ flag byte, startcol byte, column byte, nchar byte, mimic byte, msource byte,
+ ccb$tail1';
+dcl ccb$tail1 lit
+ 'pc byte, vc byte, btmp byte, reservd byte, state word, maxbufsiz word,
+  ccb$tail2';
+dcl ccb$tail2 lit
+ 'vinq address, voutq address, vcmxq address,
+  qpbflags byte, qpbresrvd byte, qpbqaddr address,
+  qpbnmsgs address, qpbbuffptr address, qbuff address, cosleep word,
+  usleep word, vsleep word, link word, r2 word)';
+
+  declare                                 /* flag values                    */
+    cf$listcp         lit        '001h',  /* control P toggle               */
+    cf$compc          lit        '002h',  /* suppress output                */
+    cf$switchs        lit        '004h',  /* XIOS supports switch screening */
+    cf$conout         lit        '008h',  /* XIOS console output ownership  */
+    cf$vout           lit        '010h',  /* process writing to VOUTQ       */
+    cf$bufp           lit        '020h';  /* toggle to control printer echo */
+                                          /* on control P when background   */
+                                          /* and buffered                   */
+/* values of state byte */
+                                            /* conout goes to XIOS  */
+
+/* state word flags */
+
+dcl
+csm$buffered          lit       '0001h',
+csm$background        lit       '0002h',
+csm$purging           lit       '0004h',
+csm$noswitch          lit       '0008h',
+csm$suspend           lit       '0010h',
+csm$abort             lit       '0020h',
+csm$filefull          lit       '0040h',
+csm$ctrlS             lit       '0080h',
+csm$ctrlO             lit       '0100h',
+csm$ctrlP             lit       '0200h';
+
+dcl x$init$offset lit '0Ch',
+    x$init$pointer pointer,
+    x$init$ptr structure (offset word, segment word) at (@x$init$pointer),
+    x$init based x$init$pointer structure
+      (tick byte, ticks$sec byte, door byte, resrvd1 (2) byte,
+      nvcns byte, nccb byte, nlst byte, ccb word, lcb word);
+
+
+dcl lcb$structure lit 'structure (attach address, queue address,
+ flag byte, startcol byte, column byte, nchar byte,
+ mimic byte, msource byte)';

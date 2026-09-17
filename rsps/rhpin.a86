@@ -1,0 +1,113 @@
+;	Code and Data Interface for PIN RSP
+;	Virtual console support for Concurrent CP/M
+
+;	March 30, 1982
+
+name    rpin
+
+cgroup	group	code
+dgroup  group   dats 
+
+assume   cs:cgroup,ds:dgroup
+
+	public	xdos,mon1,mon2,mon3,mon4,intsys
+	public	rsplink, pd, ncopies, udaseg
+	public	u_retseg, u_wrkseg, u_insys
+	extrn  plmstart:near
+
+dats	segment  public 'DATA'
+org     0
+
+rlr		equ	68h	;ready list root
+p_uda		equ	10h	;UDA in process descriptor
+supervisor	equ	0	;supervisor entry point for internal
+nvcns		equ	47h
+npcns           equ     9fh     ; XIOS # physical consoles
+rsphdr_len	equ	16
+pd_len		equ	30H
+uda_len		equ	100H
+insysoff	equ	60H
+rsp_top		equ	0
+rsp_pd		equ	rsp_top + rsphdr_len
+rsp_uda		equ	rsp_pd + pd_len
+rsp_bottom	equ	rsp_uda + uda_len
+
+	org	rsp_top
+				;RSP header
+rsplink	dw	0		;becomes system data page paragraph
+sdatvar dw      npcns           ;Tell Gensys to make 1 for each phys. cons.
+ncopies db	0
+	dw	0,0,0,0, 0
+	db	0
+	org	rsp_pd
+pd	dw	0,0		;link fields
+	db	0		;status
+	db	185		;initial priority better than TMP - worse than
+				;VOUT
+	dw	3		;flags - system and keep
+	db	'PIN     '	;name
+udaseg	dw	rsp_uda/10h	;uda paragraph
+	db	0,0		;disk,user
+        db	0,0		;ldisk,luser
+	dw	0ffh		;puremem - re-entrant
+				;rest of pd
+
+org	rsp_uda			;start of uda
+uda		dw	0
+		dw	0	;no default DMA
+		dw	0,0,0,0, 0,0,0,0, 0,0,0,0
+		dw	0,0,0,0, 0,0,0,0, 0,0,0,0
+		dw	offset stk_top
+		dw	0,0,0,0, 0,0,0,0
+u_wrkseg	dw	0
+u_retseg	dw	0
+org	rsp_uda + insysoff
+u_insys		db	1
+		db      0	;u_stat_save
+		dw	0	;ccb
+		dw	0	;lcb
+		db	0	;print string delimiter
+	
+		db	93h dup (0cch)	;fill rest of UDA stack with INT3s
+
+stk_top		dw	plmstart
+		dw	0,0		;segment, flags: unknown
+
+dats ends
+
+code	segment	public	'CODE'
+
+xdos	proc	
+	push	bp
+	mov	bp,sp
+	mov	dx,[bp+4]
+	mov	cx,[bp+6]
+	int	224
+	pop	bp
+	ret	4
+xdos	endp
+
+intsys	proc				;call O.S. as if we are
+	push bp				;already in it
+	mov bp,sp
+	mov bx,[bp+4]
+	mov dx,[bp+6]
+	mov cx,[bp+8]
+
+	push ds
+	mov ds,rsplink			;DS = Sysdat Segment
+	mov si,ds:word ptr rlr
+	mov es,[si+p_uda]
+        call ds:dword ptr [supervisor]
+	pop ds
+
+        pop bp
+	ret 6
+intsys	endp
+
+mon1	equ	xdos
+mon2	equ	xdos
+mon3	equ	xdos
+mon4    equ     xdos
+code	ends
+end

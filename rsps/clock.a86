@@ -1,0 +1,238 @@
+
+title 'Clock process'
+
+;*****************************************************
+;*
+;*	CLOCK RSP
+;*
+;* The clock process will update the CCP/M-86 Time of
+;* Day structure each time it returns from waiting for
+;* the 'Second' System Flag (Flag 2).  When the minute
+;* is updated, the 'minute' flag is set (Flag 3).
+;*
+;*****************************************************
+
+
+	; ccpm functions
+
+ccpmint		equ	224	; ccpm entry interrupt
+dev_flagwait	equ	132	; flagwait
+dev_flagset	equ	133	; flagset
+
+
+rlr		equ	68H	; Ready List Root
+ccb             equ     54H     ; VCCB list
+
+ccblen          equ     2CH     ; vccb length
+
+xiosentry	equ	28H	; offset of double word pointer in
+				; the system data segment of XIOS entry
+io_statline	equ	8	; update XIOS status line
+
+npcons		equ	9fh	; number of physical consoles
+
+tod_offset	equ	07Eh
+sec_flag        equ     2
+min_flag        equ     3
+
+	; TOD format
+
+tod_day		equ	word ptr 0
+tod_hour	equ	byte ptr 2
+tod_min		equ	byte ptr 3
+tod_sec		equ	byte ptr 4
+
+	; PD fields
+
+p_uda	equ	10h	; offset of UDA segment in PD
+pdlen   equ     48      ; length of process descriptor
+
+ps_run  equ     0       ; PD run status
+pf_keep equ     2       ; PD nokill flag
+
+
+	; RSP format
+
+rsp_top equ     0       ; rsp offset
+rsp_pd  equ     010h    ; PD offset
+rsp_uda equ     040h    ; UDA offset
+
+rsp_bottom equ  140h    ; end rsp header
+
+;*****************************************************
+;*
+;*	CLOCK CODE SEGMENT
+;*
+;*****************************************************
+
+	cseg
+	org	0
+
+
+ccpm:	int ccpmint ! ret
+
+clock:		; Clock process starts here
+
+	mov ds,sysdat
+	mov	dl,.npcons		; dh has # of phy. consoles
+	mov si,.rlr ! mov es,p_uda[si]	; ES is never saved.
+					; Note if other ccpm system calls
+					; are added to this program, ES
+					; may be changed.
+;	mov bx,tod_offset
+                
+		; Loop forever
+clockloop:
+		; BX -> TOD structure in SYSDAT
+		; Wait for Seconds Flag
+;	push bx
+	push	dx
+	mov cx,dev_flagwait ! mov dx,sec_flag
+	call ccpm
+	pop	dx
+
+		; Call XIOS status line update.
+		; ES=UDA, DS=system data segment
+;  For MCCP/M need to update all physical consoles
+;  This will be done one per second
+	mov ax,io_statline
+;
+;	xor cx,cx ! mov dx,cx
+	xor	cx,cx
+	cmp	dl,0
+	jnz	still_more
+	mov	dl,.npcons		; restart count down
+still_more:
+	dec	dl
+        push dx
+	callf dword ptr .xiosentry
+        pop dx
+;	pop bx
+	mov	bx,tod_offset
+
+		; increment seconds
+	clc
+	mov al,tod_sec[bx]
+        inc al ! daa ! mov tod_sec[bx],al
+
+		; check for minute mark
+
+	cmp al,60h ! jae update_min
+	    jmp clock_loop
+
+update_min:
+		; set minute flag
+
+	mov tod_sec[bx],0
+;	mov cx,dev_flagset ! mov dx,min_flag
+;	push bx ! call ccpm ! pop bx
+
+		; increment minute field of TOD
+
+	clc ! mov al,tod_min[bx]
+	inc al ! daa ! mov tod_min[bx],al
+
+		; check if hour
+
+	cmp al,60h ! jae update_hour
+	    jmp clock_loop
+
+update_hour:
+		;update hour field
+
+	mov tod_min[bx],0
+	clc ! mov al,tod_hour[bx]
+	inc al ! daa ! mov tod_hour[bx],al
+
+		; check for day
+
+	cmp al,24h ! jae update_day
+	    jmp clock_loop
+
+update_day:
+		; update Day field
+
+
+        mov tod_hour[bx],0
+        inc tod_day[bx]
+        jmp clock_loop           ; loop forever
+
+;*****************************************************
+;*
+;*	Data Segment
+;*
+;*****************************************************
+
+	dseg
+	org 	0
+
+sysdat	dw	0,0,0
+        dw	0,0,0
+        dw	0,0
+
+	org	rsp_pd
+
+        dw      0,0             ; link,thread
+        db      ps_run          ; status
+        db      190             ; priority
+        dw      pf_keep         ; flags
+        db      'CLOCK   '      ; name
+        dw      offset uda/10h  ; uda seg
+        db      0,0,0,0		; dsk,usr,ldsk,luser
+        dw      0		; mem partitions
+        dw      0,0             ; dvract,wait
+        db	0,0		; org,net
+	dw      0               ; parent
+	db	0,0,0,0		; cns,abort,cin,cout
+	db	0,0,0,0		; lst,sf3,sf4,sf5
+	dw	0,0,0,0		; reserved,pret,scratch
+
+	org	rsp_uda
+
+uda		dw	0,0,0,0			;0-7 note: no default DMA
+		dw	0,0,0,0			;8-fh
+		dw	0,0,0,0			;10-17
+		dw	0,0,0,0			;18-1f
+		dw	0,0,0,0			;20-27
+		dw	0,0,0,0			;28-2f
+		dw	0,0,offset stack_top,0	;30-37
+		dw	0,0,0,0			;38-3f
+		dw	0,0,0,0			;40-47
+		dw	0,0,0,0			;48-4f
+		dw	0,0,0,0			;50-57
+		dw	0,0,0,0			;58-5f
+		db	1			;60 INSYS <> 0
+						;don't switch from
+						;from UDA stack
+						;on entry to SUP
+		db	0
+
+	dw	0cccch,0cccch,0cccch		;62-67
+	dw	0cccch,0cccch,0cccch,0cccch	;68-6F
+	dw	0cccch,0cccch,0cccch,0cccch	;70
+	dw	0cccch,0cccch,0cccch,0cccch
+	dw	0cccch,0cccch,0cccch,0cccch	;80
+	dw	0cccch,0cccch,0cccch,0cccch
+	dw	0cccch,0cccch,0cccch,0cccch	;90
+	dw	0cccch,0cccch,0cccch,0cccch
+	dw	0cccch,0cccch,0cccch,0cccch	;A0
+	dw	0cccch,0cccch,0cccch,0cccch
+	dw	0cccch,0cccch,0cccch,0cccch	;B0
+	dw	0cccch,0cccch,0cccch,0cccch
+	dw	0cccch,0cccch,0cccch,0cccch	;C0
+	dw	0cccch,0cccch,0cccch,0cccch
+	dw	0cccch,0cccch,0cccch,0cccch	;D0
+	dw	0cccch,0cccch,0cccch,0cccch
+	dw	0cccch,0cccch,0cccch,0cccch	;E0
+	dw	0cccch,0cccch,0cccch,0cccch
+	dw	0cccch,0cccch,0cccch,0cccch	;F0
+	dw	0cccch
+
+stack_top	dw	offset clock	; code starting point
+		dw	0		; code seg - set by GENSYS
+		dw	0		; init. flags - set by GENSYS
+
+					; UDA is 100H bytes long
+	end
+
+

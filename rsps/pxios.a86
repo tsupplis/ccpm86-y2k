@@ -1,0 +1,50 @@
+;	Interface to call Physical XIOS
+;	From a process not in the O.S.
+;	code reentrant, separate data areas per process
+;	used by VOUT and PIN RSPs
+
+name    pxios
+
+cgroup	group	code
+dgroup	group	dats
+
+assume	cs:cgroup
+assume  ds:dgroup
+
+dats	segment public 'DATA'
+	extrn	rsplink:word	;segment of SYSDAT
+	extrn	udaseg:word	;UDA must be in ES for XIOS call
+	extrn	u_retseg:word, u_wrkseg:word, u_insys:byte
+dats	ends
+
+code	segment public 'CODE'
+	public	pxios1, pxios2, pxios3, pxios4
+	xiosmod	equ	28h
+        p_uda	equ	10h
+        rlr	equ	68h
+        
+pxios2	equ	pxios1
+pxios3	equ	pxios1
+pxios4	equ	pxios1
+
+pxios1	proc
+	push	bp
+	mov	bp,sp
+
+	mov	ax,[bp+8]		;set up registers
+	mov	cx,[bp+6]
+	mov	dx,[bp+4]
+
+	push 	ds
+        mov	ds,rsplink		;SYSDAT
+        mov	si,ds:word ptr rlr	;ready list root
+        mov	es,[p_uda+si]		;UDA
+	call	ds:dword ptr [xiosmod]
+	pop	ds
+
+	pop	bp
+	ret	6
+pxios1	endp
+
+code	ends
+end

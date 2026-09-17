@@ -1,0 +1,11 @@
+declare
+        lit                literally          'literally',
+        dcl                lit                'declare',
+        true               lit                '0ffh',
+        false              lit                '0',
+        no                 lit                'not',
+        boolean            lit                'byte',
+        forever            lit                'while true',
+        cr                 lit                '13',
+        lf                 lit                '10',
+        tab                lit                '9';

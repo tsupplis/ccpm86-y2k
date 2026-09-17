@@ -1,0 +1,118 @@
+;	Code and Data Interface for VOUT RSP
+;	(for virtual console support)
+;	March 30, 1983
+
+name    rvout
+
+cgroup	group	code
+dgroup  group   dats
+
+assume   cs:cgroup,ds:dgroup
+
+	public	xdos,mon1,mon2,mon3,mon4,intsys
+	public rsplink,pd,udaseg,u_retseg,u_wrkseg
+	public u_insys, ncopies
+	extrn  plmstart:near
+
+
+dats	segment public	'DATA'
+org	0
+
+rsphdr_len	equ	16
+pd_len		equ	30H
+uda_len		equ	100H
+insysoff	equ	60H
+rsp_top		equ	0
+rsp_pd		equ	rsp_top + rsphdr_len
+rsp_uda		equ	rsp_pd + pd_len
+rsp_bottom	equ	rsp_uda + uda_len
+	org	rsp_top
+				;RSP header
+rsplink	dw	0		;becomes system data page paragraph
+sdatvar dw	nvcns		;gensys makes a copy per virtual cons
+ncopies db	0
+	dw	0,0,0,0, 0
+	db	0
+	org	rsp_pd
+pd	dw	0,0		;link fields
+	db	0		;status
+	db	180		;initial priority - better than TMPs and PIN
+	dw	3		;flags - system and keep
+	db	'VOUT    '	;name
+udaseg	dw	rsp_uda/10h	;uda paragraph
+	db	0,0		;disk,user
+        db	0,0		;ldisk,luser
+	dw	0ffh		;puremem - re-entrant
+				;rest of pd
+
+org	rsp_uda			;start of uda
+uda		dw	0
+		dw	0	;init DMA, must be set by program
+		dw	0,0,0,0, 0,0,0,0, 0,0,0,0
+		dw	0,0,0,0, 0,0,0,0, 0,0,0,0
+		dw	offset stk_top
+		dw	0,0,0,0, 0,0,0,0
+u_wrkseg	dw	0
+u_retseg	dw	0
+
+org	rsp_uda + insysoff
+u_insys		db	1
+		db	0	;status save
+		dw	0	;ccb
+		dw	0	;lcb
+		db	0	;delimiter for print string
+
+		db	93h dup (0cch)	;fill UDA stack with INT 3s
+
+stk_top	dw	plmstart
+	dw	0,0		;segment and flags - unknown
+
+dats ends
+
+code	segment public 'CODE'
+
+	db	'COPYRIGHT (C) 1983,'
+	db	' DIGITAL RESEARCH '
+
+xdos	proc	
+	push	bp
+	mov	bp,sp
+	mov	dx,[bp+4]
+	mov	cx,[bp+6]
+	int	224
+	pop	bp
+	ret	4
+xdos	endp
+
+mon1	equ	xdos
+mon2	equ	xdos
+mon3	equ	xdos
+mon4    equ     xdos
+
+supervisor	equ	0
+rlr		equ	68h
+p_uda		equ	10h
+nvcns		equ	47h
+
+intsys	proc				;call O.S. as if we are
+	push bp				;already in it
+	mov bp,sp
+
+        mov bx, [bp+4]
+	mov dx, [bp+6]
+	mov cx, [bp+8]
+
+
+	push ds
+	mov ds, rsplink			;DS = Sysdat Segment
+	mov si, ds:word ptr rlr
+	mov es, [si + p_uda]
+        call ds:dword ptr [supervisor]
+	pop ds
+
+        pop bp
+	ret 6
+intsys	endp
+
+code	ends
+end

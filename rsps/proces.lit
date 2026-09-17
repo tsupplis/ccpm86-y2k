@@ -1,0 +1,51 @@
+/*
+    Proces Literals MP/M-8086 II
+*/
+
+declare pnamsiz literally '8';
+
+declare pd$hdr literally 'structure
+  (link word,thread word,stat byte,prior byte,flag word,
+  name (8) byte,uda word,dsk byte,user byte,ldsk byte,luser byte,
+  mem word';
+
+/* NDA field added for network 12/7/83 RBB */
+
+declare pd$structure literally 'pd$hdr,
+  dvract word,wait word,nda$para word,parent word,
+  cns byte,abort byte,conmode word,lst byte,sf3 byte,ps_flag word,
+  reservd (4) byte,pret word,scratch word)';
+
+  declare psrun                 lit '00',
+          pspoll                lit '01',
+          psdelay               lit '02',
+          psswap                lit '03',
+          psterm                lit '04',
+          pssleep               lit '05',
+          psdq                  lit '06',
+          psnq                  lit '07',
+          psflagwait            lit '08',
+          psciowait             lit '09';
+
+  declare pf$sys                lit '00001h',
+          pf$keep               lit '00002h',
+          pf$kernal             lit '00004h',
+          pf$pure               lit '00008h',
+          pf$table              lit '00010h',
+          pf$resource           lit '00020h',
+          pf$raw                lit '00040h',
+          pf$ctlc               lit '00080h',
+          pf$active             lit '00100h',
+          pf$tempkeep           lit '00200h',
+          pf$ctld               lit '00400h',
+          pf$childabort         lit '00800h',
+          pf$noctls             lit '01000h';
+
+  declare pcm$11                lit '00001h',
+          pcm$ctls              lit '00002h',
+          pcm$rout              lit '00004h',
+          pcm$ctlc              lit '00008h',
+          pcm$ctlo              lit '00080h',
+          pcm$rsx               lit '00300h';
+  
+  declare psf_suspend           lit '00001h';
