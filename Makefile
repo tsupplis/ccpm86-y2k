@@ -1,4 +1,4 @@
-SUBDIRS=tools commands kernel rsps genccpm
+SUBDIRS=commands kernel
 
 DISTDIR=dist
 DISTZIP=dist.zip

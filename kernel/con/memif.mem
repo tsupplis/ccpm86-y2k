@@ -1,0 +1,151 @@
+;*****************************************************
+;*
+;*	CCP/M-86 Memory Management Module Interface
+;*
+;*****************************************************
+
+	CSEG
+	org	0
+
+	jmp init
+	jmp entry
+
+				;3 variables set by GENSYS
+sysdat		dw	0
+supervisor	equ	(offset $)
+		rw	2
+
+	org	0ch
+dev_ver		db	6	;development system data version
+				;set in sysdat.fmt
+
+		db	'COPYRIGHT (C) 1982,1983,1984'
+		db	' DIGITAL RESEARCH '
+		db	'XXXX-0000-'
+serial		db	'654321'
+
+;====
+init:
+;====
+	retf
+
+;*****************************************************
+;*
+;*	MEM function table
+;*
+;*****************************************************
+
+functab	dw	maxmem_entry	; 53 - Get Max Memory
+	dw	absmax_entry	; 54 - Get Abs Max Mem
+	dw	cpmalloc_entry	; 55 - Alloc Mem
+	dw	cpmabsa_entry	; 56 - Alloc Abs Mem
+	dw	cpmfree_entry	; 57 - Free Mem
+	dw	freeall_entry	; 58 - Free All Mem
+	dw	malloc_entry	; 129 - Rel Mem Rqst
+	dw	mfree_entry	; 130 - Memory Free
+	dw	share_entry	; share memory
+	dw	maualloc_entry	; Alloc from MAU
+	dw	maufree_entry	; Free from MAU
+	dw	mlalloc_entry	; Alloc from Mem List
+	dw	mlfree_entry	; Free from Mem List
+
+;=====		=================
+entry:		; MEM entry point
+;=====		=================
+;	entry:	CX = memory function number
+;	      	DX,BX parameters
+;	exit:	AX=BX=return code
+;		CX=error code if BX=0ffffh		
+
+;	The memory manager is a mutually exclusive code
+;	section, only one process may be in the memory code
+;	at one time.  However, a process already in the memory manager
+;	can call the memory manager ENTRY: point again.
+;	Once a process gets into the memory code it cannot
+;	be terminated.
+
+;
+;	**3.1M**
+;
+;	Added local stack to insure no UDA stack overflow in MEMORY MANAGER
+;
+;	call m_sync			;obtain memory system
+;m_sync:
+;-------
+	push bx ! push cx ! push dx	;save entry parameters
+	mov bx,offset mem_spb
+	mov cx,f_sync			;obtain memory system
+	call osif			;reetrancy stops here ...
+	inc mem_cnt			;keep track how many
+					;times through memory entry
+	cmp mem_cnt,1 ! jne ms1
+	  mov cx,f_no_abort		;cannot abort while in
+	  call osif			;MEM, call NO_ABORT_ENTRY
+
+	pop dx ! pop cx ! pop bx	; must get before stack switch
+;
+;	get on to local stack
+;
+	mov	mem_save_ss,ss
+	mov	mem_save_sp,sp
+	mov	ax,ds
+	pushf
+	pop	bp
+	cli
+	mov	ss,ax
+	mov	sp,offset mem_tos
+	push	bp
+	popf
+	jmps	m_cont1
+ms1:					;on 1st time through only
+	pop dx ! pop cx ! pop bx
+;	ret
+m_cont1:
+	mov ch,0 ! shl cx,1		;and make sure TEMPKEEP is on
+	mov si,cx
+	call cs:functab[si]
+;	call m_unsync
+
+;	Note: the MEM_CNT variable is set to 1 by TERMINATE in the RTM
+;	and back to 0 by the TERM_ACT in the dispatcher.
+
+m_unsync:
+;--------
+	dec mem_cnt			;only release when last time
+	jnz mu_ret			;out of memory system
+
+;	get off local stack
+	pushf ! pop ax
+	cli
+	mov	ss,mem_save_ss
+	mov	sp,mem_save_sp
+	push	ax
+	popf
+	
+	  push bx ! push cx
+	  mov bx,offset mem_spb
+	  mov cx,f_unsync
+	  call osif			;reentrancy starts here ...
+	  mov cx,f_ok_abort
+	  call osif			;exit no_abort region
+	  pop cx ! pop bx
+mu_ret:
+;
+;	ret
+
+	mov	ax,bx
+	retf
+;
+;	**3.1M**
+;
+;====		================
+osif:		; O.S. interface
+;====		================
+	callf cs:dword ptr .supervisor ! ret
+
+;======		================
+xiosif:		; XIOS interface
+;======		================
+	callf dword ptr .xiosmod ! ret
+
+
