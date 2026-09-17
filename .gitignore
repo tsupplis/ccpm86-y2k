@@ -18,6 +18,7 @@ asm/*.mod
 **/*.sym
 **/*.lst
 **/*.abs
+**/*.mod
 **/*.lnk
 **/*.mp?
 **/*.map
