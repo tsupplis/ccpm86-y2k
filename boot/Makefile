@@ -3,7 +3,7 @@ INTEL_ASM86=intel_asm86
 INTEL_LOC86=intel_loc86
 INTEL_LINK86=intel_link86
 INTEL_OH86=intel_oh86
-ASM86=cpm86_asm86
+DRASM86=cpm86_asm86
 GENCMD=cpm86_gencmd
 RASM86=pcdev_rasm86
 LINK86=pcdev_linkcmd
@@ -14,25 +14,22 @@ DRCLINK86=drccpm_link
 
 TOOLS=date.cmd era.cmd eraq.cmd gencmd.cmd ed.cmd help.cmd show.cmd \
     set.cmd dir.cmd tod.cmd type.cmd pip3.cmd pip4.cmd sdir.cmd ren.cmd \
-    submit.cmd vcmode.cmd systat.cmd chset.cmd initdir.cmd
+    submit.cmd vcmode.cmd systat.cmd tcopy.cmd chset.cmd 
 
-SNIPPETS=
+# initdir.cmd
+
+SNIPPETS=boot.h86 load.h86 lbdos.h86  lbdos3.sys
 
 all: $(TOOLS) $(SNIPPETS)
 
+tcopy.cmd: tcopy.h86
+	$(GENCMD) $<
+	
 submit.cmd: submit.h86
 	$(GENCMD) $<
-	cmdinfo $@
 
 initdir.cmd: initdir.obj initdira.obj diomod.obj
 	$(PLILINK86) initdir [locals],initdira,diomod
-	cmdinfo $@
-
-diomod.obj: diomod.a86
-	$(RASM86) $^
-
-initdira.obj: initdira.a86
-	$(RASM86) $^
 
 sdir.cmd: sdir.h86
 	$(GENCMD) $< 'data[b1000 m3c5 x800]'
@@ -45,7 +42,11 @@ sdir.loc: scd.obj sdir.obj search.obj scan.obj sort.obj disp.obj util.obj \
 	$(INTEL_LOC86) $(basename $@).lnk 'od(sm(code,dats,data,stack,const))' \
 		'ad(sm(code(0),dats(10000h)))' 'ss(stack(+32))'  to $(basename $@).loc
 
-pip4.cmd: pip4.h86
+lbdos3.sys: lbdos3.a86
+	$(RASM86) lbdos3.a86
+	$(LINK86) 'lbdos3.sys=lbdos3[data[ori[0],max[0]]]'
+
+pip4.cmd: pip3.h86
 	$(GENCMD) $< 'data[b1000 m280 xfff]'
 	cmdinfo $@
 
@@ -93,9 +94,6 @@ ren.loc: ren.obj scd.obj
 chset.cmd: main.obj chset.obj function.obj cpmif.obj
 	$(DRCLINK86) chset[map]=main,chset,function,cpmif
 
-cpmif.obj: cpmif.a86
-	$(RASM86) $^
-
 type.cmd: type.h86
 	$(GENCMD) $< 'data[b1000]'
 	cmdinfo $@
@@ -139,7 +137,8 @@ set.cmd: set.h86
 set.loc: set.obj scd.obj
 	$(INTEL_LINK86) scd.obj, $(basename $@).obj to $(basename $@).lnk
 	$(INTEL_LOC86) $(basename $@).lnk 'od(sm(code,dats,data,stack,const))' \
-		'ad(sm(code(0),dats(10000h)))' 'ss(stack(+32))'  to $(basename $@).loc
+		'ad(sm(code(0),dats(10000h)))' \
+		'ss(stack(+32))'  to $(basename $@).loc
 
 show.cmd: show.h86
 	$(GENCMD) $< 'data[b1000]'
@@ -148,16 +147,18 @@ show.cmd: show.h86
 show.loc: show.obj scd.obj
 	$(INTEL_LINK86) scd.obj, $(basename $@).obj to $(basename $@).lnk
 	$(INTEL_LOC86) $(basename $@).lnk 'od(sm(code,dats,data,stack,const))' \
-		'ad(sm(code(0),dats(10000h)))' 'ss(stack(+32))'  to $(basename $@).loc
+		'ad(sm(code(0),dats(10000h)))' \
+		'ss(stack(+32))'  to $(basename $@).loc
 
-eraq.cmd: eraq.h86
+eraq.cmd: era.h86
 	$(GENCMD) $< 'data[b1000]'
 	cmdinfo $@
 
 eraq.loc: eraq.obj scd.obj
 	$(INTEL_LINK86) scd.obj, $(basename $@).obj to $(basename $@).lnk
 	$(INTEL_LOC86) $(basename $@).lnk 'od(sm(code,dats,data,stack,const))' \
-		'ad(sm(code(0),dats(10000h)))' 'ss(stack(+32))'  to $(basename $@).loc
+		'ad(sm(code(0),dats(10000h)))' \
+		'ss(stack(+32))'  to $(basename $@).loc
 
 era.cmd: era.h86
 	$(GENCMD) $< 'data[b1000]'
@@ -166,7 +167,8 @@ era.cmd: era.h86
 era.loc: era.obj scd.obj
 	$(INTEL_LINK86) scd.obj, $(basename $@).obj to $(basename $@).lnk
 	$(INTEL_LOC86) $(basename $@).lnk 'od(sm(code,dats,data,stack,const))' \
-		'ad(sm(code(0),dats(10000h)))' 'ss(stack(+32))'  to $(basename $@).loc
+		'ad(sm(code(0),dats(10000h)))' \
+		'ss(stack(+32))'  to $(basename $@).loc
 
 date.cmd: date.h86
 	$(GENCMD) $< 'data[b1000]'
@@ -175,7 +177,8 @@ date.cmd: date.h86
 date.loc: date.obj scd.obj
 	$(INTEL_LINK86) scd.obj, $(basename $@).obj to $(basename $@).lnk
 	$(INTEL_LOC86) $(basename $@).lnk 'od(sm(code,dats,data,stack,const))' \
-		'ad(sm(code(0),dats(10000h)))' 'ss(stack(+32))'  to $(basename $@).loc
+		'ad(sm(code(0),dats(10000h)))' \
+		'ss(stack(+32))'  to $(basename $@).loc
 
 ed.cmd: ed.h86
 	$(GENCMD) $< 'data[b1000 m80 xfff]'
@@ -184,7 +187,8 @@ ed.cmd: ed.h86
 ed.loc: ed.obj scd.obj
 	$(INTEL_LINK86) scd.obj, $(basename $@).obj to $(basename $@).lnk
 	$(INTEL_LOC86) $(basename $@).lnk 'od(sm(code,dats,data,stack,const))' \
-		'ad(sm(code(0),dats(10000h)))' 'ss(stack(+32))'  to $(basename $@).loc
+		'ad(sm(code(0),dats(10000h)))' \
+		'ss(stack(+32))'  to $(basename $@).loc
 
 gencmd.cmd: gencmd.h86
 	$(GENCMD) $< 'data[b1000 m86 xfff]'
@@ -193,17 +197,27 @@ gencmd.cmd: gencmd.h86
 gencmd.loc: gencmd.obj scd.obj
 	$(INTEL_LINK86) scd.obj, $(basename $@).obj to $(basename $@).lnk
 	$(INTEL_LOC86) $(basename $@).lnk 'od(sm(code,dats,data,stack,const))' \
-		'ad(sm(code(0),dats(10000h)))' 'ss(stack(+32))'  to $(basename $@).loc
+		'ad(sm(code(0),dats(10000h)))' \
+		'ss(stack(+32))'  to $(basename $@).loc
+
+diomod.obj: diomod.a86
+	$(RASM86) $^
+
+initdira.obj: initdira.a86
+	$(RASM86) $^
+
+cpmif.obj: cpmif.a86
+	$(RASM86) $^
 
 %.h86: %.loc
 	$(INTEL_OH86) $^
 	mv $*.hex $*.h86
 
+%.h86: %.a86
+	$(DRASM86) $^
+
 %.obj: %.a86
 	$(INTEL_ASM86) $^
-
-%.h86: %.a86
-	$(ASM86) $^
 
 %.obj: %.c
 	$(DRC86) -o$@ $^
@@ -222,6 +236,7 @@ ccpmtest.img: $(TOOLS) Makefile startup.0
 	cpmcp -f ibmpc-514ss ccpmtest.img *.cmd 0:
 	cpmcp -f ibmpc-514ss ccpmtest.img startup.0 0:
 	cpmls -F -f ibmpc-514ss ccpmtest.img 0:*.*
+
 
 test: ccpmtest $(TOOLS)
 
