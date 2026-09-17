@@ -5,12 +5,14 @@ dist/**
 **/*.zip
 **/.D*
 **/*.lin
+**/*.inp
 **/*.log
 **/*.sys
 asm/*.lib
 **/.*.swp
 **/*.obj
 **/*.o
+**/*.loc
 **/*.h86
 **/*.sym
 **/*.lst

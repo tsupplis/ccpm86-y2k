@@ -1,7 +1,10 @@
-PLM86=intel_plm86
-ASM86=intel_asm86
-DRASM86=cpm_asm86
-GENCMD=cpm_gencmd
+INTEL_PLM86=intel_plm86
+INTEL_ASM86=intel_asm86
+INTEL_LOC86=intel_loc86
+INTEL_LINK86=intel_link86
+INTEL_OH86=intel_oh86
+DRASM86=cpm86_asm86
+GENCMD=cpm86_gencmd
 RASM86=pcdev_rasm86
 LINK86=pcdev_linkcmd
 PLI86=drpli_pc
@@ -28,64 +31,174 @@ submit.cmd: submit.h86
 initdir.cmd: initdir.obj initdira.obj diomod.obj
 	$(PLILINK86) initdir [locals],initdira,diomod
 
-sdir.cmd: sdir.obj scd.obj search.obj scan.obj sort.obj disp.obj util.obj \
+sdir.cmd: sdir.h86
+	$(GENCMD) $< 'data[b1000 m3c5 x800]'
+	cmdinfo $@
+
+sdir.loc: scd.obj sdir.obj search.obj scan.obj sort.obj disp.obj util.obj \
     timest.obj dpb.obj
-	$(LINK86) sdir=scd,sdir,search,sort,disp,scan,timest,dpb,util '[data[ori[0]]'
+	$(INTEL_LINK86) scd.obj, search.obj, scan.obj, sort.obj, disp.obj, \
+	util.obj, timest.obj, dpb.obj, $(basename $@).obj to $(basename $@).lnk
+	$(INTEL_LOC86) $(basename $@).lnk 'od(sm(code,dats,data,stack,const))' \
+		'ad(sm(code(0),dats(10000h)))' 'ss(stack(+32))'  to $(basename $@).loc
 
 lbdos3.sys: lbdos3.a86
 	$(RASM86) lbdos3.a86
 	$(LINK86) 'lbdos3.sys=lbdos3[data[ori[0],max[0]]]'
 
-pip4.cmd: pip4.obj inpout.obj scd1.obj 
-	$(LINK86) pip4=scd1,inpout,pip4 '[data[ori[0],max[1000],add[200]]]'
+pip4.cmd: pip3.h86
+	$(GENCMD) $< 'data[b1000 m280 xfff]'
+	cmdinfo $@
 
-pip3.cmd: pip3.obj inpout.obj scd1.obj 
-	$(LINK86) pip3=scd1,inpout,pip3 '[data[ori[0],max[1000],add[200] ]'
+pip4.loc: pip4.obj scd.obj
+	$(INTEL_LINK86) scd.obj, $(basename $@).obj to $(basename $@).lnk
+	$(INTEL_LOC86) $(basename $@).lnk 'od(sm(code,dats,data,stack,const))' \
+		'ad(sm(code(0),dats(10000h)))' 'ss(stack(+32))'  to $(basename $@).loc
 
-systat.cmd: systat.obj scd.obj
-	$(LINK86) systat=scd,systat '[data[ori[0]]'
+pip3.cmd: pip3.h86
+	$(GENCMD) $< 'data[b1000 m280 xfff]'
+	cmdinfo $@
 
-vcmode.cmd: vcmode.obj scd.obj
-	$(LINK86) vcmode=scd,vcmode '[data[ori[0]]'
+pip3.loc: pip3.obj scd.obj
+	$(INTEL_LINK86) scd.obj, $(basename $@).obj to $(basename $@).lnk
+	$(INTEL_LOC86) $(basename $@).lnk 'od(sm(code,dats,data,stack,const))' \
+		'ad(sm(code(0),dats(10000h)))' 'ss(stack(+32))'  to $(basename $@).loc
 
-ren.cmd: ren.obj scd.obj
-	$(LINK86) ren=scd,ren '[data[ori[0]]'
+systat.cmd: systat.h86
+	$(GENCMD) $< 'data[b1000]'
+	cmdinfo $@
+
+systat.loc: systat.obj scd.obj
+	$(INTEL_LINK86) scd.obj, $(basename $@).obj to $(basename $@).lnk
+	$(INTEL_LOC86) $(basename $@).lnk 'od(sm(code,dats,data,stack,const))' \
+		'ad(sm(code(0),dats(10000h)))' 'ss(stack(+32))'  to $(basename $@).loc
+
+vcmode.cmd: vcmode.h86
+	$(GENCMD) $< 'data[b1000]'
+	cmdinfo $@
+
+vcmode.loc: vcmode.obj scd.obj
+	$(INTEL_LINK86) scd.obj, $(basename $@).obj to $(basename $@).lnk
+	$(INTEL_LOC86) $(basename $@).lnk 'od(sm(code,dats,data,stack,const))' \
+		'ad(sm(code(0),dats(10000h)))' 'ss(stack(+32))'  to $(basename $@).loc
+
+ren.cmd: ren.h86
+	$(GENCMD) $< 'data[b1000]'
+	cmdinfo $@
+
+ren.loc: ren.obj scd.obj
+	$(INTEL_LINK86) scd.obj, $(basename $@).obj to $(basename $@).lnk
+	$(INTEL_LOC86) $(basename $@).lnk 'od(sm(code,dats,data,stack,const))' \
+		'ad(sm(code(0),dats(10000h)))' 'ss(stack(+32))'  to $(basename $@).loc
 
 chset.cmd: main.obj chset.obj function.obj cpmif.obj
 	$(DRCLINK86) chset[map]=main,chset,function,cpmif
 
-type.cmd: type.obj scd.obj
-	$(LINK86) type=scd,type '[data[ori[0]]'
+type.cmd: type.h86
+	$(GENCMD) $< 'data[b1000]'
+	cmdinfo $@
 
-tod.cmd: tod.obj scd.obj
-	$(LINK86) tod=scd,tod '[data[ori[0]]'
+type.loc: type.obj scd.obj
+	$(INTEL_LINK86) scd.obj, $(basename $@).obj to $(basename $@).lnk
+	$(INTEL_LOC86) $(basename $@).lnk 'od(sm(code,dats,data,stack,const))' \
+		'ad(sm(code(0),dats(10000h)))' 'ss(stack(+32))'  to $(basename $@).loc
 
-help.cmd: help.obj scd.obj
-	$(LINK86) help=scd,help '[dat[ori[0]]'
+tod.cmd: tod.h86
+	$(GENCMD) $< 'data[b1000]'
+	cmdinfo $@
 
-dir.cmd: dir.obj scd.obj
-	$(LINK86) dir=scd,dir '[dat[ori[0]]'
+tod.loc: tod.obj scd.obj
+	$(INTEL_LINK86) scd.obj, $(basename $@).obj to $(basename $@).lnk
+	$(INTEL_LOC86) $(basename $@).lnk 'od(sm(code,dats,data,stack,const))' \
+		'ad(sm(code(0),dats(10000h)))' 'ss(stack(+32))'  to $(basename $@).loc
 
-set.cmd: set.obj scd.obj
-	$(LINK86) set=scd,set '[dat[ori[0]]'
+help.cmd: help.h86
+	$(GENCMD) $< 'data[b1000]'
+	cmdinfo $@
 
-show.cmd: show.obj scd.obj
-	$(LINK86) show=scd,show '[dat[ori[0]]'
+help.loc: help.obj scd.obj
+	$(INTEL_LINK86) scd.obj, $(basename $@).obj to $(basename $@).lnk
+	$(INTEL_LOC86) $(basename $@).lnk 'od(sm(code,dats,data,stack,const))' \
+		'ad(sm(code(0),dats(10000h)))' 'ss(stack(+32))'  to $(basename $@).loc
 
-ed.cmd: ed.obj scd.obj
-	$(LINK86) ed=scd,ed '[dat[ori[0]]'
+dir.cmd: dir.h86
+	$(GENCMD) $< 'data[b1000]'
+	cmdinfo $@
 
-eraq.cmd: eraq.obj scd.obj
-	$(LINK86) eraq=scd,eraq '[dat[ori[0]]'
+dir.loc: dir.obj scd.obj
+	$(INTEL_LINK86) scd.obj, $(basename $@).obj to $(basename $@).lnk
+	$(INTEL_LOC86) $(basename $@).lnk 'od(sm(code,dats,data,stack,const))' \
+		'ad(sm(code(0),dats(10000h)))' 'ss(stack(+32))'  to $(basename $@).loc
 
-era.cmd: era.obj scd.obj
-	$(LINK86) era=scd,era '[dat[ori[0]]'
+set.cmd: set.h86
+	$(GENCMD) $< 'data[b1000]'
+	cmdinfo $@
 
-date.cmd: date.obj scd.obj
-	$(LINK86) date=scd,date '[dat[ori[0]]'
+set.loc: set.obj scd.obj
+	$(INTEL_LINK86) scd.obj, $(basename $@).obj to $(basename $@).lnk
+	$(INTEL_LOC86) $(basename $@).lnk 'od(sm(code,dats,data,stack,const))' \
+		'ad(sm(code(0),dats(10000h)))' \
+		'ss(stack(+32))'  to $(basename $@).loc
 
-gencmd.cmd: gencmd.obj scd.obj
-	$(LINK86) gencmd=scd,gencmd '[dat[ori[0]]'
+show.cmd: show.h86
+	$(GENCMD) $< 'data[b1000]'
+	cmdinfo $@
+
+show.loc: show.obj scd.obj
+	$(INTEL_LINK86) scd.obj, $(basename $@).obj to $(basename $@).lnk
+	$(INTEL_LOC86) $(basename $@).lnk 'od(sm(code,dats,data,stack,const))' \
+		'ad(sm(code(0),dats(10000h)))' \
+		'ss(stack(+32))'  to $(basename $@).loc
+
+eraq.cmd: era.h86
+	$(GENCMD) $< 'data[b1000]'
+	cmdinfo $@
+
+eraq.loc: eraq.obj scd.obj
+	$(INTEL_LINK86) scd.obj, $(basename $@).obj to $(basename $@).lnk
+	$(INTEL_LOC86) $(basename $@).lnk 'od(sm(code,dats,data,stack,const))' \
+		'ad(sm(code(0),dats(10000h)))' \
+		'ss(stack(+32))'  to $(basename $@).loc
+
+era.cmd: era.h86
+	$(GENCMD) $< 'data[b1000]'
+	cmdinfo $@
+
+era.loc: era.obj scd.obj
+	$(INTEL_LINK86) scd.obj, $(basename $@).obj to $(basename $@).lnk
+	$(INTEL_LOC86) $(basename $@).lnk 'od(sm(code,dats,data,stack,const))' \
+		'ad(sm(code(0),dats(10000h)))' \
+		'ss(stack(+32))'  to $(basename $@).loc
+
+date.cmd: date.h86
+	$(GENCMD) $< 'data[b1000]'
+	cmdinfo $@
+
+date.loc: date.obj scd.obj
+	$(INTEL_LINK86) scd.obj, $(basename $@).obj to $(basename $@).lnk
+	$(INTEL_LOC86) $(basename $@).lnk 'od(sm(code,dats,data,stack,const))' \
+		'ad(sm(code(0),dats(10000h)))' \
+		'ss(stack(+32))'  to $(basename $@).loc
+
+ed.cmd: ed.h86
+	$(GENCMD) $< 'data[b1000 m80 xfff]'
+	cmdinfo $@
+
+ed.loc: ed.obj scd.obj
+	$(INTEL_LINK86) scd.obj, $(basename $@).obj to $(basename $@).lnk
+	$(INTEL_LOC86) $(basename $@).lnk 'od(sm(code,dats,data,stack,const))' \
+		'ad(sm(code(0),dats(10000h)))' \
+		'ss(stack(+32))'  to $(basename $@).loc
+
+gencmd.cmd: gencmd.h86
+	$(GENCMD) $< 'data[b1000 m86 xfff]'
+	cmdinfo $@
+
+gencmd.loc: gencmd.obj scd.obj
+	$(INTEL_LINK86) scd.obj, $(basename $@).obj to $(basename $@).lnk
+	$(INTEL_LOC86) $(basename $@).lnk 'od(sm(code,dats,data,stack,const))' \
+		'ad(sm(code(0),dats(10000h)))' \
+		'ss(stack(+32))'  to $(basename $@).loc
 
 diomod.obj: diomod.a86
 	$(RASM86) $^
@@ -96,11 +209,15 @@ initdira.obj: initdira.a86
 cpmif.obj: cpmif.a86
 	$(RASM86) $^
 
+%.h86: %.loc
+	$(INTEL_OH86) $^
+	mv $*.hex $*.h86
+
 %.h86: %.a86
 	$(DRASM86) $^
 
 %.obj: %.a86
-	$(ASM86) $^
+	$(INTEL_ASM86) $^
 
 %.obj: %.c
 	$(DRC86) -o$@ $^
@@ -109,10 +226,10 @@ cpmif.obj: cpmif.a86
 	$(PLI86) $^ \$$dl
 
 %.obj: %.plm
-	$(PLM86) $^ debug 'optimize(3)' xref
+	$(INTEL_PLM86) $^ debug 'optimize(3)' xref
 
 clean:
-	rm -f *.sys *.cmd *.obj *.h86 *.sym *.lin *.lst *.prn ccpmtest.img
+	rm -f *.sys *.loc *.cmd *.obj *.h86 *.sym *.lin *.lst *.prn ccpmtest.img
 
 ccpmtest.img: $(TOOLS) Makefile startup.0
 	cp cpmbase.img ccpmtest.img
