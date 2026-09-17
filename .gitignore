@@ -28,5 +28,6 @@ local/**
 **/*.img
 **/*.cmd
 **/*.con
+**/*.rsp
 **/.*.swp
 **/.DS_Store

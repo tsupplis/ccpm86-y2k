@@ -1,4 +1,4 @@
-SUBDIRS=tools asm ddt86 kernel genccpm
+SUBDIRS=tools asm ddt86 kernel rsps genccpm
 
 DISTDIR=dist
 DISTZIP=dist.zip
