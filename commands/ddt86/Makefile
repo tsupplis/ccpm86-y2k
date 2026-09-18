@@ -6,8 +6,8 @@ INTEL_OH86=intel_oh86
 ASM86=cpm86_asm86
 GENCMD=cpm86_gencmd
 RASM86=pcdev_rasm86
-PLI86=drpli_pc
-PLILINK86=drpli_link
+PLI86=drplicpm_pc
+PLILINK86=drplicpm_link
 
 TOOLS=gentab.cmd ddt86.cmd
 

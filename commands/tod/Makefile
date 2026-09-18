@@ -3,15 +3,7 @@ INTEL_ASM86=intel_asm86
 INTEL_LOC86=intel_loc86
 INTEL_LINK86=intel_link86
 INTEL_OH86=intel_oh86
-ASM86=cpm86_asm86
 GENCMD=cpm86_gencmd
-RASM86=pcdev_rasm86
-LINK86=pcdev_linkcmd
-PLI86=drpli_pc
-PLILINK86=drpli_link
-PLIOBJFIX=drpli_objfix
-DRC86=drccpm_cc
-DRCLINK86=drccpm_link
 
 TOOLS=tod.cmd
 
@@ -34,15 +26,6 @@ tod.loc: tod.obj scd.obj
 
 %.obj: %.a86
 	$(INTEL_ASM86) $^
-
-%.h86: %.a86
-	$(ASM86) $^
-
-%.obj: %.c
-	$(DRC86) -o$@ $^
-
-%.obj: %.pli
-	$(PLI86) $^ \$$dl
 
 %.obj: %.plm
 	$(INTEL_PLM86) $^ debug 'optimize(3)' xref

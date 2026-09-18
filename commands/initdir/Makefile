@@ -7,8 +7,8 @@ ASM86=cpm86_asm86
 GENCMD=cpm86_gencmd
 RASM86=pcdev_rasm86
 LINK86=pcdev_linkcmd
-PLI86=drpli_pc
-PLILINK86=drpli_link
+PLI86=drplicpm_pc
+PLILINK86=drplicpm_link
 PLIOBJFIX=drpli_objfix
 
 TOOLS=initdir.cmd
