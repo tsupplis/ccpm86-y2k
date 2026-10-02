@@ -14,7 +14,7 @@ do;
     07 Oct 82  by Bruce Skidmore
 */
 
-$include(:f2:vaxcmd.lit)
+$include(vaxcmd.lit)
 
 declare plmstart label public;
 

@@ -2,9 +2,9 @@ $title ('TYPE utility: Types file to Console')
 type:
 do;
 
-$include (:f2:copyrt.lit)
+$include (copyrt.lit)
 
-$include(:f2:vaxcmd.lit)
+$include(vaxcmd.lit)
 
 /*
   Revised:
@@ -20,7 +20,7 @@ $include(:f2:vaxcmd.lit)
     Jan 83 fmb : check for openfile error codes in AH reg.
  */
 
-$include (:f2:vermpm.lit)
+$include (vermpm.lit)
 
 declare
     true    literally '0FFh',

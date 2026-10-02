@@ -14,8 +14,6 @@ $include(vaxcmd.lit)
 
 $include(vermpm.lit)
 
-declare BUF_LEN literally '23';
-
 declare dcl literally 'declare';
 dcl lit literally 'literally';
 dcl forever lit 'while 1';
@@ -116,8 +114,8 @@ error:
 declare	buffer$adr structure (
 	max$chars  byte,
 	numb$of$chars byte,
-	console$buffer(BUF_LEN) byte)
-	initial (BUF_LEN,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0);	
+	console$buffer(21) byte)
+	initial (21,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0);	
 
 declare tod$adr address;
 declare tod based tod$adr structure (
@@ -126,7 +124,7 @@ declare tod based tod$adr structure (
   hrs byte,
   min byte,
   sec byte,
-  ASCII (BUF_LEN) byte );
+  ASCII (21) byte );
 
 declare string$adr address;
 declare string based string$adr (1) byte;
@@ -170,20 +168,18 @@ emit$bin$pair: procedure(b);
     call emit$bcd(b mod 10);
     end emit$bin$pair;
 
-emit$year: procedure(yy);
-    declare yy word;
-    call emit$bcd((yy/1000) mod 10);
-    call emit$bcd((yy/100) mod 10);
-    call emit$bcd((yy/10) mod 10);
-    call emit$bcd(yy mod 10);
-    end emit$year;
+emit$slant: procedure(b);
+    declare b byte;
+    call emit$bin$pair(b);
+    call emitchar('/');
+    end emit$slant;
 
 declare chr byte;
 
 gnc: procedure;
     /* get next command byte */
     if chr = 0 then return;
-    if index = BUF_LEN-1 then
+    if index = 20 then
     do;
       chr = 0;
       return;
@@ -202,14 +198,14 @@ numeric: procedure byte;
     return (chr - '0') < 10;
     end numeric;
 
-scan$numeric: procedure(lb,ub) word;
-    declare (lb,ub) word;
-    declare b word;
+scan$numeric: procedure(lb,ub) byte;
+    declare (lb,ub) byte;
+    declare b byte;
     b = 0;
     call deblank;
     if not numeric then call error;
         do while numeric;
-      /*if (b and 1110$0000b) <> 0 then call error;*/
+        if (b and 1110$0000b) <> 0 then call error;
         b = shl(b,3) + shl(b,1); /* b = b * 10 */
         if carry then call error;
         b = b + (chr - '0');
@@ -220,8 +216,8 @@ scan$numeric: procedure(lb,ub) word;
     return b;
     end scan$numeric;
 
-scan$delimiter: procedure(d,lb,ub) word;
-    declare (d,lb,ub) word;
+scan$delimiter: procedure(d,lb,ub) byte;
+    declare (d,lb,ub) byte;
     call deblank;
     if chr <> d then call error;
     call gnc;
@@ -229,7 +225,7 @@ scan$delimiter: procedure(d,lb,ub) word;
     end scan$delimiter;
 
 declare
-    base$year lit '1978',   /* base year for computations */
+    base$year lit '78',   /* base year for computations */
     base$day  lit '0',    /* starting day for base$year 0..6 */
     month$size (*) byte data
     /* jan feb mar apr may jun jul aug sep oct nov dec */
@@ -239,10 +235,9 @@ declare
     (  000,031,059,090,120,151,181,212,243,273,304,334);
 
 leap$days: procedure(y,m) byte;
-    declare y word;
-    declare m byte;
+    declare (y,m) byte;
     /* compute days accumulated by leap years */
-    declare yp word;
+    declare yp byte;
     yp = shr(y,2); /* yp = y/4 */
     if (y and 11b) = 0 and month$days(m) < 59 then
         /* y not 00, y mod 4 = 0, before march, so not leap yr */
@@ -267,18 +262,19 @@ bcd:
     return shl((val/10),4) + val mod 10;
   end bcd;
 
-declare (month, day, hrs, min, sec) byte;
-declare year word;
+declare (month, day, year, hrs, min, sec) byte;
 
 set$date: procedure;
     declare
         (i, leap$flag) byte; /* temporaries */
-    year = scan$numeric(0,0ffffh);
+    month = scan$numeric(1,12) - 1;
     /* may be feb 29 */
     if (leap$flag := month = 1) then i = 29;
         else i = month$size(month);
-    month   = scan$delimiter('-',1,12) - 1;
-    day  = scan$delimiter('-',1,i);
+    day   = scan$delimiter('/',1,i);
+    year  = scan$delimiter('/',0,99);
+    if year<78 then
+            year=year+100;
     /* ensure that feb 29 is in a leap year */
     if leap$flag and day = 29 and (year and 11b) <> 0 then
         /* feb 29 of non-leap year */ call error;
@@ -287,7 +283,7 @@ set$date: procedure;
                 + 365 * (year - base$year)
                 + day
                 - leap$days(base$year,0)
-                + leap$days(year,month);      
+                + leap$days(year,month);
     end set$date;
 
   set$time: procedure;	
@@ -365,11 +361,13 @@ get$date$time: procedure;
 emit$date$time: procedure;
     call emitn(.day$list(shl(week$day,2)));
     call emitchar(' ');
-    call emit$year(year);
-    call emitchar('-');
-    call emit$bin$pair(month);
-    call emitchar('-');
-    call emit$bin$pair(day);
+    call emit$slant(month);
+    call emit$slant(day);
+    if year>99 then
+    do;
+        year=year-100;
+    end;
+    call emit$bin$pair(year);
     call emitchar(' ');
     call emit$colon(hrs);
     call emit$colon(min);
@@ -426,7 +424,7 @@ tod$ASCII:
     hrs byte,
     min byte,
     sec byte,
-    ASCII (BUF_LEN) byte );
+    ASCII (21) byte );
 
   declare i byte;
   declare ret address;
@@ -438,7 +436,7 @@ tod$ASCII:
       call movb (@extrnl$tod.date,@lcltod.date,5);
       call tod$ASCII (.lcltod);
       call write$console (0dh);
-      do i = 0 to BUF_LEN-1;
+      do i = 0 to 20;
         call write$console (lcltod.ASCII(i));
       end;
     end display$tod;
@@ -469,13 +467,13 @@ plmstart:
     do;
 	lcltod.opcode = 1;
 	call crlf;
-	call print$buffer(.('Enter today''s date  (YYYY-MM-DD): ','$'));
-	call move (BUF_LEN,.(000000000000000000000),.buffer$adr.console$buffer);
+	call print$buffer(.('Enter today''s date  (MM/DD/YY): ','$'));
+	call move (21,.(000000000000000000000),.buffer$adr.console$buffer);
 	call read$buffer(.buffer$adr);
 	call crlf;
 	if buffer$adr.numb$of$chars > 0
 	then do;
-	   call move(BUF_LEN,.buffer$adr.console$buffer,.lcltod.ASCII);
+	   call move(21,.buffer$adr.console$buffer,.lcltod.ASCII);
 	   tod$adr = .lcltod;
 	   string$adr = .tod.ASCII;
 	   chr = string(index := 0);
@@ -483,12 +481,12 @@ plmstart:
 	   call move(2,.lcltod.date,.extrnl$tod);
 	end;
 	call print$buffer(.('Enter the time      (HH:MM:SS): ','$'));
-	call move (BUF_LEN,.(000000000000000000000),.buffer$adr.console$buffer);
+	call move (21,.(000000000000000000000),.buffer$adr.console$buffer);
 	call read$buffer(.buffer$adr);
 	if buffer$adr.numb$of$chars > 0
 	then do;
 	   call crlf;
-	   call move(BUF_LEN,.buffer$adr.console$buffer,.lcltod.ASCII);
+	   call move(21,.buffer$adr.console$buffer,.lcltod.ASCII);
 	   tod$adr = .lcltod;	
 	   string$adr = .tod.ASCII;
 	   ret = 0;
@@ -506,7 +504,7 @@ plmstart:
 
     if (fcb(1) <> ' ') and (fcb(1) <> 'C') then
     do;
-      call move (BUF_LEN,.buff(1),.lcltod.ASCII);
+      call move (21,.buff(1),.lcltod.ASCII);
       lcltod.opcode = 1;
       call tod$ASCII (.lcltod);
       call print$buffer (.(
@@ -528,4 +526,3 @@ plmstart:
   end plmstart;
 
 end DATE;
-

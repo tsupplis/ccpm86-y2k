@@ -11,11 +11,11 @@ do;
     23 Jun  82  by Bill Fitler
 */
 
-$include (:f1:copyrt.lit)
+$include (copyrt.lit)
 
-$include (:f1:vaxcmd.lit)
+$include (vaxcmd.lit)
 
-$include (:f1:vermpm.lit)
+$include (vermpm.lit)
 
 declare
     true    literally '0FFh',
@@ -31,9 +31,9 @@ declare
     ctrlx   literally '18h',
     bksp    literally '8';
 
-$include (:f1:proces.lit)
+$include (proces.lit)
 
-$include (:f1:uda.lit)
+$include (uda.lit)
 
 
   /**************************************

@@ -16,7 +16,7 @@ $ COMPACT
     Nov 82 F.Borda 
 */
 
-$include (:f2:vaxcmd.lit)
+$include (vaxcmd.lit)
 
 
 show:

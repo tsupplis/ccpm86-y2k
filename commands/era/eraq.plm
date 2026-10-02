@@ -10,11 +10,11 @@ do;
     31 Jan  83  by Bill Fitler
 */
 
-$include (:f2:copyrt.lit)
+$include (copyrt.lit)
 
-$include (:f2:vaxcmd.lit)
+$include (vaxcmd.lit)
 
-$include (:f2:vermpm.lit)
+$include (vermpm.lit)
 
 declare
     true    literally '1',

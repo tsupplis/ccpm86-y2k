@@ -12,11 +12,11 @@ do;
 */
 /* ERA checks if files are open by other users */
 
-$include (:f2:copyrt.lit)
+$include (copyrt.lit)
 
-$include (:f2:vaxcmd.lit)
+$include (vaxcmd.lit)
 
-$include (:f2:vermpm.lit)
+$include (vermpm.lit)
 
 declare
     true    literally '1',
@@ -32,9 +32,9 @@ declare
     ctrlx   literally '18h',
     bksp    literally '8';
 
-$include (:f2:proces.lit)
+$include (proces.lit)
 
-$include (:f2:uda.lit)
+$include (uda.lit)
 
 
 dcl stack$siz lit '16';

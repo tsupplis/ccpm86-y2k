@@ -126,10 +126,7 @@ user_init:
 	mov ds,ax
 	mov es,ax
 	mov ss,ax
-	; Bochs BIOS int 13h uses deeper stack than the legacy local stack.
-	; Keep SS=CS, but start SP high in the segment to avoid clobbering
-	; BDOS state during BIOS disk calls.
-	mov sp,0fffeh
+	mov sp,offset bdosstack
 	mov bioscs,cs
 	callf dword ptr iosentry
 	mov biosco,bios_offset+3	;set io call to entry
@@ -412,11 +409,7 @@ xiosif:		; xios interface routine
 ;	exit:	AX = BX = output
 
 	push es
-	mov save_ds,ds
 	callf dword ptr iosentry
-	push cs
-	pop ds
-	mov ds,save_ds
 	cld! pop es
 	ret
 
@@ -425,24 +418,21 @@ rwxiosif:	; disk read/write xios interface
 ;========	================================
 ;	entry:	AL = function number
 ;	exit:	AX = BX = output
+
 	mov dx,arecord
 	mov ch,byte ptr arecord+2
 	mov bl,curdsk
 	mov bh,1
 	xchg bh,mult_sec	;BH = multi sector count
-					; stack on entry to the xios
+				; stack on entry to the xios
 	push bx			;   +C | DRV  | MCNT |
 	push track		;   +C |    TRACK    |
 	push sector		;   +8 |   SECTOR    |
 	push curdmabase		;   +6 |   DMA_SEG   |
 	push curdma		;   +4 |   DMA_OFF   |
-					;   +2 |   RET_SEG   |
-					; SP+0 |   RET_OFF   |
-	mov save_ds,ds
+				;   +2 |   RET_SEG   |
+				; SP+0 |   RET_OFF   |
 	callf dword ptr iosentry
-	push cs
-	pop ds
-	mov ds,save_ds
 	add sp,10		;remove parameters from stack
 	cld! push ds! pop es
 	ret
@@ -1484,7 +1474,6 @@ endcode	equ	offset $
 iosentry	rw	0
 biosco		dw	biosoffset	;offset and
 bioscs		dw	0		;segment for callf to BIOS
-save_ds		dw	0		;preserve DS across BIOS int calls
 
 ;
 ;*****************************************************
@@ -1680,12 +1669,13 @@ startpat	equ	offset $
 	org	startpat
 
 patch:
-	mov	bx,offset info_fcb+modnum
+	mov	bx,0894h
 	mov	al,[bx]
 	push	bx
 	dec	bx
 	dec	bx
 	jmp	done
+
 
 ;	db	0		;end of this data area
 
@@ -1693,4 +1683,3 @@ patch:
 
 ;******************** end of BDOS ********************
 end
-

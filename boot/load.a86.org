@@ -140,7 +140,6 @@ perr:
 	call msg			; print base data segment
 	mov ax,dldseg
 	call phex
-	call pcrlf
 
 	mov dx,128
 	mov cl,setmultcntf ! int 224	; set multi-sector count to 128
@@ -238,6 +237,7 @@ eject
 ;*		 Digital Research, Inc.
 ;*		 box 579, Pacific Grove
 ;*		 California, 93950
+
 ;*
 ;*	(Permission is hereby granted to use or
 ;*	 abstract the following program in  the
@@ -314,6 +314,13 @@ entry:					;arrive here from JMP at
 io_ret:
 	ret
 
+;------
+i_disk:
+;------
+	mov al,pic_nseoi		;signal end of interrupt
+	out pic_even_port,al		;to 8259
+	iret				;note we destroyed AL
+
 ;=========
 io_conout:
 ;=========
@@ -326,14 +333,27 @@ io_conout:
 ;	Put character in screen and update cursor position
 ;	BX = screen structure
 
-	; code 2025
-	mov ah, 0Eh        ; BIOS teletype function
-	mov al, cl         ; Character to print
-	mov bh, 0          ; Page number
-	mov bl, 07h        ; Text attribute (white on black)
-	int 10h            ; Call BIOS video interrupt
+	mov bx,offset ss0
+	mov di,ss_cursor[bx]		;cursor offset in bytes
+	cmp cl,cr
+	 je carriage_return
+	cmp cl,lf
+	 je linefeed
+	push es
+	mov ax,bw_video_seg
+	mov es,ax			;segment of foreground screen
+	mov al,cl
+	mov ah,07h			;default attribute
+	stosw				;update and don't touch the attribute
+	pop es				;DI incremented by 2
+	cmp ss_column[bx],columns_per_screen - 1
+	jne inc_col
+	  call carriage_return
+	  jmp line_feed
+inc_col:
+	inc ss_column[bx]		;DI = next data, attribute
+	mov ss_cursor[bx],di		;save new cursor position
 	ret
-
 
 ;---------------
 carriage_return:
@@ -432,12 +452,108 @@ ss_column		equ	byte ptr ss_row + byte		;current col
 
 ;************************************************************************
 ;*									*
+;*	8237 DIRECT MEMORY ACCESS CONTROLLER PORT AND COMMANDS		*
+;*									*
+;************************************************************************
+
+dma_c0_address	equ	000h		;8237 channel 0 address		rw
+dma_c0_count	equ	001h		;8237 channel 0 transfer count	rw
+dma_c1_address	equ	002h		;8237 channel 1 address		rw
+dma_c1_count	equ	003h		;8237 channel 1 transfer count	rw
+dma_c2_address	equ	004h		;8237 channel 2 address		rw
+dma_c2_count	equ	005h		;8237 channel 2 transfer count	rw
+dma_c3_address	equ	006h		;8237 channel 3 address		rw
+dma_c3_count	equ	007h		;8237 channel 3 transfer count	rw
+dma_stat_reg	equ	008h		;8237 status register		ro
+dma_cmd_reg	equ	dma_stat_reg	;8237 command register		wo
+dma_requ_reg	equ	dma_stat_reg+1	;8237 software dma request	wo
+dma_bmsk_reg	equ	dma_stat_reg+2	;8237 binary channel mask	wo
+dma_mode_reg	equ	dma_stat_reg+3	;8237 mode register		wo
+dma_cbpf	equ	dma_stat_reg+4	;8237 clear byte pointer f/f	wo
+dma_temp_reg	equ	dma_stat_reg+5	;8237 temporary register	ro
+dma_clear	equ	dma_stat_reg+5	;8237 master clear		wo
+dma_mask_reg	equ	dma_stat_reg+7	;8237 linear channel mask	wo
+
+dma_page_c1	equ	080h		;a16 to a20 for channel 1
+
+dma_page_fdc	equ	081h		;a16 to a20 for channel 2
+dma_page_c3	equ	082h		;a16 to a20 for channel 3
+
+
+;	The following labels define single mode, address increment
+;	auto-initialization disable, read or write using channel 2
+
+dma_mode_write_fdc	equ	01001010b
+dma_mode_read_fdc	equ	01000110b
+
+dma_bmsk_fdc		equ	00000010b	;binary channel mask for disk
+ 
+
+;	DMA channel assignments
+
+;channel 0 dynamic memory refresh
+;channel 1
+;channel 2 floppy disk controller
+;channel 3
+
+
+;************************************************************************
+;*									*
 ;*		FLOPPY DISK DRIVER EQUATES				*
 ;*									*
 ;************************************************************************
 
+
+;	The following equates are set to the size of a double density,
+;	single sided 5 & 1/4" floppy.
+
 bytes_per_sector	equ	512
-sectors_per_track	equ	18		;1 to 18
+sectors_per_track	equ	8		;1 to 8
+bytes_per_track		equ	sectors_per_track * bytes_per_sector
+tracks_per_disk		equ	40		;0 to 39
+bytes_per_disk		equ	tracks_per_disk * bytes_per_track
+
+
+;	The following equates are for the INTEL 8272 Floppy Disk
+;	Controller.
+
+fdc_stat		equ	03f4h		;status port for the disk controller
+fdc_data		equ	fdc_stat+1	;data port for the disk controller
+fdc_port		equ	03f2h		;all bits clear on channel reset
+
+		;7 6 5 4 3 2 1 0
+		;| | | | | | \_/
+		;| | | | | |  |
+		;| | | | | |  drive select 00=a,01=b,10=c,11=d
+		;| | | | | fdc reset*
+		;| | | | int & dmarq enable
+		;d c b a motor on
+
+fdc_on		equ	00001100b	;mask to keep the 8272 unreset
+fdc_no_motor	equ	11111100b	;mask for no motors
+fdc_read_cmd	equ	01100110b	;mfm, skip deleted data, read
+fdc_write_cmd	equ	01000101b	;mfm, write
+fdc_format_cmd	equ	01001101b	;mfm, format
+fdc_seek_cmd	equ	00001111b	;seek
+fdc_recal_cmd	equ	00000111b	;home to track 0
+fdc_si_cmd	equ	00001000b	;sense interupt status
+fdc_spec_cmd	equ	00000011b	;specify
+
+fdc_ready	equ	10000000b	;mask for transfer ready
+
+fdc_spec_1	equ	11001111b	;srt=0c, hd unload=0f first specify byte
+fdc_spec_2	equ	00000011b	;hd load=1, mode=DMA second specify byte
+
+f_bytes		equ	2		;magic number for 512 bytes per sector
+f_sectors	equ	8		;sectors per track
+f_gap		equ	03ah		;magic number for format gap
+f_filler	equ	0e5h		;fill character
+
+r_bytes		equ	2		;magic number for 512 bytes
+r_sectors	equ	8
+
+r_gap		equ	02ah
+r_dtl		equ	0ffh
 
 ;	Equates for paramter passing for read and write from the
 ;	BDOS.
@@ -530,6 +646,8 @@ io_read:	    ; Function 11: Read sector
 ;		CS,DS,ES,SS must be preserved though call
 
 	mov bp,sp		;set BP for indexing into IOPB
+;	mov dma_mode_storage,dma_mode_read_fdc
+;	mov fdc_rw_cmd,fdc_read_cmd	;loader always reads
 	call flp_io
 	mov al,1
 	jnz i_read_ret		;zero flag is set with successful
@@ -598,11 +716,29 @@ flp_rwlocal:			;read into BIOS data segment the spanning
 	    mov bx,local_buf	;sector
 	    mov ax,ds			;compute 20 bit local DMA addr
 	    call comp_dma
+;	    cmp fdc_rw_cmd,fdc_read_cmd	;loader always reads
+;					;only need this for writes
+
+;					;reading or writing ?
+;	    je flp_local
+;	      mov si,dma_off		;get the sector to write from local
+;	      mov di,local_buf		;buffer
+;	      push es ! push ds ! push ds ! pop es
+;	      mov ax,dma_seg ! mov ds,ax
+;	      mov cx,bytes_per_sector/2
+;	      rep movsw
+;	      pop ds ! pop es
+;	      mov dma_off,si		;update DMA offset
+;
+;flp_local:
 
 	    mov num_sec,1		;read/write one sector
 	    call flp_phys_io
 	    jnz flp_ret			;return zero flag reset
 	      inc sector ! dec track_mcnt
+
+;	      cmp fdc_rw_cmd,fdc_read_cmd	;loader always reads
+;	      jne flp_local_done
 
 	        mov di,dma_off		;move the sector to user's area
 	        mov si,local_buf	;if reading
@@ -666,79 +802,240 @@ flp_phys_io:
 ;		disk parameters on the stack
 ;	exit:	zero flag set if ok
 
-;	Perform physical read through BIOS int 13h.
+;	Perform physical actions to read/write floppy diskette
 
-	mov	retries,max_retries
+	mov d_a_number,r_bytes
+	mov d_a_eot,r_sectors
+	mov d_a_gpl,r_gap
+	mov d_a_dtl,r_dtl
 
-flp_phys_retry:
-	push	bx
-	push	cx
-	push	dx
-	push	di
-	push	si
-	push	bp
-	push	es
-	push	ds
-
-	mov	ax,track
-	mov	bl,al
-	and	bl,1			; head = track mod 2
-	shr	al,1			; cylinder = track / 2
-	mov	ch,al
-	mov	dh,bl
-	mov	dl,drive
-
-	mov	bx,dma_low16
-	mov	si,bx
-	and	bx,0fh			; offset = phys_addr & 0x000F
-	mov	cl,4
-	shr	si,cl			; segment base from low 16 bits
-	xor	ax,ax
-	mov	al,dma_high4
-	mov	cl,12
-	shl	ax,cl			; add high nibble of 20-bit address
-	add	si,ax
-	mov	es,si
-
-	mov	ax,sector
-	inc	ax			; sectors are 1-based for BIOS
-	mov	cl,al
-	mov	ah,02h			; read sectors
-	mov	al,num_sec
-	int	13h
-
-	pop	ds
-	pop	es
-	pop	bp
-	pop	si
-	pop	di
-	pop	dx
-	pop	cx
-	pop	bx
-	jnc	flp_phys_ok
-
-	push	ax
-	push	dx
-	push	bp
-	push	ds
-	mov	ah,00h			; reset floppy before retrying
-	mov	dl,drive
-	int	13h
-	pop	ds
-	pop	bp
-	pop	dx
-	pop	ax
-	dec	retries
-	jnz	flp_phys_retry
-	mov	al,1			; report error with ZF reset
-	or	al,al
+	call motor_and_recal		;make sure motor is on
+	mov recals,max_recals
+recal_loop:
+	mov retries,max_retries
+retry_loop:
+	call seek
+	call dma_setup
+	call fdc_read_write
+	jz phys_ret			;if errors 
+	  dec retries			;attempt retries
+	  jnz retry_loop
+	    call recal
+	    dec recals
+	    jnz recal_loop
+	      or al,1			;reset zero flag
+phys_ret:				;and return error
 	ret
 
-flp_phys_ok:
-	xor	al,al
+motor_and_recal:
+;---------------
+;	entry:	none
+;	exit:	none
+
+;	Turn on the motor if off.  Also do RECAL operation if
+;	motor is off.  Note: loader does not turn off the motor.
+
+	mov al,010h			;pick up a bit for motor a
+	mov cl,drive			;fetch the binary drive code
+	shl al,cl			;make it a bit for motor x
+	mov ah,motor_flags		;fetch the motor bits
+	test ah,al			;check to see if its on
+	jnz motor_on_done		;yes then leap
+	  or al,fdc_on			;mask in the no reset,enable interupt
+	  or al,drive			;mask in the drive
+	  mov motor_flags,al		;save for later
+	  mov dx,fdc_port		;point to the port number
+	  out dx,al			;select & motor on
+	  call recal			;back to track zero
+motor_on_done:				;when we first turn on the motor
 	ret
+
+recal:
+;-----
+;	entry:	none
+;	exit:	none
+
+;	Move the head to home on the selected disk drive.
+
+	mov disk_arguments,2		;specify number of arguments
+	mov d_a_command,fdc_recal_cmd
+	mov al,drive			;get current disk
+	mov d_a_drive,al		;set up the command block
+	call fdc_command_put		;go send the command block
+	hlt				;wait for FDC interrupt
+	jmp sense_interrupt		;required after RECAL command
+	;ret
+
+seek:
+;----
+;	entry:	TRACK to seek to on the stack relative to BP
+;	exit:	none
+
+	mov disk_arguments,3		;request 3 byte command transfer
+	mov d_a_command,fdc_seek_cmd
+	xor bl,bl			;select head 0
+	mov ax,track			;get track off stack
+	cmp al,40			;test for off side 1
+	jb side_ok			;if single sided then leap
+	  mov bl,1			;else get a head 1
+	  mov ah,79			;else get back track bias
+	  sub ah,al			;compute new track number
+	  xchg ah,al			;and get it into al
+side_ok:
+	mov d_a_head,bl			;set up the head
+	add bl,bl			;multiply by 2
+	add bl,bl			;multiply by 4
+	mov d_a_cylinder,al		;set up the track number
+	or bl,drive			;bits 0,1 are drive number
+	mov d_a_drive,bl		;set up disk number
+	mov ax,sector			;get sector off stack
+	inc ax				;sectors are relative to 1
+	mov d_a_record,al		;and set it up
+	add al,num_sec			;compute new end of track
+	dec al
+	mov d_a_eot,al			;save it
+	call fdc_command_put		;send the command block
+	hlt				;wait for FDC interrupt
+	jmp sense_interrupt		;required after SEEK command
+	;ret
+
+dma_setup:
+;---------
+;	entry:	DMA_MODE_STORAGE, DMA_LOW16, DMA_HIGH4 set up
+;	exit:   none
+
+;	Set the DMA device up for a read/write operation.
+;	The current DMA command word must in DMA_MODE_STORAGE.
+;	DMA_LOW16 and DMA_HIGH4 are the twenty bit starting address.
+;	The read/write operation cannot cross a physical 64K boundary.
+
+	out dma_cbpf,al			;reset the byte pointer
+
+	mov al,dma_mode_storage		;get the mode byte
+	out dma_mode_reg,al		;set the mode
+	mov ax,dma_low16		;low 16 bits of 20 bit DMA address
+	out dma_c2_address,al		;send low 8 bits
+	mov al,ah
+	out dma_c2_address,al		;send next 8 bits
+	mov al,dma_high4		;high 4 bits of 20 bit DMA address
+	out dma_page_fdc,al
+	xor ax,ax
+	mov ah,num_sec			;shl num_sec,8 (* 256)
+	shl ah,1			;*512
+	dec ax				;0 relative
+	out dma_c2_count,al		;set up the low byte
+	mov al,ah			;get the low byte
+	out dma_c2_count,al		;and the high byte
+	mov al,dma_bmsk_fdc		;get the binary channel mask
+	out dma_bmsk_reg,al		;enable the disk channel
+	ret
+
+fdc_read_write:
+;--------------
+
+;	entry:	DMA device set up, head positioned on correct
+;		track
+;	exit:	zero flag set if successful
+
+;	Send read or write command to 8272 FDC
+
+	mov disk_arguments,9		;9 byte command for read or write
+	mov al,fdc_rw_cmd		;get read or write command
+	mov d_a_command,al		;put it in the command string
+	call fdc_command_put		;send the command to the FDC
+	hlt				;wait for FDC interrupt
+	mov disk_results,7		;7 byte result transfer
+	call fdc_status_get		;get the result bytes
+	test d_r_st0,0C0H		;test status register 0
+	ret				;return zero flag set on success
+
+sense_interrupt:
+;---------------
+;	Sense interrupt command on the FDC.  It is called
+;	after a recal or a seek to test for seek complete.
+
+	mov disk_arguments,1		;only one byte of command
+	mov d_a_command,fdc_si_cmd	;sense interrupt commmand
+	call fdc_command_put		;send the command to the FDC
+	mov disk_results,2		;2 bytes are returned
+	call fdc_status_get		;get the 2 result bytes
+	ret
+
+fdc_command_put:
+;---------------
+;	entry:	DISK_ARGUMENT array set up
+;	exit:	none
+
+;	Send the command block in the DISK_ARGUMENTS table to
+;	the 8272 FDC.
+;	The number of commands to write to the FDC is the
+;	first item in the table.
+
+
+	mov dx,fdc_stat			;point to the i/o port
+	mov si,offset disk_arguments	;point to the table of arguments
+	cld				;make sure we go forward
+	lodsb				;get the length of the arguments table
+	mov cl,al			;get it into the count register
+	sub ch,ch			;zero the high byte
+
+fdc_command_loop:
+	in al,dx			;get the current control byte
+	test al,fdc_ready		;if not ok to send next byte
+	jz fdc_command_loop		;then loop waiting
+	  inc dx			;point at the data port
+	  lodsb				;else get the byte to send
+	  out dx,al			;send it
+	  dec dx			;point back at the status port
+	  loop fdc_command_loop		;if not last byte then loop
+	  ret				;else were all done
+
+fdc_status_get:
+;--------------
+;	entry:	number of results in 1st byte of DISK_RESULTS array
+;	exit:	none
+
+;	Get the status information from the 8272
+;	FDC and place them in the table at DISK_RESULTS.
+;	The first byte in the table is the number of results
+;	to read from the FDC
+
+	push es				;save UDA
+	mov dx,fdc_stat			;point at the status port
+	mov ax,ds			;get our data segment
+	mov es,ax			;into the extra segment
+	mov di,offset disk_results + 1	;point to where to put the data
+	cld 				;make sure we go forward
+	mov cl,disk_results		;fetch the number of expected results
+	sub ch,ch			;zero the high byte
+
+fdc_status_loop:
+	in al,dx			;get the current control byte
+	test al,fdc_ready		;if not ok to read next byte
+	jz fdc_status_loop		;then loop waiting
+	  inc dx			;point at the data port
+	  in al,dx			;get the byte
+	  stosb				;put it in the structure
+	  dec dx			;point back at the status port
+	  loop fdc_status_loop		;if not last then loop
+	pop es				;restore UDA
+	ret				;else return
+
+
 
 ;		INIT ROUTINE
+
+;************************************************************************
+;*									*
+;*	8259 PROGRAMMABLE INTERRUPT CONTROLLER COMMANDS			*
+;*			AND PORTS					*
+;*									*
+;************************************************************************
+
+pic_even_port		equ	020h	;port 0
+pic_odd_port		equ	021h	;bit 0 is A0 of 8259 instructions
+
+pic_nseoi		equ	020h	;non specific end of interupt
 
 ;************************************************************************
 ;*									*
@@ -775,11 +1072,30 @@ init:					;arrive here from the JMP
 
 
 set_up_interrupts:
-	; BIOS int 13h path: keep ROM PIC mask and IRQ vectors intact.
-	; Do not reprogram PIC masks here and do not hook int 0Eh.
+	mov al,10111101b		;enable diskette and keyboard
+	out pic_odd_port,al		;interrupts only
+					;and mask off the rest
+
+;	mov disk_arguments,3		;send specify command to the
+;	mov d_a_command,fdc_spec_cmd	;FDC (Intel 8272 or NEC 765)
+;	mov d_a_drive,0d0h		;step rate=3ms, head unload=0ms
+;	mov d_a_cylinder,20h		;head load=2ms, DMA mode true
+;	call fdc_command_put		;head unload and head load times
+					;are meaningless on mini floppies
+					;where the head is loaded
+					;when the motor is turned on
 
 	mov ax,ds
 	add data_buf_seg,ax		;fix up data buffer segment
+
+	push es ! xor ax,ax
+	mov es,ax
+	mov di,disk_interrupt*4		;point at vector location
+	mov ax,offset i_disk
+	stosw				;save and inc DI
+	mov ax,cs
+	stosw
+	pop es
 
 set_up_video:	
 	mov dx,bw_card			;get the video chip port
@@ -852,8 +1168,45 @@ ss0		dw	0,0,0	;cursor, escape, screen_seg
 
 ;	Floppy Disk Driver data
 
+	
 max_retries		equ		3
 retries			db	0	;retry counter
+max_recals		equ		5
+
+recals			db	0
+
+;	The following 2 tables are used to issue commands to,
+;	and read results from the 8272 FDC.  The first entry
+;	in each table is the number of bytes to send or receive
+;	from the device
+
+disk_arguments	db	0		;number of arguments to send
+d_a_command	db	0		;command read/write
+d_a_drive	db	0		;drive select & head select
+d_a_cylinder	db	0		;cylinder to read/write
+d_a_head	db	0		;head
+d_a_record	db	0		;sector
+d_a_number	db	2		;magic number for 512 bytes/sector 
+d_a_eot		db	sectors_per_track	;end of track sector number
+d_a_gpl		db	02ah		;inter sector gap length
+d_a_dtl		db	0ffh		;data length
+
+disk_results	db	0		;number of bytes to read
+d_r_st0		db	0		;status byte 0
+d_r_st1		db	0		;status byte 1
+d_r_st2		db	0		;status byte 2
+d_r_cylinder	db	0		;cylinder we are on now
+d_r_head	db	0
+d_r_record	db	0
+d_r_number	db	0		;number of sectors read
+
+f_a_bytes	db	0
+f_a_sectors	db	0
+f_a_gap		db	0
+f_a_filler	db	0
+
+fdc_rw_cmd		db	fdc_read_cmd	;read or write command
+dma_mode_storage	db	dma_mode_read_fdc
 
 num_sec			db	1		;num sectors to read/write
 						;in one call to controller
@@ -862,6 +1215,8 @@ track_mcnt		rb	1		;multi sector count on
 						;current track
 dma_low16		rw	1		;20 bit address storage
 dma_high4		rb	1
+
+motor_flags		db	0		;last state of the motor bits
 
 ;	Disk Parameter Header
 
@@ -876,17 +1231,17 @@ dph0	dw	0		;translate table
 
 ;	Disk Parameter Block
 
-dpb0	dw	18		;sectors per track
-	db	5		;block shift
-	db	31		;block mask
-	db	1		;extnt mask
-	dw	354		;disk size in 1k blocks
+dpb0	dw	8		;sectors per track
+	db	3		;block shift
+	db	7		;block mask
+	db	0		;extnt mask
+	dw	155		;disk size in 1k blocks
 				;less offset track(s)
-	dw	255		;directory max
-	db	192		;alloc0
+	dw	63		;directory max
+	db	11000000b	;alloc0
 	db	0		;alloc1
-	dw	64		;check size
-	dw	2		;offset
+	dw	16		;check size
+	dw	1		;offset
 	db	2		;phys sec shift
 	db	3		;phys sec mask
 
@@ -959,4 +1314,3 @@ dir_buf		equ	((offset  $) + 15) and 0fff0h
 local_buf	equ	dir_buf + 512
 
 data_buf	equ	(local_buf + 512)/16
-

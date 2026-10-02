@@ -49,15 +49,15 @@
 dir:
 do;
 
-$include (:f1:copyrt.lit)
+$include (copyrt.lit)
 
-$include (:f1:comlit.lit)
+$include (comlit.lit)
 
-$include (:f1:mfunc.lit)
+$include (mfunc.lit)
 
-$include (:f1:proces.lit)
+$include (proces.lit)
 
-$include (:f1:qd.lit)
+$include (qd.lit)
 
   /**************************************
    *                                    *

@@ -7,7 +7,7 @@
     /* Common Include Module for RSP and Transient CCPMSTAT */
 
 
-$include(:f2:newcom.lit)
+$include(newcom.lit)
 dcl buff (128) byte external;
 
 
@@ -76,14 +76,14 @@ dcl CR  lit '13';                                  /* CR = carriage return*/
 dcl LF  lit '10';                                  /* LF = line feed      */
 
 
-$include (:f2:mdsat.lit)
-$include (:f2:proces.lit)
-$include (:f2:sd.lit)
-$include (:f2:qd.lit)
-$include (:f2:flag.lit)
-$include (:f2:uda.lit)
-$include (:f2:vccb.lit)
-/*$include (:f2:ccb.lit)*/
+$include (mdsat.lit)
+$include (proces.lit)
+$include (sd.lit)
+$include (qd.lit)
+$include (flag.lit)
+$include (uda.lit)
+$include (vccb.lit)
+/*$include (ccb.lit)*/
 
 dcl pd$pointer pointer;  /* double word bases for MP/M-86 data structures */
 dcl pd$ptr structure(

@@ -4,9 +4,9 @@ $compact
 status:
 do;
 
-$include (:f2:copyrt.lit)
+$include (copyrt.lit)
 
-$include (:f2:vaxcmd.lit)
+$include (vaxcmd.lit)
 
 $include (scomon.plm)
 

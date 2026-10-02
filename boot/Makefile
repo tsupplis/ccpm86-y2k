@@ -7,9 +7,14 @@ TOOLS=tcopy.cmd
 
 # initdir.cmd
 
-SNIPPETS=boot.sys load.sys lbdos.sys  lbdos3.sys
+SNIPPETS=boot.sys load.sys lbdos.sys  lbdos3.sys track0
 
 all: $(TOOLS) $(SNIPPETS)
+
+track0: boot.sys load.sys lbdos.sys
+	dd if=boot.sys of=track0 bs=1 seek=0 skip=128
+	dd if=lbdos.sys of=track0 bs=1 seek=512 skip=128
+	dd if=load.sys of=track0 bs=1 seek=2816 skip=2432
 
 tcopy.cmd: tcopy.h86
 	$(GENCMD) $<
@@ -44,7 +49,7 @@ boot.sys: boot.h86
 	$(RASM86) $^
 
 clean:
-	rm -f $(TOOLS) $(SNIPPETS) *.obj *.cmd *.h86 *.sym *.lst ccpmtest.img
+	rm -f $(TOOLS) $(SNIPPETS) *.obj *.cmd *.h86 *.sym *.lst ccpmtest.img track0
 
 ccpmtest.img: $(TOOLS) Makefile startup.0
 	cp cpmbase.img ccpmtest.img

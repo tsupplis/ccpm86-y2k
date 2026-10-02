@@ -3,21 +3,21 @@ $compact
 vcmode:
 do;
 
-$include (:f2:copyrt.lit)
-$include (:f2:vaxcmd.lit)
-$include (:f2:comlit.lit)
-$include (:f2:mfunc.lit)
-$include (:f2:fcb.lit)
+$include (copyrt.lit)
+$include (vaxcmd.lit)
+$include (comlit.lit)
+$include (mfunc.lit)
+$include (fcb.lit)
 
 dcl fcb (1) byte external;
 dcl buff (1) byte external;
 
-$include (:f2:sd.lit)
+$include (sd.lit)
 
 dcl ccb$pointer pointer;
 dcl ccb$ptr structure ( offset address, segment address) at
   (@ccb$pointer);
-$include (:f2:vccb.lit)
+$include (vccb.lit)
 dcl ccb based ccb$pointer ccb$structure;
 
 dcl ccpmproduct lit '14h';
@@ -158,7 +158,7 @@ showstate: procedure (verb);
     
 end show$state;
 
-$include (:f2:qd.lit)
+$include (qd.lit)
 
 dcl qpb qpb$structure;
 

@@ -7,9 +7,9 @@ $ COMPACT
     1/26/83 for CCPM 2.0 by F.Borda
 */
 
-$include (:f2:copyrt.lit)
+$include (copyrt.lit)
 
-$include (:f2:vaxcmd.lit)
+$include (vaxcmd.lit)
 
 /* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
 
@@ -19,7 +19,7 @@ $include (:f2:vaxcmd.lit)
 set:
 do;
 
-$include (:f2:vermpm.lit)
+$include (vermpm.lit)
 
 declare copyright (*) byte data (
   ' Copyright (c) 1983, Digital Research ');
@@ -96,9 +96,9 @@ $ eject
 
  * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */
 
-$include (:f2:proces.lit)
+$include (proces.lit)
 
-$include (:f2:uda.lit)
+$include (uda.lit)
 
 
 declare

@@ -57,7 +57,7 @@ DO;
 
 ****/
 
-$include (:f1:copyrt.lit)
+$include (copyrt.lit)
 
 declare
     mpmproduct literally '01h', /* requires mp/m */
@@ -1707,8 +1707,8 @@ INSERT: PROCEDURE;
                   /* read a character and check for endfile
                      or CR  */
 SCANNING: PROCEDURE BYTE;
-    RETURN NOT ((CHAR := READC) = ENDFILE OR
-                   (CHAR = CR AND NOT INSERTING));
+    CHAR = READC;
+    RETURN NOT (CHAR = ENDFILE OR (CHAR = CR AND NOT INSERTING));
     END SCANNING;
 /* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
@@ -2637,3 +2637,4 @@ $ eject
         END;
     END;
 END;
+
