@@ -1,4 +1,4 @@
-SUBDIRS=commands kernel
+SUBDIRS=commands kernel boot media
 
 DISTDIR=dist
 DISTZIP=dist.zip

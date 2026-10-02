@@ -64,4 +64,4 @@ u_conccb	equ	es:word ptr .062h
 ;u_lstccb	equ	es:word ptr .064h
 ;u_delim	equ	es:byte ptr .066h
 u_ioexerr	equ	es:byte ptr .067h ;extended IOS error for PCMODE
-
+u_nameitem	equ	es:word ptr .068h ;name item addr for record locking

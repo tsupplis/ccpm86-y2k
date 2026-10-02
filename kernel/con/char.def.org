@@ -5,32 +5,21 @@
 ;*
 ;*****************************************************
 
-ctla	equ	001h
-ctlb	equ	002h
 ctlc	equ	003h
 ctld	equ	004h
 ctle	equ	005h
-ctlf	equ	006h
 bell	equ	007h
-ctlg	equ	007h
 ctlh	equ	008h
-tab	equ	009h	; ctli
-lf	equ	00ah	; ctlj
-ctlk	equ	00bh
-ctll	equ	00ch
-cr	equ	00dh	; ctlm
-ctln	equ	00eh
+tab	equ	009h
+lf	equ	00ah
+cr	equ	00dh
 ctlp	equ	010h
 ctlq	equ	011h
 ctlr	equ	012h
 ctls	equ	013h
-ctlt	equ	014h
 ctlu	equ	015h
-ctlv	equ	016h
-ctlw	equ	017h
 ctlx	equ	018h
-ctly	equ	019h
 ctlz	equ	01ah
 ctl	equ	05eh
 rubout	equ	07fh
-
+

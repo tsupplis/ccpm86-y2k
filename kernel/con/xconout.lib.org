@@ -10,14 +10,21 @@ reorg10	equ	offset $
 ;*						*
 ;************************************************
 
+crt_rows	equ	24	; crt height
+crt_cols	equ	80	; crt width
+crt_size	equ	crt_rows * crt_cols
+crt_full	equ	100H*(crt_rows-1) + (crt_cols-1)
+s_l_offset	equ	crt_size	; status line offset
+buffer_size	equ	crt_size * (num_vir_cons*2 + 1)
+				; this allows 2x bytes for each
+				; console and 1x for the map
 
 mono_seg	equ	0B000h	; monochrome memory segment
 color_seg	equ	0B800h	; color memory segment
 mono_port	equ	03B4h	; monochrome controller addr
 color_port	equ	03D4h	; color controller addr
 mono_cursor	equ	0B0Ch	; monochrome cursor code
-;color_cursor	equ	0607h	; color cursor code
-color_cursor	equ	010dh	; color cursor code	; 2025 edit
+color_cursor	equ	0607h	; color cursor code
 compaq_cursor	equ	0B0Ch	; hi-res cursor on color card
 
 vrt		equ	08h	; vertical retrace bit
@@ -282,9 +289,8 @@ ww_wrap_column:
 
 ww_full_window:
 	call	point_vs	;point to structure
-	mov	cx,0
-	mov	ah, crt_rows_minus2
-	mov	al, crt_cols_minus1
+	mov	cx,0		;top left
+	mov	ax,crt_full	;bottom right
 	cmp	vs_top_left,cx	;if the current top console
 	jnz	w_full1		;  is not a full screen,
 	cmp	vs_bot_right,ax	;  then make it one.
@@ -293,9 +299,7 @@ ww_full_window:
 	mov	ax,vs_old_b_r	;  then switch to previous.
 	cmp	cx,0		;if old window is not
 	jnz	w_full1		;  a full screen
-	cmp	ah, crt_rows_minus2
-	jnz	w_full1
-	cmp	al, crt_cols_minus1
+	cmp	ax,crt_full	;  then go ahead.
 	jnz	w_full1
 	ret			;if both full, bag it
 w_full1:
@@ -529,14 +533,6 @@ check_flag_done:
 ;		dx = cursor
 
 vc_out:
-	test	vs_mode,wrap_pending_bit
-	jz	vc_out_prepped
-	and	vs_mode,not wrap_pending_bit
-	mov	dl,0
-	mov	vs_cur_col,dl	; force pending wrap to next line
-	call	vc_out_lf
-	mov	dx,vs_cursor
-vc_out_prepped:
 	push	es
 	call	point_cursor	; di -> cursor pos
 	mov	ch,vs_attrib
@@ -571,17 +567,16 @@ vc_out1:
 	test	vs_mode,wrap_bit
 	jz	vc_out2		; exit if not wrapping
 
-	or	vs_mode,wrap_pending_bit
-	mov	dl,vs_width
-	dec	dl
-	jmp	put_cursor
+	mov	dl,0
+	mov	vs_cur_col,dl	; force a cr,lf
+	call	vc_out_lf
+	jmps	show_cursor
 vc_out2:
 	ret			; don't touch cursor
 
 ;	vc carriage return out
 
 vc_out_cr:
-	and	vs_mode,not wrap_pending_bit
 	mov	dl,0		; first column
 	jmps	put_cursor	; update and display
 
@@ -643,8 +638,7 @@ in_window2:
 ;	vc line feed out
 
 vc_out_lf:
-	and	vs_mode,not wrap_pending_bit
-	cmp	dh,crt_rows_minus2	; if at the bottom
+	cmp	dh,crt_rows-1	; if at the bottom
 	jz	vc_lf1		;   do a scroll
 
 	inc	dh		; if not, move down
@@ -652,30 +646,23 @@ vc_out_lf:
 	call	update_window	; update if not full on top
 	jmp	show_cursor
 vc_lf1:
-	mov	ah, 0
-	mov	al, crt_cols
-	shl	ax, 1		; one row down
-	mov	si, ax
 	sub	ax,ax		; zero offset from
 	mov	di,ax		;   the top left
+	mov	si,crt_cols*2	; one row down
 	jmp	z_line		; delete one line to scroll
 
 
 ;	vc back space
 
 vc_out_bs:
-	and	vs_mode,not wrap_pending_bit
 	dec	dl		; back one column
-	js	vc_bs0		; if at left, continue logic
-	jmp	put_cursor	; if not at left
-vc_bs0:
+	jns	put_cursor	; if not at left
 	test	vs_mode,wrap_bit
 	jz	vc_bs1		; if no wrap, done
 
 	mov	dl,vs_width	; if at left, wrap
 	sub	dx,0101h	; up one, left one
-	js	vc_bs1		; if top-left, done
-	jmp	put_cursor	; if not at top
+	jns	put_cursor	; if not at top
 vc_bs1:
 	ret			; if top left, bag it
 
@@ -694,7 +681,6 @@ vc_bel_done:
 ;	vc escape character received
 
 vc_out_esc:
-	and	vs_mode,not wrap_pending_bit
 	mov	vs_vector,offset con_escape
 	ret			; set vector and leave
 
@@ -710,7 +696,7 @@ z_up:
 ;	esc B  -  cursor down
 z_down:
 	inc	dh		; next row down
-	cmp	dh,crt_rows_minus1	; if not already at bottom,
+	cmp	dh,crt_rows	; if not already at bottom,
 	jb	z_cursor	;   then set cursor
 	ret
 
@@ -747,11 +733,7 @@ z_rev_index:
 
 ;	esc J  -  erase to end of screen
 z_erase_eos:
-	mov	ah, 0
-	mov	al, crt_rows_minus1
-	mov	cl, 8
-	shl	ax, cl
-	mov	cx, ax
+	mov	cx,crt_rows shl 8
 	jmps	eraser		; common code
 
 ;	esc K  -  erase to end of line
@@ -811,15 +793,8 @@ erase1:
 z_insert_line:
 	mov	dl,0		; first column
 	call	point_cursor	; ax = count from top
-	mov	cx, crt_size
-	dec	cx
-	shl	cx, 1
-	mov	di,cx	; end of screen
-	mov	si,di
-	mov	ch, 0
-	mov	cl, crt_cols
-	shl	cx, 1
-	sub	si, cx
+	mov	di,(crt_size-1)*2	; end of screen
+	mov	si,(crt_size-crt_cols-1)*2
 	std			; backwards move
 	jmps	z_line		; shared code
 
@@ -827,27 +802,20 @@ z_insert_line:
 z_delete_line:
 	mov	dl,0
 	call	point_cursor	; di -> line start
-	mov	ch, 0
-	mov	cl, crt_cols
-	mov	si, cx
-	shl	si, 1
-	add	si, di		; next row down
+	mov	si,di
+	add	si,crt_cols*2	; next row down
 
 ;	external entry point
 ;	entry:	si,di set up for movsw
 ;		ax = count from top of screen
 z_line:
-	mov	cx, crt_size
-	sub	cx, ax
-	mov	ah, 0
-	mov	al, crt_cols
-	sub	cx, ax		; cx = character count
+	mov	cx,crt_size-crt_cols
+	sub	cx,ax		; cx = character count
 	jbe	zline1		; skip if nothing to move
 
 	call	z_movsw		; movsw in vc_segment
 z_line1:
-	mov	ch, 0
-	mov	cl, crt_cols	; one line's worth
+	mov	cx,crt_cols	; one line's worth
 	jmps	erase		; blank one line
 
 ;	repeat movsw in current screen segment
@@ -871,8 +839,7 @@ z_movsw1:
 ;	esc N  -  delete one character
 z_delete_char:
 	call	point_cursor	; point to current char
-	mov	ch, 0
-	mov	cl,crt_cols_minus1	; last column
+	mov	cx,crt_cols-1	; last column
 	sub	cl,dl		; cx = chars to line end
 	jz	z_del_ch1	; skip if at line end
 
@@ -882,7 +849,7 @@ z_delete_char:
 	call	z_movsw		; shift left one char
 z_del_ch1:
 	mov	cx,1		; erase one last char
-	jmp	erase
+	jmps	erase
 
 ;	esc Y  -  set cursor position
 z_set_cursor:
@@ -890,14 +857,14 @@ z_set_cursor:
 	ret			; advance to row set
 
 z_set1:
-	mov	al,crt_rows_minus2	; maximum allowable row
+	mov	al,crt_rows-1	; maximum allowable row
 	call	z_limit		; clip oversize values
 	mov	vs_cur_row,cl	; save the row
 	mov	vs_vector,offset z_set2
 	ret			; advance to col set
 
 z_set2:
-	mov	al,crt_cols_minus1	; maximum allowable column
+	mov	al,crt_cols-1	; maximum allowable column
 	call	z_limit
 	mov	dl,cl		; dx = new cursor location
 	call	restore_state	; back to normal
@@ -1400,13 +1367,11 @@ release_done:
 ;	entry:	bx -> vs_
 
 check_full_top:
-	mov	al, vs_rowsb
-	cmp	al, crt_rows_minus1
+	cmp	vs_rowsb,crt_rows
 	jnz	check_ft_done	; skip if not full
-	mov	al, vs_colsb
-	cmp	al, crt_cols
+	cmp	vs_colsb,crt_cols
 	jnz	check_ft_done	; skip if not full
-	mov	al, top_screen
+	mov	al,top_screen
 	cmp	vs_number,al	; if top, set zf
 check_ft_done:
 	ret
@@ -1661,7 +1626,7 @@ draw_frame:
 draw_f1:
 	mov	dh,vs_bottom
 	inc	dh		; down on row
-	cmp	dh,crt_rows_minus1
+	cmp	dh,crt_rows
 	jz	draw_f2		; skip if bottom
 
 	mov	ax,bot_corners
@@ -1717,7 +1682,7 @@ hline2:
 	loop	hline2		; cx times
 
 	pop	ax		; corners again
-	cmp	dl,crt_cols_minus1	; if at right edge
+	cmp	dl,crt_cols-1	; if at right edge
 	jz	hline3		;   skip last corner
 
 	mov	al,ds:a_copy	; frame attribute
@@ -1746,13 +1711,10 @@ vline:
 	xchg	ax,si		; si -> map
 	mov	es,vc_map_seg	; for owner check
 	pop	ax		; vert line + attrib
-	mov	dh, 0
-	mov	dl, crt_cols_minus1
 vline1:
 	call	put_if_ours	; to the screen
-	add	di, dx
-	add	di, dx
-	add	si, dx
+	add	di,2*(crt_cols-1)
+	add	si,crt_cols-1
 	loop	vline1		; num of rows times
 	pop	cx
 	pop	si
@@ -1803,7 +1765,7 @@ new_count:
 
 do_true_view:
 	mov	dx,vs_view_point
-	mov	al,crt_rows_minus1
+	mov	al,crt_rows
 	sub	al,vs_rowsb	; get max view row
 	cmp	al,dh
 	jae	do_true1	; skip if ok
@@ -1847,11 +1809,11 @@ new_map2:
 	dec	dl		; include frame
 new_map3:
 	mov	cx,vs_bot_right
-	cmp	ch,crt_rows_minus2	; if at crt bottom
+	cmp	ch,crt_rows-1	; if at crt bottom
 	jz	new_map4	;   skip bot frame
 	inc	ch		; include frame
 new_map4:
-	cmp	cl,crt_cols_minus1	; if at crt right
+	cmp	cl,crt_cols-1	; if at crt right
 	jz	new_map5	;   skip right frame
 	inc	cl		; include frame
 new_map5:
@@ -1862,8 +1824,6 @@ new_map5:
 
 ;	now install the new window
 
-	mov	bh, 0
-	mov	bl, crt_cols
 	mov	al,vs_bit	; restore vc bit mask
 new_map6:
 	push	di
@@ -1876,7 +1836,7 @@ new_map7:
 
 	pop	cx
 	pop	di
-	add	di,bx	; next row
+	add	di,crt_cols	; next row
 	dec	ch
 	jnz	new_map6
 	pop	es
@@ -1898,15 +1858,14 @@ point_vs:
 
 ;	point to vc image from cursor row,column
 ;	entry:	dx = (row,column)
-;	exit:	ax = crt_cols*row + column
+;	exit:	ax = 80*row + column
 ;		di = 2*ax
 
 point_cursor:
-	mov	al, crt_cols	; 256 - crt_cols
-	neg	al
+	mov	al,176		; 256 - 80 = 176
 	mul	dh
-	neg	ax		; ax = -(256-crt_cols)*row
-	add	ax,dx		; ax = crt_cols*row + col
+	neg	ax		; ax = -176*row
+	add	ax,dx		; ax = 80*row + col
 	mov	di,ax
 	add	di,di		; di = 2*ax
 	ret
@@ -2204,8 +2163,8 @@ put_c_alpha:
 put_crt_c0:
 	xchg	ax,bx		; save char in bx
 	test	dl,sync_bit
-;	jz	put_c3		; if no sync, skip
-	jmp	put_c3
+	jz	put_c3		; if no sync, skip
+
 	mov	dx,color_port+6	; crt status
 put_c1:
 	sti			; allow an interrupt
@@ -2271,17 +2230,6 @@ video_out1:
 reorg9	equ	(offset $ + 1) and -2
 	dseg
 	org	reorg9
-
-
-;crt_rows	db	25	; crt height
-crt_rows_minus1 db	24
-crt_rows_minus2 db	23
-crt_cols	db	80	; crt width
-crt_cols_minus1 db	79
-;crt_cols_minus2 db	78
-crt_size	dw	24*80
-sl_offset	dw	24*80	; status line offset
-
 
 vc_map_seg	rw	1	; filled by init
 
@@ -2385,53 +2333,52 @@ cursor_bit	equ	02h		; cursor displayed
 rev_bit		equ	04h		; reverse video mode
 sync_bit	equ	08h		; sync crt accesses
 match_bit	equ	10h		; image matches physical
-wrap_pending_bit equ	20h		; deferred wrap at line end
 init_mode	equ	wrap_bit + cursor_bit + match_bit
 
 table_vs	dw	first_vs,second_vs,third_vs,fourth_vs
 
-first_vs	dw	0,0,0
-		dw	0,0,0
+first_vs	dw	0,0,crt_full
+		dw	0,crt_full,crt_full
 		dw	1850H,0
-		dw	0,0,0
+		dw	crt_rows,crt_cols,0
 		dw	0,0,vc_list
-		db	07h,init_mode,1,0,0,1
+		db	07h,init_mode,1,crt_cols,0,1
 		dw	0,con_normal,0
 		dw	0,0,0
 		dw	pfk_tbl0,0,0FF00h
 		dw	0,0,0,0,0
 		db	1,0
 
-second_vs	dw	0,0,0
-		dw	0,0,0
+second_vs	dw	0,0,crt_full
+		dw	0,crt_full,crt_full
 		dw	1850H,0
-		dw	0,0,0
+		dw	crt_rows,crt_cols,0
 		dw	0,0,vc_list
-		db	07h,init_mode,1,0,1,2
+		db	07h,init_mode,1,crt_cols,1,2
 		dw	0,con_normal,0
 		dw	0,0,0
 		dw	pfk_tbl1,0,0FF00h
 		dw	0,0,0,0,0
 		db	1,0
 
-third_vs	dw	0,0,0
-		dw	0,0,0
+third_vs	dw	0,0,crt_full
+		dw	0,crt_full,crt_full
 		dw	1850H,0
-		dw	0,0,0
+		dw	crt_rows,crt_cols,0
 		dw	0,0,vc_list
-		db	07h,init_mode,1,0,2,4
+		db	07h,init_mode,1,crt_cols,2,4
 		dw	0,con_normal,0
 		dw	0,0,0
 		dw	pfk_tbl2,0,0FF00h
 		dw	0,0,0,0,0
 		db	1,0
 
-fourth_vs	dw	0,0,0
-		dw	0,0,0
+fourth_vs	dw	0,0,crt_full
+		dw	0,crt_full,crt_full
 		dw	1850H,0
-		dw	0,0,0
+		dw	crt_rows,crt_cols,0
 		dw	0,0,vc_list
-		db	07h,init_mode,1,0,3,8
+		db	07h,init_mode,1,crt_cols,3,8
 		dw	0,con_normal,0
 		dw	0,0,0
 		dw	pfk_tbl3,0,0FF00h
@@ -2449,13 +2396,8 @@ ibm_str      db  71h,50h,5Ah,0Ah,1Fh,06h,19h,1Ch,02h,07h,26h,07h,0,0,0,0
 compaq_str   db  71h,50h,5Ah,0Ah,19h,06h,19h,19h,02h,0Dh,2Bh,0Ch,0,0,0,0
 
 ;	dynamic row update list
-;
-;	The list stores run-length update spans for all VCs and is indexed at
-;	runtime by new_vc_list/update_window. Keep this overprovisioned to avoid
-;	overwrite when geometry exceeds classic 80x25.
-;	Current budget supports up to 256 rows.
 
-vc_list		rw	(2*num_vir_cons-1) * 100h  * 2 + 4
+vc_list		rw	(2*num_vir_cons-1) * crt_rows * 2 + 4
 
 ;	console control blocks have moved to xchar.lib
-
+

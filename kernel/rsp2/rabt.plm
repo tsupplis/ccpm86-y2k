@@ -5,9 +5,9 @@ do;
 
 /* Modified 3/15/83 to force an ATTACH console call */
 
-$include (:f2:copyrt.lit)
-$include (:f2:comlit.lit)
-$include (:f2:mfunc.lit)
+$include (copyrt.lit)
+$include (comlit.lit)
+$include (mfunc.lit)
 
 /**** Vax commands for generation:
 
@@ -54,7 +54,7 @@ patch: procedure public;	/* dummy area for patching code segments */
 	i=i+5;  i=i+5;  i=i+5;  i=i+5;  i=i+5;     /* about 54 bytes */
   end patch;
 
-$include (:f2:proces.lit)
+$include (proces.lit)
 
   dcl pd$pointer pointer;
   dcl pd$ptr structure (offset word, segment word) at(@pd$pointer);
@@ -62,7 +62,7 @@ $include (:f2:proces.lit)
 
   dcl rsplink word external;
 
-$include (:f2:qd.lit)
+$include (qd.lit)
 
   dcl abt$qd$buf (131) byte;
   dcl abt$cmd structure(
@@ -145,4 +145,4 @@ plm$start:
     end;
 end plmstart;
 end abort;
-
+

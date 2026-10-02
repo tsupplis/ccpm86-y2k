@@ -32,5 +32,5 @@ xios.con: xios.h86
 	$(RASM86) $^ 
 
 clean:
-	rm -f *.obj *.h86 *.sym *.lst *.con *.cmd *.loc *.lnk
+	rm -f *.obj *.h86 *.sym *.lst *.con *.cmd *.loc *.lnk *.lst
 

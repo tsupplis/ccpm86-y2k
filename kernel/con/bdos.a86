@@ -24,7 +24,7 @@
 	eject ! include xioscb.def
 	eject 
 
-PCMODE	equ	false
+PCMODE	equ	true
 
 	        include bdosif.bdo	; system initialization
 	eject ! include file1.bdo	; file system part 1
@@ -38,4 +38,4 @@ PCMODE	equ	false
 	eject ! include sysdat.bdo
 	eject ! include data.bdo
 	end
-
+

@@ -13,13 +13,15 @@ eject						; Dec 9, 1983
 ;	single sided 5 & 1/4" floppy.
 
 bytes_per_sector	equ	512
-sectors_per_track	equ	18		;1 to 18
+sectors_per_track	equ	8		;1 to 8
 bytes_per_track		equ	sectors_per_track * bytes_per_sector
 
 
-;	Legacy FDC port bits kept only where still referenced by
-;	platform init/clock code (motor-off housekeeping).
+;	The following equates are for the INTEL 8272 Floppy Disk
+;	Controller.
 
+fdc_stat	equ	03f4h	    ;status port for disk controller
+fdc_data	equ	fdc_stat+1  ;data port for disk controller
 fdc_port	equ	03f2h	    ;all bits clear on channel reset
 
 		;7 6 5 4 3 2 1 0
@@ -31,11 +33,31 @@ fdc_port	equ	03f2h	    ;all bits clear on channel reset
 		;d c b a motor on
 
 fdc_on		equ	00001100b	;mask to keep the 8272 unreset
+fdc_reset_bit	equ	00000100b	;8272 reset when low
+fdc_no_motor	equ	11111100b	;mask for no motors
 fdc_cmnd_read	equ	01100110b	;mfm, skip deleted data, read
 fdc_cmnd_write	equ	01000101b	;mfm, write
 fdc_cmnd_format	equ	01001101b	;mfm, format
+fdc_cmnd_seek	equ	00001111b	;seek
+fdc_cmnd_recal	equ	00000111b	;home to track 0
+fdc_cmnd_si	equ	00001000b	;sense interupt status
+fdc_cmnd_spec	equ	00000011b	;specify
+
+fdc_ready_write	equ	10000000b	;mask for transfer ready
+fdc_ready_read	equ	10000000b	;mask for transfer ready
+
+fdc_spec_1	equ	11001111b	;srt=0c, hd unload=0f 1st specify byte
+fdc_spec_2	equ	00000010b	;hd load=1, mode=dma 2nd specify byte
 
 f_bytes		equ	2		;magic number for 512 bytes per sector
+f_sectors	equ	8		;sectors per track
+f_gap		equ	050h		;this is IBM's, not August's
+f_filler	equ	0e5h		;fill character
+
+r_bytes		equ	2		;magic number for 512 bytes
+r_sectors	equ	8
+r_gap		equ	02ah
+r_dtl		equ	0ffh
 
 
 ;	Equates for paramter passing for read and write from BDOS.
@@ -82,9 +104,37 @@ dpb	equ	8	;disk parameter block offset in DPH
 spt	equ	0	;sectors per track offset in DPB
 psh	equ	15	;physical shift factor offset in DPB
 
+
+;****************************************************************
+;*								*
+;*	8237 DIRECT MEMORY ACCESS CONTROLLER PORT AND COMMANDS	*
+;*								*
+;****************************************************************
+
+dma_c2_address	equ	004h		;8237 channel 2 address		rw
+dma_c2_count	equ	005h		;8237 channel 2 transfer count	rw
+dma_stat_reg	equ	008h		;8237 status register		ro
+dma_bmsk_reg	equ	dma_stat_reg+2	;8237 binary channel mask	wo
+dma_mode_reg	equ	dma_stat_reg+3	;8237 mode register		wo
+dma_cbpf	equ	dma_stat_reg+4	;8237 clear byte ptr f/f	wo
+
+dma_page_fdc	equ	081h		;a16 to a20 for channel 2
+
+;	The following labels define single mode, address increment
+;	auto-initialization disable, read or write using channel 2
+
 dma_mode_write_fdc	equ	01001010b
 dma_mode_read_fdc	equ	01000110b
 dma_mode_verify_fdc	equ	01000010b
+
+dma_bmsk_fdc		equ	00000010b	;binary channel mask for disk
+
+;	DMA channel assignments
+
+;channel 0 dynamic memory refresh
+;channel 1
+;channel 2 floppy disk controller
+;channel 3
 
 
 ;********************************************************
@@ -156,8 +206,8 @@ disk_branch:
 ;	Select Disk branch table
 
 select_tbl	dw	select_flop,select_flop		; A,B
-		dw	select_hd,select_hd		; C,D
-		dw	sel_fid,sel_fid			; E,F
+		dw	select_flop,select_flop		; C,D
+		dw	select_hd,select_hd		; E,F
 		dw	sel_fid,sel_fid,sel_fid		; G,H,I
 		dw	sel_fid,sel_fid,sel_fid		; J,K,L
 		dw	select_mdisk,sel_fid,sel_fid	; M,N,O
@@ -166,8 +216,8 @@ select_tbl	dw	select_flop,select_flop		; A,B
 ;	Read branch table
 
 read_tbl	dw	read_flop,read_flop		; A,B
-		dw	read_hd,read_hd			; C,D
-		dw	read_fid,read_fid		; E,F
+		dw	read_flop,read_flop		; C,D
+		dw	read_hd,read_hd			; E,F
 		dw	read_fid,read_fid,read_fid	; G,H,I
 		dw	read_fid,read_fid,read_fid	; J,K,L
 		dw	read_mdisk,read_fid,read_fid	; M,N,O
@@ -176,8 +226,8 @@ read_tbl	dw	read_flop,read_flop		; A,B
 ;	Write branch table
 
 write_tbl	dw	write_flop,write_flop		; A,B
-		dw	write_hd,write_hd		; C,D
-		dw	write_fid,write_fid		; E,F
+		dw	write_flop,write_flop		; C,D
+		dw	write_hd,write_hd		; E,F
 		dw	write_fid,write_fid,write_fid	; G,H,I
 		dw	write_fid,write_fid,write_fid	; J,K,L
 		dw	write_mdisk,write_fid,write_fid	; M,N,O
@@ -214,6 +264,11 @@ select_flop:
 	cmp	dl,0		; if not first time selected
 	jnz	sel_flop1	;   then skip
 
+	push	cx
+	mov	al,0FEh		; lsb off
+	shl	al,cl		; move off bit to disk number
+	and 	recal_byte,al	; this drive not recal'd
+	pop	cx
 	call	floppy_size	; double or single sided
 
 sel_flop1:
@@ -228,12 +283,33 @@ sel_flop1:
 ;	exit:	bx = dph pointer or 00h if error reading size
 
 floppy_size:
-	mov	ax,offset dpbd	; (2025) assume double sided
-	nop ! nop ! nop ! nop   ; (2025) support nothing else
-	nop ! nop ! nop
-	nop ! nop
-	nop
+	push	bx		; save dph pointer
+	mov	al,cl		; drive code
+	mov	ah,1		; multi-sector count
+	push	ax		; stack drive,mcnt
+	sub	ax,ax
+	push	ax		; stack track
+	push	ax		; stack sector
+	push	ds		; stack dma segment
+	mov	ax,offset local_buffer
+	push	ax		; stack dma offset
+	sub	sp,4		; skip the far return
+	call	io_read		; read the sector
+	add	sp,14		; clear the stack
+	pop	bx		; restore dph pointer
+	test	al,al		; if an error comes back
+	jnz	flop_size_bad	;   then return zero
+
+	mov	ax,offset dpbs	; assume single sided
+	cmp	floppy_type,01h	; if not double sided
+	jnz	flop_size1	;   then skip
+	mov	ax,offset dpbd	; set to double sided
+flop_size1:
 	mov	.dpb[bx],ax	; save dpb offset in dph
+	ret
+
+flop_size_bad:
+	sub	bx,bx		; return bx=00h
 	ret
 
 
@@ -269,33 +345,21 @@ write_flop_done:
 format_floppy:
 	mov	dma_mode_storage,dma_mode_write_fdc
 	mov	fdc_command,fdc_cmnd_format
-	mov	al,drive
-	mov	cur_disk,al
-	mov	ax,track
+
+	mov	ax,ds		; local dma buffer for c,h,r,n
+	mov	bx,offset format_block
+	call	comp_dma	; set up dma pointers
+
+	mov	al,drive	; current drive (on stack)
+	mov	cur_disk,al	; save for seek
+	mov	ax,track	; also on stack
 	mov	cur_trk,ax
-	mov	cur_sec,1
-	mov	num_sec,sectors_per_track
 
-	; Build c/h pairs for each sector entry in the format table.
-	push	es
-	push	ds
-	pop	es
-	mov	di,offset format_block
-	mov	cx,sectors_per_track
-	mov	ax,cur_trk
-	mov	bl,al
-	and	bl,1
-	shr	al,1
-	mov	ah,bl
-format_block_loop:
-	stosw
-	inc	di
-	inc	di
-	loop	format_block_loop
-	pop	es
-
-	call	floppy_bios_exec
-	ret
+	call	disk_init	; this does it
+	call	check_disk_op	; did it work?
+	cmp	al,'R'		; if retry requested
+	jz	format_floppy	;   then loop up
+	ret			; else return error code
 
 
 ;	Common code for floppy read and write
@@ -449,173 +513,344 @@ flp_deblock_err:
 ;	to the physical disk.
 
 floppy_io:
-	; Use BIOS INT 13h for floppy I/O (compatible with 8086tiny)
-	push ax
-	push bx
-	push cx
-	push dx
-	push si
-	push es
-
-	; ES:BX = computed DMA buffer (from comp_dma)
-	mov	bx,dma_low16
-	mov	si,bx
-	and	bx,0fh			; offset = phys_addr & 0x000F
-	mov	cl,4
-	shr	si,cl			; segment base from low 16 bits
-	xor	ax,ax
-	mov	al,dma_high4
-	mov	cl,12
-	shl	ax,cl			; add high nibble of 20-bit address
-	add	si,ax
-	mov	es,si
-
-	; CH = cylinder, DH = head (track is logical: track = cyl*2 + head)
 	mov ax,track
-	mov dx,ax
-	and dl,1			; head = track % 2
-	shr ax,1			; cylinder = track / 2
-	mov ch,al
-	mov dh,dl
+	mov cur_trk,ax		; set track
+	mov ax,sector
+	inc ax			; disk sectors start at 1
+	mov cur_sec,ax		; set sector
 
-	; CL = sector (1-based), AL = count
-	mov cl,byte ptr sector
-	inc cl
-	mov al,num_sec
+	mov d_a_number,r_bytes
+	mov d_a_eot,r_sectors
+	mov d_a_gpl,r_gap
+	mov d_a_dtl,r_dtl
 
-	; AH = 02h (read) or 03h (write), DL = drive
-	mov ah,02h
-	cmp fdc_command,fdc_cmnd_write
-	jne floppy_do
-	  mov ah,03h
-floppy_do:
-	mov dl,drive
-	int disk_int
-	jnc floppy_ok
-	  or al,1			; error => zero flag clear
-	  jmp floppy_done
-floppy_ok:
-	xor al,al			; success => zero flag set
-floppy_done:
+	call disk_init
+	call check_disk_op	;see if it was ok
+	cmp al,'R'		;if retry requested
+	jz floppy_io		;  then go again
+	test al,al		;set zf if no error
+	ret			;and return with al
 
+
+;	The following routine does the read or write operation
+;	as selected by the global variables.
+
+disk_init:
+	mov	disk_error,0		;clear the global error flag
+	mov	disk_on_going,0FFh	;flag the motor off counter
+	mov	cl,cur_disk
+	mov	al,01h			; lsb only
+	shl	al,cl			; move bit to disk number
+	test	recal_byte,al		; if disk has been recal'd
+	jnz	disk_routine		;   then skip to operation
+	or	recal_byte,al		; flag for next time
+
+;	First time through, or after controller reset, recal the drive
+
+disk_recal:
+	call motor_on
+	call recal			;back to track zero
+	call wait_sense_get		;sense interrupt cycle
+
+;	Drive has been recal'd, continue with operation
+
+disk_routine:
+	mov retry_counter,max_retry
+
+disk_routine_1:
+	call motor_on			;make sure the drive is spun up
+	call seek			;and were on the right track
+	call wait_sense_get		;sense interrupt cycle
+	call dma_setup
+	call disk_operation
+
+	mov disk_time_out,60		;now, watch for too much time
+	mov dx,fdc_flag			;if more than a second
+	call flagwait			;  then we have a time out error
+	mov disk_time_out,0		;shut off the counter
+	cmp disk_error,80h		;if it's a timeout error
+	jz disk_ctrl_reset		;  then reset the controller
+	
+disk_routine_2:
+	call fdc_status_get
+	mov al,d_r_st0
+	and al,0c0h			;mask out for termination bits
+	jz disk_routine_ok		;if no errors then leap
+	  dec retry_counter		;else see if more retries are allowed
+	  jnz disk_routine_1		;if so then try whole operation again
+
+disk_routine_ok:
+	mov disk_on_going,0		;allow the motor to shut off
+	ret
+
+;	Reset the disk controller following a time out error
+
+disk_ctrl_reset:
+	cli
+	mov	al,motor_flags		; get motor bit
+	and	al,not fdc_reset_bit	; reset bit low
+	mov	dx,fdc_port
+	out	dx,al			; reset that hummer
+	mov	recal_byte,0		; recal all drives
+	mov	disk_on_going,0		; allow motors off
+	or	al,fdc_reset_bit
+	out	dx,al			; unreset it too
+	sti
+
+	call	wait_sense_get		; sense interrupt cycle
+	mov	al,d_r_st0		; get status byte
+	cmp	al,0C0h			; if perfect
+	jz	d_c_respecify		;   then redo the specify
+	mov	disk_error,20h		; bad NEC error
+	ret
+d_c_respecify:
+	jmp	flop_specify		; respecify head step
+
+
+;	The following routine reads/writes as directed from the disk.
+
+disk_operation:
+	mov disk_results,7		;7 byte result transfer
+	mov al,fdc_command		;get the requested command
+	mov d_a_command,al		;drop it in to the command block
+	cmp al,fdc_cmnd_format		;if formating
+	jz disk_op_format		;  then skip
+
+	mov disk_arguments,9		;9 byte command string
+	jmp fdc_command_put		;fire off the disk controller
+
+disk_op_format:
+	push es				;first set up the format block
+	push ds ! pop es		;  for the current cylinder/head.
+	mov di,offset format_block	;this is done most easily
+	mov cx,sectors_per_track	;  after "seek" sets cyl/head.
+	mov ax,word ptr d_a_cylinder	;al=cyl, ah=head
+disk_op_format_loop:
+	stosw				;store cylinder/head
+	inc di ! inc di			;past sector/size
+	loop disk_op_format_loop	;do for each sector
 	pop es
-	pop si
-	pop dx
-	pop cx
-	pop bx
-	pop ax
+
+	mov d_a_cylinder,f_bytes	;now use the usual r/w command
+	mov d_a_head,f_sectors		;  string for the format command.
+	mov d_a_record,f_gap		;the names don't match the
+	mov d_a_number,f_filler		;  but we promise not to tell.
+	mov disk_arguments,6		;format command is shorter
+	jmp fdc_command_put		;fire off the disk controller
+
+
+;	The following routine homes the head on the selected disk drive.
+
+recal:
+	mov disk_arguments,2		;specify number of arguments
+	mov d_a_command,fdc_cmnd_recal
+	mov disk_results,1		;request 1 result read
+	mov al,cur_disk			;get current disk
+	mov d_a_drive,al		;set up the command block
+	call fdc_command_put		;go send the command block
 	ret
 
 
-;	Execute a floppy request through BIOS int 13h.
-;	exit:	AL = 00h if no error / ignored error
-;		AL = 01h accept error
-;		AL = 02h accept write-protect
-;		zero flag set on success
+;	The following routine seeks to the selected track on the
+;	selected drive
 
-floppy_bios_exec:
-	mov	disk_error,0
-	mov	retry_counter,max_retry
-
-floppy_bios_retry:
-	call	floppy_bios_call
-	jnc	floppy_bios_ok
-
-	mov	disk_error,ah		; save BIOS status for message handling
-	mov	ah,00h			; reset disk subsystem before retrying
-	mov	dl,cur_disk
-	int	disk_int
-
-	dec	retry_counter
-	jnz	floppy_bios_retry
-
-	call	do_disk_error
-	cmp	al,'R'
-	jz	floppy_bios_exec
-	or	al,al			; set zf if ignore
-	ret
-
-floppy_bios_ok:
-	xor	al,al
+seek:
+	mov disk_results,1		;only one status byte returned
+	mov disk_arguments,3		;request 3 byte command transfer
+	mov d_a_command,fdc_cmnd_seek
+	mov bl,0			;get a head 0
+	mov ax,cur_trk
+	cmp al,40			;test for off side 1
+	jb side_ok			;if single sided then leap
+	  mov bl,1			;else get a head 1
+	  neg al			;and wrap around the edge
+	  add al,79			;cyl = 79 - track
+side_ok:
+	mov d_a_head,bl			;set up the head
+	add bl,bl			;multiply by 2
+	add bl,bl			;multiply by 4
+	mov d_a_cylinder,al		;set up the track number
+	or bl,cur_disk			;mash disk into head
+	mov d_a_drive,bl		;set up disk number
+	mov ax,cur_sec			;get starting sector
+	mov d_a_record,al		;and set it up
+	add al,num_sec			;compute new end of track ????
+	dec al
+	mov d_a_eot,al			;save it
+	call fdc_command_put		;send the command block
 	ret
 
 
-;	Issue one BIOS int 13h request using current globals.
-;	entry:	cur_disk, cur_trk, cur_sec, num_sec, dma_seg, dma_off
-;		fdc_command and dma_mode_storage select operation
-;	exit:	CF/AH from BIOS
+;	do a flag wait, sense interrupt and get fdc status
+;	used by recal, seek, and reset operations
 
-floppy_bios_call:
-	push	bx
-	push	cx
-	push	dx
-	push	di
-	push	si
-	push	bp
-	push	es
+wait_sense_get:
+	mov	dx,fdc_flag
+	call	flagwait
+	call	sense_interrupt		;jolt the less than wonderful 8272
+	jmp	fdc_status_get		;read the status
 
-	mov	ax,cur_trk
-	mov	bl,al
-	and	bl,1			; head = track mod 2
-	shr	al,1			; cylinder = track / 2
-	mov	ch,al
-	mov	dh,bl
-	mov	ax,cur_sec
-	mov	cl,al			; sector starts at 1
-	mov	dl,cur_disk
 
-	cmp	fdc_command,fdc_cmnd_format
-	jne	floppy_bios_dma
-	mov	ah,05h			; format track
-	mov	al,sectors_per_track
-	mov	cl,f_bytes
-	mov	bx,offset format_block
-	push	ds
-	pop	es
-	jmp	floppy_bios_do
+;	The following routine does the sense interrupt command on
+;	the FDC.  It is called after a recal or a seek to test for
+;	seek complete.
 
-floppy_bios_dma:
-	mov	bx,dma_low16
-	mov	si,bx
-	and	bx,0fh			; offset = phys_addr & 0x000F
-	mov	cl,4
-	shr	si,cl			; segment base from low 16 bits
-	xor	ax,ax
-	mov	al,dma_high4
-	mov	cl,12
-	shl	ax,cl			; add high nibble of 20-bit address
-	add	si,ax
-	mov	es,si
-
-	mov	ax,cur_sec
-	mov	cl,al			; restore sector after shifts above
-	mov	ah,02h			; default: read sectors
-	mov	al,num_sec
-	cmp	fdc_command,fdc_cmnd_write
-	jne	floppy_bios_not_write
-	mov	ah,03h			; write sectors
-	jmp	floppy_bios_do
-
-floppy_bios_not_write:
-	cmp	dma_mode_storage,dma_mode_verify_fdc
-	jne	floppy_bios_do
-	mov	ah,04h			; verify sectors
-
-floppy_bios_do:
-	int	disk_int
-	pop	es
-	pop	bp
-	pop	si
-	pop	di
-	pop	dx
-	pop	cx
-	pop	bx
+sense_interrupt:
+	mov disk_results,2		;2 bytes are returned
+	mov disk_arguments,1		;only one byte of command
+	mov d_a_command,fdc_cmnd_si	;drop in the sense interrupt commmand
+	call fdc_command_put		;send the command
 	ret
 
 
-;	Legacy direct-8272 routines removed.
-;	All active floppy access now uses BIOS int 13h through
-;	floppy_io / floppy_bios_exec / floppy_bios_call above.
+;	floppy disk controller specify command sets head step speed
+
+flop_specify:
+	mov	disk_arguments,3	; for a specify command
+	mov	d_a_command,fdc_cmnd_spec
+	mov	al,fdc_spec1_var	; pick up step speed
+	mov	d_a_drive,al		;   and store it
+	mov	d_a_cylinder,fdc_spec_2	; just the usual here
+	jmp	fdc_command_put		; set the head step speed
+
+
+;	The following routine sends the command block in the
+;	DISK_ARGUMENTS table to the 8272 FDC.
+;	The number of commands to write to the FDC is the
+;	first item in the table.
+
+fdc_command_put:
+	mov dx,fdc_stat			;point to the i/o port
+	mov si,offset disk_arguments	;point to the table of arguments
+	cld				;make sure we go forward
+	lodsb				;get the length of the arguments table
+	mov cl,al			;get it into the count register
+	sub ch,ch			;zero the high byte
+
+fdc_command_loop:
+	in al,dx			;get the current control byte
+	test al,fdc_ready_write		;if not ok to send next byte
+	jz fdc_command_loop		;then loop waiting
+	inc dx				;point at the data port
+	lodsb				;else get the byte to send
+	out dx,al			;send it
+	dec dx				;point back at the status port
+	loop fdc_command_loop		;if not last byte then loop
+	ret				;else were all done
+
+
+;	The following routine gets the status information from the 8272
+;	FDC and places them in the table at DISK_RESULTS.
+;	The first byte in the table is the number of results
+;	to read from the FDC
+
+fdc_status_get:
+	push es				;save UDA
+	mov dx,fdc_stat			;point at the status port
+	mov ax,ds			;get our data segment
+	mov es,ax			;into the extra segment
+	mov di,offset disk_results + 1	;point to where to put the data
+	cld 				;make sure we go forward
+	mov cl,disk_results		;fetch the number of expected results
+	sub ch,ch			;zero the high byte
+
+fdc_status_loop:
+	in al,dx			;get the current control byte
+	test al,fdc_ready_read		;if not ok to read next byte
+	jz fdc_status_loop		;then loop waiting
+	inc dx				;point at the data port
+	in al,dx			;get the byte
+	stosb				;put it in the structure
+	dec dx				;point back at the status port
+	loop fdc_status_loop		;if not last then loop
+	pop es				;restore UDA
+	ret				;else return
+
+
+;	The following routine sets the DMA device up for a
+;	read/write operation.  The current DMA command word must be
+;	at DMA_MODE_STORAGE.  The read/write operation cannot cross
+;	a physical 64K boundary.
+
+dma_setup:
+	out dma_cbpf,al			;reset the byte pointer
+	mov al,dma_mode_storage		;get the mode byte
+	out dma_mode_reg,al		;set the mode
+	mov ax,dma_low16		;low 16 bits of 20 bit DMA address
+	out dma_c2_address,al		;send low 8 bits
+	mov al,ah
+	out dma_c2_address,al		;send next 8 bits
+	mov al,dma_high4		;high 4 bits of 20 bit DMA address
+	out dma_page_fdc,al
+	xor ax,ax
+	mov ah,num_sec			;shl num_sec,8 (* 256)
+	shl ah,1			;*512
+	dec ax				;0 relative
+	out dma_c2_count,al		;set up the low byte
+	mov al,ah			;get the low byte
+	out dma_c2_count,al		;and the high byte
+	mov al,dma_bmsk_fdc		;get the binary channel mask
+	out dma_bmsk_reg,al		;enable the disk channel
+	ret
+
+;	The following routine resets the motor_off_counter and tests
+;	the current motor_flags against the selected drive.
+
+motor_on:
+	mov motor_off_counter,40h	;extend the motor off counter
+	mov al,010h			;pick up a bit for motor a
+	mov cl,cur_disk			;fetch the binary drive code
+	shl al,cl			;make it a bit for motor x
+	mov ah,motor_flags		;fetch the motor bits
+	test ah,al			;check to see if its on
+	jnz motor_on_done		;yes then leap
+	  or al,fdc_on			;mask in the no reset,enable interupt
+	  or al,cur_disk		;mask in the drive
+	  mov motor_flags,al		;save for later
+	  mov dx,fdc_port		;point to the port number
+	  out dx,al			;select & motor on
+	  mov dx,ticks_per_second/8	;wait 1/8 of second for the
+	  mov cl,p_delay		;motor to spin up on writes
+	  call supif
+motor_on_done:
+	ret
+
+
+;	The following routine checks to see if the last
+;	disk operation was OK.  It returns with the zero flag
+;	set if it was OK or if the error is to be ignored.
+;	exit:	al = FFh for accept error
+;		     00h for no error or ignore error
+;		     'R' for retry operation
+
+check_disk_op:
+	mov	al,d_r_st0		; get the first result byte
+	and	al,0C0h			; see if ok
+	jnz	flop_error		; no then leap
+	  ret				; al = 0 for no error
+
+flop_error:
+	mov	cl,cur_disk		; force a recal on next op
+	mov	al,0FEh			; lsb off
+	shl	al,cl			; move off bit to disk number
+	and 	recal_byte,al		; this drive not recal'd
+
+	cmp	disk_error,0		; if error code is there
+	jnz	flop_error_go		;   then skip the lookup
+
+	mov	si,offset flop_er_tbl	; stat bits / error codes
+	mov	cx,flop_er_size		; table length
+flop_error_loop:
+	lodsw				; get stat bits
+	test	d_r_st12,ax		; test received status
+	jnz	flop_error_found	; if this is the one
+	inc	si			; past error code
+	loop	flop_error_loop
+flop_error_found:
+	lodsb				; fetch the error code
+	mov	disk_error,al		; and store for message
+flop_error_go:
+	jmp	do_disk_error		; return A=FFh, I=00h, R='R'
 
 
 ;	***  Memory Disk Routines  ***
@@ -775,6 +1010,37 @@ reorg13	equ	(offset $ + 1) and -2
 
 max_retry	equ		4
 
+;	The following tables are used to issue commands to,
+;	and read results from the 8272 FDC.  The first entry
+;	in each table is the number of bytes to send or receive
+;	from the device
+
+disk_arguments	db	0		;number of arguments to send
+d_a_command	db	0		;command read/write
+d_a_drive	db	0		;drive select & head select
+d_a_cylinder	db	0		;cylinder to read/write
+d_a_head	db	0		;head
+d_a_record	db	0		;sector
+d_a_number	db	2		;magic number for 512 bytes/sector 
+d_a_eot		db	sectors_per_track	;end of track sector number
+d_a_gpl		db	02ah		;inter sector gap length
+d_a_dtl		db	0ffh		;data length
+
+disk_results	db	0		;number of bytes to read
+d_r_st0		db	0		;status byte 0
+d_r_st1		db	0		;status byte 1
+d_r_st2		db	0		;status byte 2
+d_r_st12	equ	word ptr d_r_st1
+d_r_cylinder	db	0		;cylinder we are on now
+d_r_head	db	0
+d_r_record	db	0
+d_r_number	db	0		;number of sectors read
+
+f_a_bytes	db	0
+f_a_sectors	db	0
+f_a_gap		db	0
+f_a_filler	db	0
+
 dma_mode_storage	db	dma_mode_read_fdc	;current dma mode
 fdc_command		db	fdc_cmnd_read		;current fdc mode
 cur_disk		db	0ffh
@@ -787,11 +1053,16 @@ track_mcnt		rb	1		;multi sector count on
 dma_low16		rw	1		;20 bit address storage
 dma_high4		rb	1
 
+disk_on_going		db	0		;0FFh if disk op happening
 retry_counter		db	0		;0 no more retrys left
 motor_flags		db	0		;last state of the motor bits
+motor_off_counter	db	0
+fdc_spec1_var		db	fdc_spec_1	;head step default
+recal_byte		db	0		;which disks have been recal'd
 verify_flag		db	0		;verify after disk write?
+disk_time_out		db	0		;count down for tick routine
 
-;	Format Block consists of one c,h,r,n entry per physical sector
+;	Format Block consists of eight copies of c,h,r,n data
 ;	which the Floppy Disk Controller uses for formating.
 
 format_block		db	0,0,1,f_bytes
@@ -802,18 +1073,28 @@ format_block		db	0,0,1,f_bytes
 			db	0,0,6,f_bytes
 			db	0,0,7,f_bytes
 			db	0,0,8,f_bytes
-			db	0,0,9,f_bytes
-			db	0,0,10,f_bytes
-			db	0,0,11,f_bytes
-			db	0,0,12,f_bytes
-			db	0,0,13,f_bytes
-			db	0,0,14,f_bytes
-			db	0,0,15,f_bytes
-			db	0,0,16,f_bytes
-			db	0,0,17,f_bytes
-			db	0,0,18,f_bytes
 
 ;	Floppy now shares its local buffer with hard disk
+
+;	Stack switch area for disk interrupt
+
+		dw	0cccch,0cccch,0cccch,0cccch
+		dw	0cccch,0cccch,0cccch,0cccch
+		dw	0cccch,0cccch,0cccch,0cccch
+		dw	0cccch,0cccch,0cccch,0cccch
+
+		dw	0cccch,0cccch,0cccch,0cccch
+		dw	0cccch,0cccch,0cccch,0cccch
+		dw	0cccch,0cccch,0cccch,0cccch
+		dw	0cccch,0cccch,0cccch,0cccch
+
+		dw	0cccch,0cccch,0cccch,0cccch
+		dw	0cccch,0cccch,0cccch,0cccch
+
+user_save_area	rs	0
+user_ss		dw	0
+user_sp		dw	0
+user_ax		dw	0
 
 mdisk_start	dw	0D000h		;may be changed in init
 
@@ -821,7 +1102,7 @@ mdisk_start	dw	0D000h		;may be changed in init
 
 dph0	dw	0000h,0000h	;translate table
 	dw	0000h,0000h	;scratch area
-	dw	dpbd		;dsk parm block
+	dw	dpbs		;dsk parm block
 	dw	0ffffh		;check
 	dw	0ffffh		;alloc vectors
 	dw	0ffffh		;dir buff cntrl	blk
@@ -830,7 +1111,7 @@ dph0	dw	0000h,0000h	;translate table
 
 dph1	dw	0000h,0000h	;translate table
 	dw	0000h,0000h	;scratch area
-	dw	dpbd		;dsk parm block
+	dw	dpbs		;dsk parm block
 	dw	0ffffh		;check
 	dw	0ffffh		;alloc vectors
 	dw	0ffffh		;dir buff cntrl	blk
@@ -882,17 +1163,17 @@ dpbs	dw	8		;sectors per track
 
 ;	double sided floppy parameter block
 
-dpbd	dw	18		;sectors per track
-	db	5		;block shift
-	db	31		;block mask
+dpbd	dw	8		;sectors per track
+	db	4		;block shift
+	db	15		;block mask
 	db	1		;extnt mask
-	dw	354		;disk size in 1k blocks
+	dw	157		;disk size in 2k blocks
 				;less offset track(s)
-	dw	255		;directory max
-	db	192		;alloc0
+	dw	63		;directory max
+	db	10000000b	;alloc0
 	db	0		;alloc1
-	dw	64		;check size
-	dw	2		;offset
+	dw	16		;check size
+	dw	1		;offset
 	db	2		;phys sec shift
 	db	3		;phys sec mask
 
@@ -920,6 +1201,16 @@ dsm_md	dw	191		;max disk size in 2k blocks
 ;************************************************
 
 disk_error	rb	1		; ROS error code store
+
+;	Table of floppy status bits versus ROS error codes
+
+flop_er_tbl	db	10h,01h,40h	; bad seek
+		db	20h,20h,10h	; bad crc
+		db	04h,00h,04h	; sector not found
+		db	02h,00h,03h	; write protect
+		db	01h,01h,02h	; bad addr mark
+flop_er_size	equ	(offset $ - offset flop_er_tbl)/3
+		db	0BBh		; unknown error
 
 disk_er_codes	db	01h,02h,03h,04h,05h,07h
 		db	08h,09h,0Bh,10h,11h,20h
@@ -955,4 +1246,4 @@ disk_er_resp	db	3,'RIA'
 
 er_hundred	db	100			; for track divide
 er_ten		db	10
-
+

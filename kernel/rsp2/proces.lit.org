@@ -1,3 +1,4 @@
+
 /*
     Proces Literals MP/M-8086 II
 */
@@ -9,11 +10,9 @@ declare pd$hdr literally 'structure
   name (8) byte,uda word,dsk byte,user byte,ldsk byte,luser byte,
   mem word';
 
-/* NDA field added for network 12/7/83 RBB */
-
 declare pd$structure literally 'pd$hdr,
-  dvract word,wait word,nda$para word,parent word,
-  cns byte,abort byte,conmode word,lst byte,sf3 byte,ps_flag word,
+  dvract word,wait word,org byte,net byte,parent word,
+  cns byte,abort byte,conmode word,lst byte,sf3 byte,sf4 byte,sf5 byte,
   reservd (4) byte,pret word,scratch word)';
 
   declare psrun                 lit '00',
@@ -47,6 +46,4 @@ declare pd$structure literally 'pd$hdr,
           pcm$ctlc              lit '00008h',
           pcm$ctlo              lit '00080h',
           pcm$rsx               lit '00300h';
-  
-  declare psf_suspend           lit '00001h';
-
+

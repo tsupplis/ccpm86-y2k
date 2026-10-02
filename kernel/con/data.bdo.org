@@ -48,7 +48,6 @@ RELOG		DB	0		;AUTOMATIC RELOG SWITCH
 ;
 		rb	1
 file_id		dw	0		;address of lock list entry
-u_nameitem      dw      0               ;!!PATCHED!!
 ;
 ;	**3.1M**	End of record locking patch
 ;
@@ -404,4 +403,4 @@ if not CCPMOFF
 		org	0fffh
 endif
 		db	0
-                                                                                                                                                                                                                                                 
+

@@ -269,653 +269,110 @@ read:	push bx				;[SP] = buffer offset
 	mov al,c_column[si]
 	mov c_strtcol[si],al		;start column = current column
 	xor bx,bx			;BX = character count
-	mov	byte ptr c_btmp[si], 0	; current pointer in buffer
 
 		;read next character, CX, BX active
 readnx:	push bx
 readn0:	call coninf	;AX, BX = 16 bit char just read
-	mov	dl, al
-	pop	bx
-	pop	di
-	push	di
+	mov dl,al
+	pop bx
 
 		;	Carriage Return
-	cmp dl,cr ! jnz notcr		; 0x836f1
+	cmp dl,cr ! jnz notcr
 eofre:	    jmp readen
 notcr:
 		;	Line Feed
 	cmp dl,lf ! jz eofre
 
-		;	Backspace
-	cmp	dl, ctlh
-	jnz	noth
-	call	rd_bksp
-	jmp	readnx
+tryh:		;	Backspace
+	cmp dl,ctlh ! jnz noth
+	    or bl,bl ! jz readnx			;if not 1st char
+		dec bl ! mov al,c_column[si]		;decrement char count
+		mov c_btmp[si],al			;temporary hold	
+		or c_flag[si],cf_compc ! jmp linelen
 noth:
-
-		;	Control G
-	cmp	dl, ctlg
-	jnz	notg
-	call	rd_delete
-	jmp	readnx
-notg:
-
 		;	Rubout
-	cmp	dl, rubout
-	jnz	notrub
-	call	rd_delete
-	jmp	readnx
+
+	cmp dl,rubout ! jnz notrub
+	    or bl,bl ! jz readnxx			;only if not 1st char
+	        pop di ! push di
+		push ds ! mov ds,u_wrkseg
+		mov dl,1[di+bx] ! pop ds		;make char=last char
+		dec bx					;dec char count
+		jmp rdech1				;echo, read next
+readnxx:    jmp readnx
 notrub:
+		;	Control E
 
-		;	Control K: delete from cursor
-	cmp	dl, ctlk
-	jnz	notk
-	call	rd_del_forward
-	jmp	readnx
-notk:
-
-		;	Control B: delete before cursor
-	cmp	dl, ctlb
-	jnz	notb
-	call	rd_del_back
-	jmp	readnx
-notb:
-
-		;	Control Y: delete whole line
-	cmp	dl, ctly
-	jnz	noty
-	call	rd_del_line
-	jmp	readnx
-noty:
-
-		;	Control T: delete word right
-	cmp	dl, ctlt
-	jnz	nott
-	call	rd_del_word_right
-	jmp	readnx
-nott:
-
-		;	Control U: delete word left
-	cmp	dl, ctlu
-	jnz	notu
-	call	rd_del_word_left
-	jmp	readnx
-notu:
-
-		;	Control E: history up
-	cmp	dl, ctle
-	jnz	note
-	; TODO
-	jmp	readnx
+	cmp dl,ctle ! jnz note
+	    push bx
+	    mov dl,cr ! call conoutf
+	    mov dl,lf ! call conoutf
+	    mov c_column[si],0
+	    mov c_strtcol[si],0
+	    jmp readn0
 note:
-
-		;	Control X: history down
-	cmp	dl,ctlx
-	jnz	notx
-	; TODO
-	jmp	readnx
+		;	Control X
+	cmp dl,ctlx ! jnz notx
+backx:	    mov al,c_strtcol[si]
+	    cmp al,c_column[si] ! jb backxxx
+		xor bx,bx ! jmps readnxx
+backxxx:    mov dl,ctlh ! call conoutf
+	    mov dl,' ' ! call conoutf
+	    mov dl,ctlh ! call conoutf
+	    dec c_column[si] 
+	    jmps backx
 notx:
-
-		;	Control S
-	cmp	dl, ctls
-	jnz	nots
-	call	rd_cursor_left
-	jmp	readnx
-nots:
-
-		;	Control D
-	cmp	dl, ctld
-	jnz	notd
-	call	rd_cursor_right
-	jmp	readnx
-notd:
-
-		;	Control Q: go to start of line
-	cmp	dl, ctlq
-	jnz	notq
-	call	rd_go_start
-	jmp	readnx
-notq:
-
-		;	Control R: go to end of line
-	cmp	dl, ctlr
-	jnz	notr
-	call	rd_go_end
-	jmp	readnx
+		;	Control U
+	cmp dl,ctlu ! jnz notu
+	    call crlfp
+	    pop bx ! jmp read
+notu:
+		;	CONTROL R - redraw line
+	cmp dl,ctlr ! jnz notr
+linelen:    push bx ! call crlfp
+			;print buffer on screen
+	    pop cx ! xor bx,bx
+rep0:	    or cl,cl ! jz rep1
+		pop di ! push di
+		push ds ! mov ds,u_wrkseg
+		inc bx ! dec cl
+		mov dl,1[di+bx] ! pop ds	;DL = nxt char
+		mov ch,bl ! push cx
+		call ctlout
+		pop cx ! mov bh,0 ! mov bl,ch
+	        jmps rep0
+rep1:	    test c_flag[si],cf_compc
+	    push bx ! jz l_22
+		and c_flag[si],not cf_compc
+		mov ah,c_btmp[si] ! mov al,ah
+backsp:	      cmp al,c_column[si]
+	      jb l_22
+		sub al,c_column[si]
+		or al,al ! jz l_22
+		    push ax
+		    mov dl,ctlh ! call conoutf
+		    mov dl,' ' ! call conoutf
+		    mov dl,ctlh ! call conoutf
+		    pop ax ! dec ah ! mov al,ah
+		    jmps backsp
+l_22:	    jmp readn0
 notr:
-
-		;	Control A: word back
-	cmp	dl, ctla
-	jnz	nota
-	call	rd_word_back
-	jmp	readnx
-nota:
-
-		;	Control F: word forward
-	cmp	dl, ctlf
-	jnz	notf
-	call	rd_word_forward
-	jmp	readnx
-notf:
-
 		;	All other characters
-
-	; type character in dl
-	call rd_type
-
-	pop di
-	push di
-	push ds
-	mov ds, u_wrkseg
-	cmp bl, [di]
-	pop ds
-	jae readen
-	jmp readnx
+rdecho:	    inc bx
+	    pop di ! push di
+	    push ds ! mov ds,u_wrkseg
+	    mov 1[di+bx],dl ! pop ds
+rdech1:	    push bx ! call ctlout ! pop bx
+	    pop di ! push di
+	    push ds ! mov ds,u_wrkseg
+	    cmp bl,[di] ! pop ds ! jae readen
+		push bx ! jmps l_22
 		;	End of Console String
 readen:	pop di
 	push ds ! mov ds,u_wrkseg
 	mov 1[di],bl ! pop ds
 	mov dl,cr ! call conoutf
 	mov c_column[si],0
-	ret
-
-
-;;;; deletion operations ;;;
-
-rd_bksp:	; di: buffer offset, preserve di, update bx
-	cmp	bl, 0
-	je	ctrlh_end
-	call	rd_cursor_left
-	call	rd_delete
-ctrlh_end:
-	ret
-
-rd_erase:	; cx: count, preserve di, bx
-	; erase count characters on screen without moving the cursor
-	push	di
-	push	bx
-	push	cx
-rde_loop1:
-	cmp	cx, 0
-	je	rde_loop1_end
-	mov	dl, ' '
-	push	cx
-	call	conoutf
-	pop	cx
-	dec	cx
-	jmp	rde_loop1
-rde_loop1_end:
-	pop	cx
-rde_loop2:
-	cmp	cx, 0
-	je	rde_loop2_end
-	mov	dl, ctlh
-	push	cx
-	call	conoutf
-	pop	cx
-	dec	cx
-	jmp	rde_loop2
-rde_loop2_end:
-	pop	bx
-	pop	di
-	ret
-
-rd_delete:	; di: buffer offset, preserve di, update bx
-	call	get_char
-	call	char_len
-	push	ax
-	mov	al, c_btmp[si]
-	cmp	al, bl
-	jz	rdd_end
-	push	bx
-	push	ds
-	mov	ds, u_wrkseg
-
-	; move after cursor to the left
-	xchg	al, bl
-	mov	bh, 0
-	inc	bl
-rdd_loop:
-	cmp	al, bl
-	je	rdd_loop_end
-	mov	dl, 2[di+bx]
-	mov	1[di+bx], dl
-	inc	bl
-	jmp	rdd_loop
-rdd_loop_end:
-	pop	ds
-	pop	bx
-	dec	bx
-
-	pop	cx
-	call	rd_print_right
-rdd_end:
-	ret
-
-rd_del_line:		; di: buffer offset, preserve di, update bx
-	push	di
-	call	rd_go_start
-	mov	al, 0
-	mov	cl, c_strtcol[si]
-	add	di, 2
-	call	cons_len		; al: from, bl: to, cl: start, ds:di: buffer
-	pop	di
-	mov	cx, ax
-	call	rd_erase
-	mov	bl, 0
-	mov	al, c_strtcol[si]
-	mov	c_column[si], al
-	ret
-
-rd_del_forward:		; di: buffer offset, preserve di, update bx
-	push	di
-	mov	al, c_btmp[si]
-	mov	cl, c_strtcol[si]
-	add	di, 2
-	call	cons_len		; al: from, bl: to, cl: start, ds:di: buffer
-	pop	di
-	mov	cx, ax
-	call	rd_erase
-	mov	bl, c_btmp[si]
-	ret
-
-rd_del_back:		; di: buffer offset, preserve di, update bx
-	; initialize
-	call	get_prev_char
-	call	char_len
-	push	ax
-	push	di
-	push	bx			; save bx = length on stack
-	mov	ah, 0
-	mov	al, c_btmp[si]
-	push	ax			; save cursor position on stack
-
-	call	rd_del_line		; erase screen
-
-	; shift buffer from cursor to start
-	pop	bx			; bx = cursor location in buffer
-	pop	ax			; ax = total buffer length
-	mov	cx, ax
-	sub	cx, bx			; cx = # chars to move
-	push	cx			; save it for the future
-	push	ds
-	mov	ds, u_wrkseg
-rddb_loop:				; di: address of the first character
-	cmp	cx, 0
-	je	rddb_loop_end
-	mov	dl, 2[di+bx]
-	mov	2[di], dl
-	dec	cx
-	inc	di
-	jmp	rddb_loop
-rddb_loop_end:
-	pop	ds
-	pop	bx			; set bx to the new length of buffer
-	pop	di
-
-	pop	cx
-	call	rd_print_right		; display buffer
-	call	rd_go_start		; move cusor to start
-	ret
-
-rd_del_word_right:
-	cmp	bl, c_btmp[si]
-	je	rdwr_end
-	call	get_char
-	call	is_space
-	jne	rdwr_word_loop
-
-rdwr_space_loop:
-	cmp	bl, c_btmp[si]
-	je	rdwr_space_loop_end
-	call	get_char
-	call	is_space
-	jne	rdwr_space_loop_end
-	call	rd_delete
-	jmp	rdwr_space_loop
-rdwr_space_loop_end:
-	jmp	rdwr_end
-
-rdwr_word_loop:
-	cmp	bl, c_btmp[si]
-	je	rdwr_word_loop_end
-	call	get_char
-	call	is_space
-	je	rdwr_word_loop_end
-	call	rd_delete
-	jmp	rdwr_word_loop
-rdwr_word_loop_end:
-
-rdwr_end:
-	ret
-
-rd_del_word_left:
-	cmp	byte ptr c_btmp[si], 0
-	je	rdwl_end
-	call	get_prev_char
-	call	is_space
-	jne	rdwl_word_loop
-
-rdwl_space_loop:
-	cmp	byte ptr c_btmp[si], 0
-	je	rdwl_space_loop_end
-	call	get_prev_char
-	call	is_space
-	jne	rdwl_space_loop_end
-	call	rd_bksp
-	jmp	rdwl_space_loop
-rdwl_space_loop_end:
-	jmp	rdwl_end
-
-rdwl_word_loop:
-	cmp	byte ptr c_btmp[si], 0
-	je	rdwl_word_loop_end
-	call	get_prev_char
-	call	is_space
-	je	rdwl_word_loop_end
-	call	rd_bksp
-	jmp	rdwl_word_loop
-rdwl_word_loop_end:
-
-rdwl_end:
-	ret
-
-;;; cursor motion operations ;;;
-
-rd_go_start:		; di: buffer offset, preserve di, bx
-			; update: cursor location in c_btmp, c_column
-	push	di
-	push	bx
-	mov	al, c_column[si]
-rgs_loop:
-	cmp	al, c_strtcol[si]
-	jz	rgs_loop_end
-	mov	dl, ctlh
-	push	ax
-	call	conoutf
-	pop	ax
-	dec	al
-	jmp	rgs_loop
-rgs_loop_end:
-	mov	byte ptr c_btmp[si], 0
-	mov	c_column[si], al	; c_strtcol[si]
-	pop	bx
-	pop	di
-	ret
-
-rd_go_end:		; di: buffer offset, preserve di, bx, update c_btmp[si]
-rge_loop:
-	cmp	bl, c_btmp[si]
-	je	rge_loop_end
-	call	rd_cursor_right
-	jmp	rge_loop
-rge_loop_end:
-	ret
-
-rd_cursor_left: ; di: buffer offset, preserve di, bx
-	mov	al, c_column[si]
-	cmp	al, c_strtcol[si]
-	jz	rcl_end
-	push	di
-	push	bx
-	mov	bl, c_btmp[si]
-	dec	bl
-	mov	c_btmp[si], bl
-	mov	cl, c_strtcol[si]	; cl: start
-	push	ds
-	mov	ds, u_wrkseg
-	mov	al, 0
-	add	di, 2			; address of the buffer
-	call	cons_len		; al: from, bl: to, cl: start, ds:di: buffer
-	pop	ds
-	mov	cl, c_column[si]
-	sub	cl, c_strtcol[si]
-	sub	cl, al			; cl: length of the character
-	add	al, c_strtcol[si]
-	mov	c_column[si], al
-rcl_loop:
-	cmp	cl, 0
-	jz	rcl_loop_end
-	mov	dl, ctlh
-	push	cx
-	call	conoutf
-	pop	cx
-	dec	cl
-	jmp	rcl_loop
-rcl_loop_end:
-	pop	bx
-	pop	di
-rcl_end:
-	ret
-
-rd_cursor_right: ; di: buffer offset, preserve di, bx, update c_btmp[si]
-	mov	al, c_btmp[si]
-	cmp	al, bl
-	je	rcr_end
-	push	bx
-	push	ds
-	mov	ds, u_wrkseg
-	mov	bl, al
-	mov	dl, 2[bx+di]
-	pop	ds
-	push	di
-	call	ctlout
-	pop	di
-	pop	bx
-	inc	byte ptr c_btmp[si]
-rcr_end:
-	ret
-
-rd_word_back:
-	push	di
-	cmp	byte ptr c_btmp[si], 0
-	je	rwb_label
-rwb_label:
-rwb_loop1:
-	cmp	byte ptr c_btmp[si], 0
-	je	rwb_loop1_end
-	call	get_prev_char
-	call	is_space
-	jne	rwb_loop1_end
-	call	rd_cursor_left
-	jmp	rwb_loop1
-rwb_loop1_end:
-rwb_loop2:
-	cmp	byte ptr c_btmp[si], 0
-	je	rwb_loop2_end
-	call	get_prev_char
-	call	is_space
-	je	rwb_loop2_end
-	call	rd_cursor_left
-	jmp	rwb_loop2
-rwb_loop2_end:
-	pop	di
-rwb_end:
-	ret
-
-rd_word_forward:
-	push	di
-rwf_loop1:
-	cmp	bl, c_btmp[si]
-	je	rwf_loop1_end
-	call	get_char
-	call	is_space
-	je	rwf_loop1_end
-	call	rd_cursor_right
-	jmp	rwf_loop1
-rwf_loop1_end:
-rwf_loop2:
-	cmp	bl, c_btmp[si]
-	je	rwf_loop2_end
-	call	get_char
-	call	is_space
-	jne	rwf_loop2_end
-	call	rd_cursor_right
-	jmp	rwf_loop2
-rwf_loop2_end:
-	pop	di
-	ret
-
-
-;;; character insertion ;;;
-
-rd_type:	; dl: character, di: buffer offset, bx: buffer length
-	call	char_len
-	push	ax
-	push	di
-	mov	ah, 0
-	mov	al, c_btmp[si]		; ax: cursor position in buffer
-	add	di, 2
-	add	di, ax			; di points to characters to shift
-	mov	cl, bl
-	sub	cl, al			; cl = length to copy
-	mov	ch, dl			; character to insert
-	push	ds
-	mov	ds, u_wrkseg
-rdt_loop:
-	cmp	cl, 0
-	je	rdt_loop_end
-	mov	dl, [di]
-	mov	[di], ch
-	mov	ch, dl
-	dec	cl
-	inc	di
-	jmp	rdt_loop
-rdt_loop_end:
-	mov	[di], ch
-	pop	ds
-	pop	di
-	inc	bx
-	pop	cx
-	call	rd_print_right
-	call	rd_cursor_right
-	ret
-
-
-;;; helper subroutines ;;;
-
-char_len:	; bx: position, dl: character, result in al
-	push	bx
-	cmp	dl, tab
-	je	chl_tab
-	cmp	dl, 0
-	je	chl_1
-	cmp	dl, ' '
-	jae	chl_1
-	mov	al, 2		; control character: 2
-	jmp	chl_end
-chl_tab:
-	mov	al, 8		; al = 8
-	and	bl, 7		; bl = pos % 8
-	sub	al, bl		; al = 8 - (pos % 8)
-	jmp	chl_end
-chl_1:
-	mov	al, 1
-chl_end:
-	pop	bx
-	ret
-
-; prints the buffer to the right of the cursor, inserts cx spaces
-rd_print_right:		; di: buffer offset, preserve di, bx
-			; cx: number of spaces to insert
-	push	bx
-	push	di
-
-	mov	al, c_column[si]
-	push	ax	; column
-
-	push	cx	; spaces
-
-	mov	al, c_btmp[si]
-	push	ax	; cursor
-
-	; print characters
-rdpr_loop:
-	cmp	bl, c_btmp[si]
-	je	rdpr_loop_end
-	call	rd_cursor_right
-	jmp	rdpr_loop
-rdpr_loop_end:
-	pop	ax	; cursor
-	mov	c_btmp[si], al	; restore cursor position
-
-	; insert spaces
-	pop	cx	; spaces
-	call	rd_erase
-
-	; put cursor back
-	pop	bx	; column
-rdprc_loop:
-	cmp	bl, c_column[si]
-	je	rdprc_loop_end
-	mov	dl, ctlh
-	push	bx
-	call	ctlout
-	pop	bx
-	jmp	rdprc_loop
-rdprc_loop_end:
-
-	pop	di
-	pop	bx
-	ret
-
-
-get_char:	; put current character into dl, preserve everything
-	push	bx
-	mov	bh, 0
-	mov	bl, c_btmp[si]
-	push	ds
-	mov	ds, u_wrkseg
-	mov	dl, 2[di+bx]
-	pop	ds
-	pop	bx
-	ret
-
-get_prev_char:	; put previous character into dl, preserve everything
-	push	bx
-	mov	bh, 0
-	mov	bl, c_btmp[si]
-	push	ds
-	mov	ds, u_wrkseg
-	mov	dl, 1[di+bx]
-	pop	ds
-	pop	bx
-	ret
-
-; substring length on screen
-cons_len:	; al: from, bl: to, cl: start, ds:di: buffer, result in al
-	; start and to are constant, therefore, kept on stack
-	push	bp
-	mov	bp, sp
-	mov	bh, 0
-	push	bx		; stack: to
-	mov	ch, 0		; cx: start
-	push	cx		; stack: start, to
-	mov	bh, 0
-	mov	bl, al		; bx: current = from
-	mov	cx, 0		; cx: count
-clen_loop:
-	cmp	bx, ss:(-2)[bp]	; test current = to
-	je	clen_loop_end
-	mov	dl, [di+bx]
-	push	bx
-	add	bx, ss:(-4)[bp]	; add start for tab expansion
-	call	char_len	; ax: character length
-	add	cx, ax
-	pop	bx		; bx: current
-	inc	bx
-	jmp	clen_loop
-clen_loop_end:
-	mov	ax, cx
-	mov	sp, bp
-	pop	bp
-	ret
-
-is_space:	; test if dl is a space character, e=true
-	cmp	dl, ' '
-	je	is_space_exit
-	cmp	dl, tab
-is_space_exit:
 	ret
 
 rawinit:
@@ -1307,4 +764,4 @@ goxios:
 	call xiosif
 	pop si ! pop dx
 	ret
-
+
