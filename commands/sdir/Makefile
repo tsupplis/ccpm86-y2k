@@ -27,9 +27,9 @@ sdir.cmd: sdir.h86
 	cmdinfo $@
 
 sdir.loc: scd.obj sdir.obj search.obj scan.obj sort.obj disp.obj util.obj \
-    timest.obj dpb.obj
+    timest.obj 
 	$(INTEL_LINK86) scd.obj, search.obj, scan.obj, sort.obj, disp.obj, \
-	util.obj, timest.obj, dpb.obj, $(basename $@).obj to $(basename $@).lnk
+	util.obj, timest.obj, $(basename $@).obj to $(basename $@).lnk
 	$(INTEL_LOC86) $(basename $@).lnk 'od(sm(code,dats,data,stack,const))' \
 		'ad(sm(code(0),dats(10000h)))' 'ss(stack(+32))'  to $(basename $@).loc
 
