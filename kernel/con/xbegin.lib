@@ -95,6 +95,7 @@ sec_flag	equ	2		;seconds flag number
 min_flag	equ	3		;minutes flag number
 
 					;XIOS flags:
+fdc_flag	equ	4		;disk operation flag
 ci_flag		equ	5		;console in flag
 ww_flag		equ	6		;window manager flag
 er_flag		equ	7		;get errror response
@@ -314,6 +315,7 @@ pic_ocw_port		equ	020h	;port 0
 pic_ocw_nseoi		equ	020h	;non specific end of interupt
 pic_ocw_seoi		equ	060h	;specific end of interupt channel 0
 
+disk_channel		equ	06h
 keyboard_channel	equ	01h
 timer_channel		equ	00h
 
@@ -409,17 +411,13 @@ lcb		dw	offset lcb_tab	;pointer to the first lcb
 ;	the INIT routine to match the actual physical drives.
 
 dph_tbl		dw	dph0,dph1	; A: B:   floppies
-		dw	hd_dph0,hd_dph1	; C: D:	  hard disks
-		dw	0,0,0,0,0,0,0,0	; E: - L:
+		dw	dph2,dph3	; C: D:	  floppies
+		dw	hd_dph0,hd_dph1	; E: F:   hard disks
+		dw	0,0,0,0,0,0	; G: - L:
 md_dph		dw	dph_md		; M:	  memory disk
 		dw	0,0,0		; N: - P:
 
-;	XIOS runtime screen/image allocation budget (paragraphs).
-;	This value is exported to GENCCPM via xt_alloc (field at XTABALLOC),
-;	which reserves memory for all VC image segments plus vc_map.
-;	Do not rewrite genccpm_buf at INIT time; it is allocation metadata.
-xios_buf_paras	equ	0600h	; reserved paragraphs for vc images + vc_map
-genccpm_buf	dw	xios_buf_paras	; xt_alloc: consumed by GENCCPM
+genccpm_buf	dw	buffer_size/16
 
 debug		db	false		;save debugger interrupts
 
@@ -707,7 +705,7 @@ i_keyboard:
 	  jz mask_release
 	    test down_bits,alt_bit	;yes $ is alt down ?
 	    jz mask_release
-	      jmp mask_release		; 8086tiny: ignore synthetic Ctrl+Alt+Del
+	      jmp reset			;we're gone baby
 mask_release:				;parity is on when key is released
 	and al,07fh			;mask off the release bit
 	cmp al,83 ! jle valid_key	;test for non$existent key
@@ -1049,15 +1047,57 @@ control_table:
 	db	240,0FEH		;0,.
 
 
+
+;********************************************************
+;*							*
+;*		DISK INTERRUPT HANDLER			*
+;*							*
+;*******************************************************
+
+reorg4	equ	offset $
+	cseg
+	org	reorg4
+
+
+;	The following routine gets control from an interrupt from the
+;	FDC.  The current state is saved and dev_flagset is called.
+
+;------
+i_disk:
+;------
+	mov cs:user_ax,ax		;save ax
+	mov cs:user_ss,ss		;save the stack segment
+	mov cs:user_sp,sp		;and stack segment
+	mov ax,cs			;get code segment
+	mov ss,ax			;into stack segment
+	mov sp,offset user_save_area	;point at the save area
+	push bx! push cx
+	push dx! push bp
+	push si! push di
+	push ds! push es
+
+	mov al,pic_ocw_seoi + disk_channel
+	out pic_ocw_port,al
+
+	mov ds,cs:sysdat
+	mov dx,fdc_flag
+	call flagset
+
+	pop es! pop ds
+	pop di! pop si
+	pop bp! pop dx
+	pop cx! pop bx
+	mov ss,cs:user_ss
+	mov sp,cs:user_sp
+	mov ax,cs:user_ax
+	jmpf cs:dword ptr dispatcher
+
+
 ;********************************************************
 ;*							*
 ;*      8253-5 COUNTER TIMER PORT AND DATA EQUATES	*
 ;*							*
 ;********************************************************
-
-reorg4	equ	offset $
-	cseg
-	org	reorg4
 
 
 timer_0_reg		equ	040h		;first counter timer port
@@ -1099,7 +1139,7 @@ i_clock:
 	push bp ! push di ! push si ! push es
 
 	cmp beep_counter,00		;test for beeping now
-	jz update_tick			;no then leap to the next test
+	jz check_motor_off		;no then leap to the next test
 	  cmp beep_ticks,00		;is this the first time through
 	  jnz check_beep_tick		;no the leap around set up
 
@@ -1114,7 +1154,7 @@ check_beep_tick:
 	in al,port_b			;else turn on the beeper
 	or al,beep_on
 	out port_b,al
-	jmps update_tick
+	jmps check_motor_off
 
 check_more_beeps:
 	dec beep_counter		;count down the beep
@@ -1124,6 +1164,25 @@ turn_beep_off:
 	in al,port_b			;else get the bits
 	and al,beep_off
 	out port_b,al			;silence the beeper
+
+check_motor_off:
+	cmp disk_on_going,00h		;test for disk operation under way
+	jnz check_disk_time		;yes, don't touch motor off counter
+	  dec motor_off_counter
+	  jnz check_disk_time		;not timed out yet leap
+	    mov dx,fdc_port
+	    mov al,fdc_on		;keep the fdc not reset
+	    mov motor_flags,al		;deselect the motors
+	    out dx,al
+
+check_disk_time:
+	cmp disk_time_out,0		;if zero, then it's not being used
+	jz update_tick			;  so, go about your business
+	  dec disk_time_out		;if it hasn't timed out
+	  jnz update_tick		;  then there's no need to worry
+	    mov disk_error,80h		;if it has timed out
+	    mov dx,fdc_flag		;  then tell the error routine why
+	    call flagset		;  and do a flag set to unstick us
 
 update_tick:
 	cmp tick_counter,ticks_per_second	;test for new second
@@ -1439,4 +1498,4 @@ reset:
 reset_key	rb	1
 
 rom_reset	dw	0000h,0FFFFh
-
+

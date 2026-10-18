@@ -15,7 +15,7 @@ reorg6	equ	offset $
 ;========
 io_const:
 ;========
-	xor	ax,ax
+	xor ax,ax
 	ret
 
 
@@ -27,8 +27,6 @@ full_key	equ	7EH		;full/partial window toggle
 ;	entry:	dl = console number
 
 io_conin: 
-io_conin_vc:
-
 	mov	dl,top_screen		; current foreground console
 	call	point_vs		; point to console structure
 	cmp	vs_pfk_count,0		; check for pfk's waiting
@@ -95,6 +93,12 @@ no_pfk_exp:
 	ret				; and return the code
 
 
+;	point to pfk table  -  public, called by z_prog_pfk
+;	entry:	al = pfk table index
+;		bx -> vs_
+;	exit:	vs_pfk_ptr -> pfk value
+;		vs_pfk_count = maximum char count
+
 point_pfk:
 	sub	si,si			; zero offset for low table
 	mov	cl,pfk_l_size		; chars per low pfk
@@ -139,6 +143,7 @@ w_full:
 	mov	dl,top_screen		; get active console num
 	call	ww_full_window		; full/small switch
 	jmp	conin_wait		; get another character
+
 
 ;	check for console in no switch mode
 ;	exit:	zf set switch is allowed
@@ -337,7 +342,7 @@ ww_statline:
 
 ;	normal io status line call
 ;	entry:	if cx = 0  normal status update
-;		if cx = offset, print crt_cols chars at cx:dx
+;		if cx = offset, print 80 chars at cx:dx
 ;		if cx = 0FFFFh, resume normal status
 ;	exit:	al = 0  if call was successful
 ;		al = 0FFh  if call was blocked
@@ -353,9 +358,6 @@ sl_shared:
 	cmp sl_exit_value,al	;if not locked on exit
 	jnz ret_statline	;then just return
 sl_free:
-	cld			; status line uses rep movs/stos, force forward direction
-	pushf
-	cli
 	push es			;save UDA
 	jcxz sl_keep		;if cx=0, skip source update
 	  mov sl_off,cx		;store offset
@@ -373,7 +375,7 @@ sl_ext_loop:
 	mov es,sl_seg		;source segment
 	call sl_get_char	;either get_80 or get_160
 	call sl_put_char	;put one char to status line
-	loop sl_ext_loop	;crt_cols times
+	loop sl_ext_loop	;80 times
 sl_ex:
 	jmp sl_exit
 
@@ -392,472 +394,147 @@ sl_get_160:
 ;	normal status line update
 
 sl_norm:
-	cld			; ensure forward string ops for all rep moves/stores
 	push ds ! pop es
+	mov di,offset smsg_cnum
+	mov al,' ' ! mov cx,offset smsg_pstr - offset smsg_cnum
+	rep stosb		;blank out local status string
+	mov di,offset smsg_pnum
+	mov cx,offset smsg_hour - offset smsg_pnum
+	rep stosb
 
-	; clear working fields
-	mov	di,offset smsg_pd
-	mov	al,' '
-	mov	cx,8
-	rep	stosb
-	mov	di,offset smsg_openvec
-	mov	cx,6
-	rep	stosb
-	mov	di,offset smsg_window
-	mov	cx,3
-	rep	stosb
-	mov	di,offset smsg_capslock
-	mov	cx,4
-	rep	stosb
-	mov	di,offset smsg_numlock
-	mov	cx,3
-	rep	stosb
+	mov al,top_screen
+	cbw			;ah=0
+	mov bx,ax		;for ccb fetch
+	add al,'0'		;console numbers 0-3
+	mov smsg_cnum,al	;set console number
 
-	; console and owner process
-	mov	al,top_screen
-	cbw
-	mov	bx,ax
-	add	al,'0'
-	mov	smsg_cnum,al
+	add bx,bx		;word pointer
+	mov bx,ccb_list[bx]	;get process which owns the
+	mov si,c_owner[bx]	;top console
+	test si,si ! jz s_nopd	;make sure a process is currently
 
-	add	bx,bx
-	mov	bx,ccb_list[bx]
-	mov	si,c_owner[bx]
-	test	si,si
-	jz	s_nopd
-	lea	si,p_name[si]
-	mov	di,offset smsg_pd
-	mov	cx,4
-	rep	movsw
+	  mov al,p_list[si]
+	  add al,'0' ! mov smsg_pnum,al
+	lea si,p_name[si]	;offset of process name
+	mov di,offset smsg_pd
+	mov cx,4 ! rep movsw
 
 s_nopd:
-	; console mode text (4 chars)
-	mov	ax,c_state[bx]
-	mov	si,offset dynstr
-	test	ax,csm_noswitch
-	jnz	s_mode_sel
-	test	ax,csm_buffered
-	jz	s_mode_sel
-	mov	si,offset bufstr
-	test	ax,csm_purging
-	jz	s_mode_sel
-	mov	si,offset purstr
-s_mode_sel:
-	mov	di,offset smsg_mode
-	mov	cx,length dynstr
-	rep	movsb
+s_ctrlS:
+	mov ax,c_state[bx]
+	test ax,csm_ctrlS ! jz s_ctrlO
+	  mov s_msgctrlS,'S^' ! jmps s_ctrlP
+s_ctrlO:
+	test ax,csm_ctrlO ! jz s_ctrlP	;ctrl S and ctrl O are mutally
+	  mov s_msgctrlS,'O^'		;exclusive print one of ^S or ^O
+s_ctrlP:
+	test ax,csm_ctrlP ! jz s_mode
+	  mov s_msgctrlP,'P^'
+	  mov dl,'=' ! mov dh,c_mimic[bx]
+	  add dh,'0' ! mov smsg_ctrlP_num,dx
+s_mode:
+	mov di,offset s_msgmode
+	mov cx,length dynstr
 
-	; drives with open files
-	mov	dx,open_vec
+	mov si,offset noswstr
+	test ax,csm_noswitch ! jnz s_movmode	;if 1 noswitch
+	  mov si,offset dynstr
+	  test ax,csm_buffered ! jz s_movmode	;if 0 dynamic
+	    mov si,offset bufstr
+	    test ax,csm_purging ! jz s_movmode	;if 0 buffered
+	      mov si,offset purstr		;else purging
+s_movmode:
+	rep movsb
+
+s_get_openvec:			; display a letter for each drive
+				; with open files  ABCDM*
+	mov	dx,open_vec	; BDOS sets this vector in SYSDAT
 	mov	di,offset smsg_openvec
 	mov	si,offset sl_drive_list
-	mov	cx,6
+	mov	cx,6		; drives to check
 s_get_open1:
-	lodsw
-	test	dx,ax
-	jz	s_get_open2
-	movsb
-	jmps	s_get_open3
+	lodsw			; get test mask
+	test	dx,ax		; if this drive is not on
+	jz	s_get_open2	;   then skip
+	  movsb			; store the drive letter
+	  jmps	s_get_open3	; skip the pointer bump
 s_get_open2:
 	inc	si
 	inc	di
 s_get_open3:
 	loop	s_get_open1
 
-	; middle indicators
-	cmp	im_here,0
-	jz	s_capslock
-	mov	si,offset winstr
-	mov	di,offset smsg_window
-	mov	cx,length winstr
-	rep	movsb
+s_window:
+	cmp im_here,0 ! jz s_capslock
+	  mov si,offset winstr
+	  mov di,offset smsg_window
+	  mov cx,length winstr
+	  rep movsb
 
 s_capslock:
-	mov	al,toggle_bits
-	test	al,capslock_bit
-	jz	s_numlock
-	mov	si,offset capstr
-	mov	di,offset smsg_capslock
-	mov	cx,length capstr
-	rep	movsb
+	mov al,toggle_bits
+	test al,capslock_bit ! jz s_numlock
+	  mov si,offset capstr
+	  mov di,offset smsg_capslock
+	  mov cx,length capstr
+	  rep movsb
 
 s_numlock:
-	test	al,numlock_bit
-	jz	s_time
-	mov	si,offset numstr
-	mov	di,offset smsg_numlock
-	mov	cx,length numstr
-	rep	movsb
+	test al,numlock_bit ! jz sl_time
+	  mov si,offset numstr
+	  mov di,offset smsg_numlock
+	  mov cx,length numstr
+	  rep movsb
 
-s_time:
-	; update time and date fields when clock is enabled
-	cmp	sl_clk_flag,0
-	jz	s_build
-	pushf
-	cli
+sl_time:
+	cmp	sl_clk_flag,0	; if clocks disabled
+	jz	sl_display	;   then skip
 
-	mov	al,tod_hour
-	mov	sl_hour_save,al
-	call	sl_ascii
-	cmp	al,'0'
-	jnz	s_hour_set
-	mov	al,' '
-s_hour_set:
-	mov	smsg_hour,ax
+sl_hours:
+	mov	al,tod_hour	; get current hour from sysdat
+	cmp	al,sl_hour_save	; if no change
+	jz	sl_minutes	;   then skip
 
+	mov	sl_hour_save,al	; save for future skip
+	mov	dx,'ma'		; assume 'am'
+	cmp	al,12h		; if in the morning
+	jb	sl_hour1	;   then skip
+	  sub	al,12h		; correct the hour
+	  das			; (it's decimal dummy!)
+	  mov	dx,'mp'		;   and make it 'pm'
+sl_hour1:
+	cmp	al,0		; if hour = 0
+	jnz	sl_hour2	;   then make it 12
+	  mov	al,12h
+sl_hour2:
+	mov	smsg_ampm,dx	; save 'am' or 'pm'
+	call	sl_ascii	; convert bcd to ascii
+	cmp	al,'0'		; blank a leading zero
+	jnz	sl_hour3
+	  mov	al,' '
+sl_hour3:
+	mov	smsg_hour,ax	; and store the hour
+
+sl_minutes:
 	mov	al,tod_min
-	mov	sl_min_save,al
-	call	sl_ascii
-	mov	smsg_min,ax
+	cmp	al,sl_min_save	; if no change in minutes
+	jz	sl_seconds	;   then skip
 
-	mov	al,tod_sec
-	call	sl_ascii
-	mov	smsg_sec,ax
+	mov	sl_min_save,al	; save the value
+	call	sl_ascii	; convert bcd to ascii
+	mov	smsg_min,ax	; and store the minute
 
-	mov	ax,tod_day
-	call	sl_day_to_ymd	; bl=year(00-99), bh=month, dl=day
-	mov	al,bl
-	call	sl_bin_ascii2
-	mov	smsg_year,ax
-	mov	al,bh
-	call	sl_bin_ascii2
-	mov	smsg_mon,ax
-	mov	al,dl
-	call	sl_bin_ascii2
-	mov	smsg_day,ax
-	popf
-
-s_build:
-	; default empty lengths
-	mov	sl_left_len,0
-	mov	sl_mid_len,0
-	mov	sl_right_len,0
-
-	; width bands:
-	;  >=74   full mode
-	;  48-73  compact mode
-	;  36-47  narrow mode
-	;  <36    tiny mode
-	mov	al,crt_cols
-	cmp	al,74
-	jb	s_band_48
-	jmp	s_build_full
-s_band_48:
-	cmp	al,48
-	jb	s_band_36
-	jmp	s_build_compact
-s_band_36:
-	cmp	al,36
-	jae	s_band_36_hi
-	jmp	s_build_tiny
-s_band_36_hi:
-	jmp	s_build_narrow
-
-s_build_full:
-	; Left: console(9) + 2 + mode(8) + 2 + openvec(6) + 1 + window(3)
-	mov	di,offset sl_left_part
-	mov	si,offset sl_console_str
-	mov	cx,length sl_console_str
-	rep	movsb
-	mov	al,smsg_cnum
-	stosb
-	mov	al,' '
-	stosb
-	mov	al,' '
-	stosb
-	mov	si,offset smsg_mode
-	mov	cx,length dynstr
-	rep	movsb
-	mov	al,' '
-	stosb
-	mov	al,' '
-	stosb
-	mov	si,offset smsg_openvec
-	mov	cx,6
-	rep	movsb
-	mov	al,' '
-	stosb
-	mov	si,offset smsg_window
-	mov	cx,3
-	rep	movsb
-	mov	sl_left_len,31
-
-	; Middle: pd(8)
-	mov	di,offset sl_mid_part
-	mov	si,offset smsg_pd
-	mov	cx,8
-	rep	movsb
-	mov	sl_mid_len,8
-
-	; Right: capslock(4)+2+numlock(3)+2+date(10)+2+time(8)
-	mov	di,offset sl_right_part
-	mov	si,offset smsg_capslock
-	mov	cx,4
-	rep	movsb
-	mov	al,' '
-	stosb
-	mov	al,' '
-	stosb
-	mov	si,offset smsg_numlock
-	mov	cx,3
-	rep	movsb
-	mov	al,' '
-	stosb
-	mov	al,' '
-	stosb
-
-	; date: CCYY-MM-DD
-	mov	ax,smsg_year
-	cmp	al,'7'
-	jb	s_date_20
-	mov	al,'1'
-	mov	ah,'9'
-	jmps	s_date_cent
-s_date_20:
-	mov	al,'2'
-	mov	ah,'0'
-s_date_cent:
-	stosw
-	mov	ax,smsg_year
-	stosw
-	mov	al,'-'
-	stosb
-	mov	ax,smsg_mon
-	stosw
-	mov	al,'-'
-	stosb
-	mov	ax,smsg_day
-	stosw
-
-	mov	al,' '
-	stosb
-	mov	al,' '
-	stosb
-
-	; time: HH:MM:SS
-	mov	ax,smsg_hour
-	stosw
-	mov	al,':'
-	stosb
-	mov	ax,smsg_min
-	stosw
-	mov	al,':'
-	stosb
-	mov	ax,smsg_sec
-	stosw
-	mov	sl_right_len,31
-	jmp	s_layout
-
-s_build_compact:
-	; Left: console(9) + 1 + openvec(6) + 1 + window(3)
-	mov	di,offset sl_left_part
-	mov	si,offset sl_console_str
-	mov	cx,length sl_console_str
-	rep	movsb
-	mov	al,smsg_cnum
-	stosb
-	mov	al,' '
-	stosb
-	mov	si,offset smsg_openvec
-	mov	cx,6
-	rep	movsb
-	mov	al,' '
-	stosb
-	mov	si,offset smsg_window
-	mov	cx,3
-	rep	movsb
-	mov	sl_left_len,20
-
-	; Middle: pd(8)
-	mov	di,offset sl_mid_part
-	mov	si,offset smsg_pd
-	mov	cx,8
-	rep	movsb
-	mov	sl_mid_len,8
-
-	; Right: capslock(4) + 2 + numlock(3) + 2 + time(8)
-	mov	di,offset sl_right_part
-	mov	si,offset smsg_capslock
-	mov	cx,4
-	rep	movsb
-	mov	al,' '
-	stosb
-	mov	al,' '
-	stosb
-	mov	si,offset smsg_numlock
-	mov	cx,3
-	rep	movsb
-	mov	al,' '
-	stosb
-	mov	al,' '
-	stosb
-	mov	ax,smsg_hour
-	stosw
-	mov	al,':'
-	stosb
-	mov	ax,smsg_min
-	stosw
-	mov	al,':'
-	stosb
-	mov	ax,smsg_sec
-	stosw
-	mov	sl_right_len,19
-	jmp	s_layout
-
-s_build_narrow:
-	; Left: Cn
-	mov	di,offset sl_left_part
-	mov	al,'C'
-	stosb
-	mov	al,smsg_cnum
-	stosb
-	mov	sl_left_len,2
-
-	; Middle: pd(8)
-	mov	di,offset sl_mid_part
-	mov	si,offset smsg_pd
-	mov	cx,8
-	rep	movsb
-	mov	sl_mid_len,8
-
-	; Right: HH:MM
-	mov	di,offset sl_right_part
-	mov	ax,smsg_hour
-	stosw
-	mov	al,':'
-	stosb
-	mov	ax,smsg_min
-	stosw
-	mov	sl_right_len,5
-	jmp	s_layout
-
-s_build_tiny:
-	; Left: Cn
-	mov	di,offset sl_left_part
-	mov	al,'C'
-	stosb
-	mov	al,smsg_cnum
-	stosb
-	mov	sl_left_len,2
-
-	; Right: HH:MM
-	mov	di,offset sl_right_part
-	mov	ax,smsg_hour
-	stosw
-	mov	al,':'
-	stosb
-	mov	ax,smsg_min
-	stosw
-	mov	sl_right_len,5
-
-s_layout:
-	; clear output line to spaces (crt_cols bytes)
-	mov	di,offset status_work
-	mov	al,' '
-	mov	ch,0
-	mov	cl,crt_cols
-	rep	stosb
-
-	; right placement (right aligned)
-	mov	ch,0
-	mov	cl,crt_cols
-	xor	ax,ax
-	mov	al,sl_right_len
-	cmp	cx,ax
-	jb	s_right_none
-	sub	cx,ax
-	mov	sl_right_start,cl
-	jmps	s_place_middle
-s_right_none:
-	mov	sl_right_start,0
-	mov	al,crt_cols
-	mov	sl_right_len,al
-
-s_place_middle:
-	; place middle centered if it exists and if it fits
-	mov	sl_mid_start,0ffh
-	mov	al,sl_mid_len
-	cmp	al,0
-	jz	s_place_left
-
-	mov	ah,0
-	mov	al,crt_cols
-	mov	bl,sl_mid_len
-	xor	bh,bh
-	sub	ax,bx
-	shr	ax,1
-	mov	sl_mid_start,al
-
-	mov	bl,sl_mid_start
-	mov	bh,0
-	mov	al,sl_left_len
-	cmp	bl,al
-	jbe	s_hide_middle
-
-	mov	al,sl_mid_start
-	add	al,sl_mid_len
-	cmp	al,sl_right_start
-	jae	s_hide_middle
-
-	mov	di,offset status_work
-	mov	al,sl_mid_start
-	xor	ah,ah
-	add	di,ax
-	mov	si,offset sl_mid_part
-	mov	ch,0
-	mov	cl,sl_mid_len
-	rep	movsb
-	jmps	s_place_left
-
-s_hide_middle:
-	mov	sl_mid_start,0ffh
-
-s_place_left:
-	mov	al,sl_left_len
-	mov	ah,0
-	mov	bx,ax
-
-	mov	al,sl_right_start
-	mov	ah,0
-	mov	dx,ax
-
-	cmp	sl_mid_start,0ffh
-	jz	s_left_limit_ok
-	mov	al,sl_mid_start
-	xor	ah,ah
-	mov	dx,ax
-
-s_left_limit_ok:
-	cmp	bx,dx
-	jbe	s_left_len_ok
-	mov	bx,dx
-s_left_len_ok:
-	test	bx,bx
-	jz	s_place_right
-	mov	di,offset status_work
-	mov	si,offset sl_left_part
-	mov	cx,bx
-	rep	movsb
-
-s_place_right:
-	mov	al,sl_right_len
-	cmp	al,0
-	jz	sl_display
-	mov	ah,0
-	mov	cx,ax
-	mov	di,offset status_work
-	mov	al,sl_right_start
-	xor	ah,ah
-	add	di,ax
-	mov	si,offset sl_right_part
-	rep	movsb
+sl_seconds:
+	mov	al,tod_sec	; always do seconds
+	call	sl_ascii	; convert bcd to ascii
+	mov	smsg_sec,ax	; and store the second
 
 sl_display:
 	mov	dl,sl_crt_flag	; get allowable crt bits
 	test	dl,sl_mono_bit + sl_color_bit
 	jz	sl_exit		; if both off, bag it
 
-	mov	si,offset status_work
+	mov	si,offset status_msg
 	call	sl_disp_prep	; get the reg's ready
 	mov	ah,sl_attrib	; status line attribute
 sl_disp1:
@@ -867,7 +544,6 @@ sl_disp1:
 
 sl_exit:
 	pop	es
-	popf
 	mov	al,sl_exit_value ; successful update
 	mov	sline_locked,al	 ; free the semaphore
 	ret
@@ -875,11 +551,9 @@ sl_exit:
 ;	set up pointers and count for status display
 
 sl_disp_prep:
-	mov	di,sl_offset
-	shl	di, 1
+	mov	di,sl_offset * 2
 	mov	bx,offset status_copy
-	mov	ch, 0
-	mov	cl, crt_cols	; character count
+	mov	cx,80		; character count
 	ret
 
 ;	put one char/attrib to either or both status lines
@@ -928,7 +602,7 @@ sl_c_norm2:
 	pop	dx		; recover registers
 	pop	cx
 	pop	bx
-	jmps	sl_put5	; di already bumped
+	jmps	sl_put_5	; di already bumped
 sl_put4:
 	inc	di		; bump the crt pointer
 	inc	di
@@ -948,90 +622,6 @@ sl_ascii:
 	ret
 
 
-; convert binary 0..99 in al to ascii pair in ax
-; return: low byte = tens ascii, high byte = ones ascii
-
-sl_bin_ascii2:
-	aam
-	add	ax,3030h
-	xchg	al,ah
-	ret
-
-
-; determine leap year from low-byte year value
-; entry: al = year value (e.g. 78=1978, 100=2000)
-; exit:  al = 1 if leap, 0 if not
-
-sl_is_leap:
-	test	al,03h
-	jz	sl_is_leap_yes
-	xor	al,al
-	ret
-sl_is_leap_yes:
-	mov	al,1
-	ret
-
-
-; convert tod_day (days since 1978-01-01) to y/m/d
-; entry: ax = day count
-; exit:  bl = year (00-99 style from real year low byte)
-;        bh = month 1..12
-;        dl = day 1..31
-
-sl_day_to_ymd:
-	mov	dx,ax
-	mov	bl,78
-
-sl_ymd_year_loop:
-	mov	al,bl
-	call	sl_is_leap
-	mov	cx,365
-	or	al,al
-	jz	sl_ymd_year_cmp
-	inc	cx
-sl_ymd_year_cmp:
-	cmp	dx,cx
-	jb	sl_ymd_month_init
-	sub	dx,cx
-	inc	bl
-	jmp	sl_ymd_year_loop
-
-sl_ymd_month_init:
-	mov	bh,1
-
-sl_ymd_month_loop:
-	mov	si,offset sl_month_days
-	mov	al,bh
-	dec	al
-	cbw
-	add	si,ax
-	mov	cl,[si]
-	mov	ch,0
-	cmp	bh,2
-	jne	sl_ymd_month_cmp
-	mov	al,bl
-	call	sl_is_leap
-	or	al,al
-	jz	sl_ymd_month_cmp
-	inc	cx
-sl_ymd_month_cmp:
-	cmp	dx,cx
-	jb	sl_ymd_done
-	sub	dx,cx
-	inc	bh
-	jmp	sl_ymd_month_loop
-
-sl_ymd_done:
-	cmp	bl,100
-	jb	sl_ymd_done2
-	sub	bl,100
-	jmp	sl_ymd_done
-sl_ymd_done2:
-	mov	dl,dl
-	inc	dl
-	ret
-
-
 ;	***  Status line error message entry  ***
 ;
 ;	entry:	si -> error message
@@ -1039,7 +629,6 @@ sl_ymd_done2:
 ;	exit:	al = response character
 
 sl_error_out:
-	cld			; ensure forward copy for status save/restore blocks
 	mov	al,true
 	xchg	al,sline_locked	; test and set status semaphore
 	test	al,al
@@ -1056,8 +645,7 @@ sl_error_out:
 	push ds ! pop es	; for local moves
 	mov	si,offset status_copy
 	mov	di,offset sl_error_save
-	mov	ch, 0
-	mov	cl, crt_cols
+	mov	cx,80
 	rep	movsw		; save the current status line
 	pop	es
 
@@ -1113,7 +701,7 @@ sline_locked	db	0	; semaphore for status line code
 sl_clk_flag	db	0FFh	; do we show the clock?
 sl_exit_value	db	0	; restore semaphore on exit
 
-sl_attrib	db	0Ah	; enhanced cyan for PC
+sl_attrib	db	0Bh	; enhanced cyan for PC
 sl_off		dw	0ffffh	; offset of source
 sl_seg		dw	0	; segment of source
 sl_get_char	rw	1	; variable fetch vector
@@ -1129,44 +717,45 @@ sl_error_key	rb	1	; response key
 
 ;	status line message image
 
-status_msg		rb	0		; kept for compatibility of symbols
+status_msg		rb	0
+			db	'Console='	;0-7	
+smsg_cnum		rb	1		;8
+			db	' '		;9
+smsg_mode		rb	8		;10-17
+			db	'  '		;18-19
+smsg_pd			rb	8		;20-27
+			db	' '		;28
+smsg_openvec		rb	6		;29-34
+			db	' '		;35
+smsg_ctrlS		rw	0		;36-37
+smsg_ctrlO		rw	1		;36-37
+			db	' '		;38
+smsg_ctrlP		rw	1		;39-40
+smsg_ctrlP_num		rw	1		;41-42
+			db	' '		;43
+smsg_pstr		db	'Printer='	;44-51
+smsg_pnum		rb	1		;52
+			db	'  '		;53-54
+smsg_window		rb	3		;55-57
+			db	' '		;58
+smsg_capslock		rb	4		;59-62
+			db	' '		;63
+smsg_numlock		rb	3		;64-66
+			db	'  '		;67-68
+smsg_hour		dw	'0 '		;69-70
+smsg_c1			db	':'		;71
+smsg_min		dw	'00'		;72-73
+smsg_c2			db	':'		;74
+smsg_sec		dw	'00'		;75-76
+			db	' '
+smsg_ampm		dw	'  '		;78-79
 
-smsg_cnum		db	'0'
-smsg_mode		db	'Dynamic '
-smsg_pd			db	'        '
-smsg_openvec		db	'      '
-smsg_window		db	'   '
-smsg_capslock		db	'    '
-smsg_numlock		db	'   '
-
-smsg_year		dw	'00'
-smsg_mon		dw	'00'
-smsg_day		dw	'00'
-smsg_hour		dw	'0 '
-smsg_c1			db	':'
-smsg_min		dw	'00'
-smsg_c2			db	':'
-smsg_sec		dw	'00'
-smsg_clk_tail		db	'   '	; keeps z_clk_off 11-char blanking range
-
-sl_left_len		rb	1
-sl_mid_len		rb	1
-sl_right_len		rb	1
-sl_right_start		rb	1
-sl_mid_start		rb	1
-
-sl_left_part		rb	40
-sl_mid_part		rb	20
-sl_right_part		rb	40
-status_work		rb	100h
 ;	String constants for status line
 
-dynstr			db	'Dynamic '
-bufstr			db	'Buffered'
-purstr			db	'Purging '
-noswstr			db	'NoSwitch'
-
-sl_console_str		db	'Console='
+dynstr			db	'Dynamic '	;these 4 
+bufstr			db	'Buffered'	;messages must
+purstr			db	'Purging '	;be the
+noswstr			db	'NoSwitch'	;same length
 
 ;	Test masks and drive names for get_openvec
 
@@ -1180,11 +769,9 @@ winstr			db	'Win'
 capstr			db	'Caps'
 numstr			db	'Num'
 
-sl_month_days		db	31,28,31,30,31,30,31,31,30,31,30,31
+status_copy	rw	80	; keep a copy of status line
 
-status_copy	rw	100h	; keep a copy of status line
-
-sl_error_save	rw	100h	; back up for error messages
+sl_error_save	rw	80	; back up for error messages
 
 reorg_sl2	equ	offset $
 	cseg
@@ -1622,4 +1209,4 @@ lcb4		dw	0,0,0,0
 		dw	0FFFFh,0FFFFh,0FFFFh
 		dw	0FFFFh,0FFFFh,0FFFFh
 		dw	0FFFFh,0FFFFh,0FFFFh
-
+

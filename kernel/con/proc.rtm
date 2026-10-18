@@ -46,9 +46,9 @@ cp_uda:
 
 	mov bx,rlr
 	mov p_parent[si],bx
-	mov p_conmode[si], (pcm_ctls or pcm_ctlo)
-			; console mode - not inherited
-			; unless RSX which aren't yet implemented
+	mov p_conmode[si],0		;console mode - not inherited
+					;unless RSX which aren't yet
+					;implemented
 	mov p_tkcnt[si],0		;temp keep count
 	and p_flag[bx],not (pf_childabort + pf_resource)
 	mov al,p_lst[si]
@@ -247,4 +247,4 @@ gpd_have:				;DI->PD in SYSDAT
 gpd_done:
 	  xor cx,cx
 	  ret
-
+

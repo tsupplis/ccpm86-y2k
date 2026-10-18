@@ -15,24 +15,16 @@ one_byte_interrupt	equ	03h
 overflow_interrupt	equ	04h
 clock_interrupt		equ	08h
 keyboard_interrupt	equ	09h
-tkey_int		equ	07h		; 8086tiny internal keyboard IRQ bridge
-tclk_int		equ	0Ah		; 8086tiny internal timer IRQ bridge
-serial1_interrupt	equ	0Bh		; COM2/COM4 IRQ path (IRQ3)
-serial0_interrupt	equ	0Ch		; COM1/COM3 IRQ path (IRQ4)
 hd_hard_interrupt	equ	0Dh
 disk_interrupt		equ	0Eh
-printer_interrupt	equ	0Fh		; LPT IRQ path (IRQ7)
-video_int		equ	10h
 
 equip_int		equ	11h		; ROS equipment check int
 mem_int			equ	12h		; ROS memory check int
 disk_int		equ	13h		; ROS disk int
 async_int		equ	14h		; ROS async port int
-bios_int		equ	15h		; BIOS helper services
 print_int		equ	17h		; ROS printer int
 
 tick_interrupt		equ	1Ch		; user tick vector
-diskette_parameter_int	equ	1Eh		; BIOS floppy parameter table pointer
 hd_code_interrupt	equ	40h		; pass along to floppy
 hd_param_interrupt	equ	41h		; hard disk param pointer
 os_interrupt		equ	224		; normal CCP/M-86 entry
@@ -67,9 +59,6 @@ reorg16	equ	offset $
 INIT:
 	cli
 	call	set_sys_vars		; set up system variables
-	call	fix_floppy_spt		; keep BIOS floppy SPT aligned (8086tiny)
-	call	set_crt_vars		; 2026
-	call	set_time_date		; 2025
 	call	equip_check		; see what we've got
 	call	check_hi_mem		; from C000 up
 	call	ndp_init		; check for an 8087
@@ -81,8 +70,7 @@ INIT:
 	call	hd_init			; get hard disk partitions
 	call	do_setup		; customize XIOS
 	call	flop_off		; turn off the floppy motors
-	; 8086tiny compatibility: disable mdisk bring-up.
-	call	no_mdisk
+	call	try_mdisk		; done after setup data read
 	call	trim_memory		; fix up the partition list
 	call	do_config		; initial serial port init
 	call	do_interrupts		; do all of the int stuff
@@ -93,221 +81,16 @@ INIT:
 ;	set up initial system variables
 
 set_sys_vars:
-	cld				;Sup saves DS,ES on INIT call
-	push	ds			; 2025: set es := ds
-	pop	es
+	cld				;Sup saves DS,ES on INIT call 
 	mov sysdat,ds			;save System Data Segment 
 	mov bx,offset supmod		;save Sup entry double word
 	mov ax,[bx]			;get offset out of Sys Data Seg
 	mov cs:supervisor_o,ax		;save it
 	mov ax,2[bx]			;get the segment
 	mov cs:supervisor_s,ax		;save it
-;	mov tod_hour,0			;start with zero time
-;	mov tod_day,0890h		;Jan 1, 1984
+	mov tod_hour,0			;start with zero time
+	mov tod_day,0890h		;Jan 1, 1984
 	mov boot_disk,dl		;ros code for booter
-	ret
-
-
-; Keep BIOS diskette sectors/track at 18 so INT 13h CHS math
-; matches the fixed XIOS floppy assumptions (dpbd/sectors_per_track).
-; This stabilizes floppy reads under 8086tiny.
-
-fix_floppy_spt:
-	push	ds
-	push	es
-	xor	ax,ax
-	mov	ds,ax			; IVT segment
-	mov	bx,diskette_parameter_int*4
-	les	bx,[bx]
-	cmp	bx,0
-	jz	fix_floppy_spt_done
-	mov	al,18
-	mov	si,bx
-	add	si,4
-	mov	es:[si],al		; INT 1Eh table: sectors/track
-fix_floppy_spt_done:
-	pop	es
-	pop	ds
-	ret
-
-set_crt_vars:
-	;	Geometry init rules:
-	;	- cols from BDA 40:4A
-	;	- prefer rows from BDA 40:4C page-bytes / (2*cols)
-	;	- fallback to BDA 40:84 (rows-1)
-	;	- store internal values as rows-1 / rows-2 plus derived crt_size
-	push	es
-	mov	ax, 40h
-	mov	es, ax
-
-	mov	si, 4Ah
-	mov	al, es:[si]
-	mov	bl, al			; bl=crt_cols
-
-	mov	si, 84h
-	mov	al, es:[si]
-	mov	bh, al			; bh=rows-1 from BDA 40:84 (fallback)
-
-	mov	ax, es:word ptr 4Ch	; bytes per video page
-	or	ax, ax
-	jz	set_crt_rows1
-	xor	ah, ah
-	mov	al, bl
-	mov	si, ax
-	shl	si, 1			; si=bytes per row (2*cols)
-	jz	set_crt_rows1
-	mov	ax, es:word ptr 4Ch
-	xor	dx, dx
-	div	si			; ax=rows from page size
-	test	al, al
-	jz	set_crt_rows1
-	dec	al			; rows -> rows-1
-	mov	bh, al
-set_crt_rows1:
-	or	bh, bh
-	jnz	set_crt_rows2
-	mov	bh, 24
-set_crt_rows2:
-	mov	al, bh
-	mov	crt_rows_minus1, al
-	dec	al
-	mov	ch, al			; ch=crt_rows-2
-	mov	crt_rows_minus2, al
-	mov	al, bl			; al=crt_cols
-	mov	crt_cols, al
-	dec	al
-	mov	cl, al			; cl=crt_cols-1
-	mov	crt_cols_minus1, al
-
-	mov	al, bl			; al=crt_cols
-	mul	bh			; al=crt_cols * (crt_rows-1)
-	mov	crt_size, ax
-	mov	sl_offset, ax
-	pop	es
-
-	mov	dx, bx
-	lea	bx, first_vs
-	mov	4[bx], cl
-	mov	5[bx], ch
-	mov	8[bx], cl
-	mov	9[bx], ch
-	mov	10[bx], cl
-	mov	11[bx], ch
-	mov	16[bx], dh
-	mov	18[bx], dl
-	mov	31[bx], dl
-
-	lea	bx, second_vs
-	mov	4[bx], cl
-	mov	5[bx], ch
-	mov	8[bx], cl
-	mov	9[bx], ch
-	mov	10[bx], cl
-	mov	11[bx], ch
-	mov	16[bx], dh
-	mov	18[bx], dl
-	mov	31[bx], dl
-
-	lea	bx, third_vs
-	mov	4[bx], cl
-	mov	5[bx], ch
-	mov	8[bx], cl
-	mov	9[bx], ch
-	mov	10[bx], cl
-	mov	11[bx], ch
-	mov	16[bx], dh
-	mov	18[bx], dl
-	mov	31[bx], dl
-
-	lea	bx, fourth_vs
-	mov	4[bx], cl
-	mov	5[bx], ch
-	mov	8[bx], cl
-	mov	9[bx], ch
-	mov	10[bx], cl
-	mov	11[bx], ch
-	mov	16[bx], dh
-	mov	18[bx], dl
-	mov	31[bx], dl
-
-	ret
-
-set_time_date:				; 2025
-
-	mov	ah, 02h		; BIOS RTC time: CH/CL/DH = hh/mm/ss in BCD
-	int	1Ah
-	jc	set_time_default
-	mov	byte ptr tod_hour, ch
-	mov	byte ptr tod_min, cl
-	mov	byte ptr tod_sec, dh
-
-	mov	ah, 04h		; BIOS RTC date: CL/DH/DL = yy/mm/dd in BCD
-	int	1Ah
-	jc	set_date_default
-
-	mov	al, dl
-	call	convert_bcd
-	mov	byte ptr rtc_day, al
-	mov	al, dh
-	call	convert_bcd
-	mov	byte ptr rtc_month, al
-	mov	al, cl
-	call	convert_bcd
-	mov	byte ptr rtc_year, al
-	jmps	set_day_count
-
-set_date_default:
-	mov	tod_day, 0890h		; Jan 1, 1984
-	ret
-
-set_time_default:
-	mov	byte ptr tod_hour, 0
-	mov	byte ptr tod_min, 0
-	mov	byte ptr tod_sec, 0
-	mov	tod_day, 0890h		; Jan 1, 1984
-	ret
-
-set_day_count:
-	mov	bh, 0
-	mov	bl, rtc_year
-	add	bx, 2000	; bx=year
-	sub	bx, 1978	; bx=year-1978
-	mov	ax, 365		; ax=365
-	mul	bx		; ax=(year-1978)*365
-	add	bx, 2		; bx=(year-1978+2)
-	mov	cl, 2
-	shr	bx, cl		; bx=(year-1978+2) div 4
-	add	ax, bx		; ax: days of past years
-	mov	bh, 0
-	mov	bl, rtc_month
-	dec	bl
-	shl	bl, 1
-	add	ax, word ptr month_days[bx]
-	mov	bh, 0
-	mov	bl, rtc_day
-	add	ax, bx
-	mov	bl, rtc_year	; need to adjust for leap year
-	and	bl, 03h		; test divisible by 4
-	jnz	t_lbl
-	mov	bl, rtc_month	; test if before march
-	cmp	bl, 3
-	jb	t_lbl
-	inc	ax		; adjust current leap year
-t_lbl:	mov	tod_day, ax
-	ret
-
-convert_bcd:			; 2026
-	push	bx
-	push	cx
-	mov	bl, al
-	mov	cl, 4
-	shr	al, cl		; al = tens
-	and	bl, 0Fh		; bl = units
-	mov	cl, 10
-	mul	cl		; al = 10 * tens
-	add	al, bl		; al = units + 10 * tens
-	pop	cx
-	pop	bx
 	ret
 
 
@@ -392,13 +175,6 @@ crt_chk1:
 ;	Check for memory at or above C000:0000
 
 check_hi_mem:
-	; 8086tiny maps C000+ as writable RAM, but this region must remain reserved.
-	xor	ax,ax
-	mov	hi_mem_start,ax
-	mov	hi_mem_top,ax
-	ret
-
-old_check_hi_mem:
 	mov	dx,0C000h		; starting segment
 	mov	cx,12			; 16k block count
 	mov	ax,0DDB2h		; check pattern
@@ -413,12 +189,8 @@ ch_hi_mem2:
 	mov	hi_mem_start,dx		; there is some memory
 ch_hi_mem3:
 	add	dx,400h			; up 16k
-	jc	ch_hi_mem_done		; stop on segment wrap
-	cmp	dx,0f000h		; do not scan beyond ROM window
-	ja	ch_hi_mem_done
 	call	ch_hi_word		; as long as it's good
 	jz	ch_hi_mem3		;   keep on going
-ch_hi_mem_done:
 	mov	hi_mem_top,dx		; and save the top
 	ret
 
@@ -619,14 +391,7 @@ init_v0:
 init_v1:
 	mov	vs_vc_seg,ax		; tell each vs_ where to find
 	add	bx,size_vs		;   its buffer segment
-	mov	dx, crt_size
-	add	dx, 15
-	shr	dx, 1
-	shr	dx, 1
-	shr	dx, 1
-	shr	dx, 1
-	shl	dx, 1
-	add	ax, dx	; segment size
+	add	ax,((crt_size+15) shr 4) * 2	; segment size
 	loop	init_v1
 	mov	vc_map_seg,ax		; ownership map segment
 
@@ -663,11 +428,11 @@ init_v3:
 
 ;	Cold start setup for XT hard disk driver
 ;	needs to do these things:
-;	(1)	setup floppy interrupt trap
-;	(2)	save disk interrupt vector for far call usage
-;	(3)	initialize HDINF vectors about physical drive char.
-;	(4)	try to login first hard disk
-;	(5)	decide who will be system disk and temp disk
+;	1)	setup floppy interrupt trap
+;	2)	save disk interrupt vector for far call usage
+;	3)	initialize HDINF vectors about physical drive char.
+;	4)	try to login first hard disk
+;	5)	decide who will be system disk and temp disk
 ;
 ;	this code assumes that it is running in XIOS codeseg and that
 ;	the floppy initialization has already been done
@@ -778,6 +543,10 @@ setup_go:
 	mov	al,su_verf
 	mov	verify_flag,al		; whether to verf after write
 
+	mov	al,su_hdst		; head step code
+	mov	fdc_spec1_var,al	; save for specify
+	call	flop_specify		; set head step speed
+
 	cmp	su_cf,0			; check the config flag
 	jz	setup_pfks		; if not saved, skip
 	mov	ax,su_config
@@ -864,10 +633,7 @@ yes_mdisk_fill:
 trim_memory:
 	mov	cx,memory_top	; top segment address
 	mov	bx,offset mfl	; memory free list root
-	mov	dx,256		; guard against malformed/cyclic lists
 trim_mem1:
-	dec	dx
-	jz	trim_mem3
 	mov	si,bx		; save previous link
 	mov	bx,md_link[bx]	; link to next
 	test	bx,bx
@@ -935,7 +701,7 @@ int_save_loop:
 int_save_one:
 	add	di,4			; skip this vector
 	inc si ! inc si			; to next table entry
-	int_save_cont:
+int_save_cont:
 	inc	dx			; next int number
 	loop	int_save_loop		; through the whole table
 
@@ -1117,35 +883,14 @@ su_pfk_tbl	rb	360	; one console's pfk's
 
 int_save_tbl	dw	single_step_interrupt
 		dw	one_byte_interrupt
-		dw	tkey_int
-		dw	tclk_int
-		dw	serial1_interrupt
-		dw	serial0_interrupt
 		dw	hd_hard_interrupt
-		dw	disk_interrupt
-		dw	printer_interrupt
-		dw	video_int
-		dw	disk_int
 		dw	async_int
-		dw	bios_int
 		dw	print_int
-		dw	hd_code_interrupt
 		dw	hd_param_interrupt
 		dw	debugger_interrupt
 		dw	0FFFFh
 
-int_no_save	dw	tkey_int
-		dw	tclk_int
-		dw	serial1_interrupt
-		dw	serial0_interrupt
-		dw	hd_hard_interrupt
-		dw	disk_interrupt
-		dw	printer_interrupt
-	dw	video_int
-	dw	disk_int
-	dw	async_int
-	dw	bios_int
-	dw	hd_code_interrupt
+int_no_save	dw	hd_hard_interrupt
 		dw	hd_param_interrupt
 		dw	0FFFFh		; impossible code
 
@@ -1157,16 +902,11 @@ int_tbl	dw	divide_interrupt*4,	i_divide
 	dw	clock_interrupt*4,	i_clock
 	dw	tick_interrupt*4,	i_tick
 	dw	keyboard_interrupt*4,	i_keyboard
+	dw	disk_interrupt*4,	i_disk
+	dw	hd_code_interrupt*4,	hd_dummy_int
 	dw	flag_interrupt*4,	i_fidds_flag
 	dw	fidds_interrupt*4,	i_dummy_fidds
 	dw	xios_interrupt*4,	xios_v1_entry
 
 int_tbl_len	equ	(offset $ - offset int_tbl) / 4
-
-; 2025: date data
-month_days	dw 0,31,59,90,120,151,181,212,243,273,304,334
-rtc_day		db 0
-rtc_month	db 0
-rtc_year	db 0
-
-
+
