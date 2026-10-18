@@ -15,6 +15,7 @@ asm/*.mod
 **/*.o
 **/*.loc
 **/*.h86
+**/*.hex
 **/*.sym
 **/*.lst
 **/*.abs
@@ -28,6 +29,7 @@ private/**
 local/**
 **/*.img
 **/*.cmd
+**/*.com
 **/*.con
 **/*.rsp
 **/.*.swp
