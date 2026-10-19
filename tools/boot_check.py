@@ -92,6 +92,25 @@ def check(image, second):
                         assert 'Illegal command tail' not in text, text
                         assert 'SDIR' in text, text
                     print(f'{image.name}: SDIR empty tail, wildcard and options passed')
+                    type_command('dredix\n')
+                    type_command('hello\nworld')
+                    wait_for(lambda t: t.startswith('hello')
+                             and t.splitlines()[1].startswith('world'))
+                    for key in ('up', 'home', 'right', 'delete', 'backspace'):
+                        hmp('sendkey ' + key)
+                        time.sleep(.15)
+                    type_command('e')
+                    text, _ = wait_for(lambda t: t.startswith('ello'))
+                    hmp('sendkey alt-x')
+                    text, _ = wait_for(lambda t: 'OK to lose changes' in t)
+                    assert text.startswith('ello'), 'quit prompt corrupted editor text'
+                    type_command('y\n')
+                    text, data = wait_for(lambda t: re.search(r'^A>\s*$', t, re.M))
+                    assert 0x0e in data[3841:4000:2], 'editor changed status line color'
+                    type_command('dir\n')
+                    wait_for(lambda t: 'CCPM' in t and 'SYS' in t and 'DREDIX' in t)
+                    print(f'{image.name}: DREDIX editing, navigation, delete/backspace and exit passed')
+
                 print(f'{image.name}: PASS (two drives, A> prompt, RTC, yellow status, DIR)')
             finally:
                 process.terminate()
