@@ -13,7 +13,8 @@ SYSTEM_COMMANDS = ../commands/chset/chset.cmd ../commands/date/date.cmd \
     ../commands/initdir/initdir.cmd ../commands/ren/ren.cmd \
     ../commands/sdir/sdir.cmd ../commands/set/set.cmd ../commands/show/show.cmd \
     ../commands/submit/submit.cmd ../commands/systat/systat.cmd \
-    ../commands/tod/tod.cmd ../commands/type/type.cmd ../commands/vcmode/vcmode.cmd
+    ../commands/tod/tod.cmd ../commands/type/type.cmd \
+    ../commands/vcmode/vcmode.cmd ../commands/dredix/dredix.cmd
 
 BASE_SYSTEM_COMMANDS = ../base/config.cmd ../base/function.cmd \
     ../base/pcetime.cmd ../base/sysdisk.cmd
@@ -25,7 +26,7 @@ TOOLS_COMMANDS = ../commands/asm86/asm86.cmd ../commands/asm80/asm80.cmd \
     ../commands/hexcom/hexcom.cmd ../commands/tod/tod.cmd ../boot/tcopy.cmd
 
 COMMAND_DIRS = chset date era help initdir pip ren sdir set show submit systat tod \
-    type vcmode asm86 asm80 ddt86 gencmd genccpm hexcom
+    type vcmode asm86 asm80 ddt86 gencmd genccpm hexcom dredix
 
 # Recurse so building directly in media/ picks up changes to included sources.
 prepare:
@@ -79,7 +80,7 @@ check-media: all
 check: test
 
 check-qemu: check-media
-	$(PYTHON) boot_check.py
+	$(PYTHON) ../tools/boot_check.py
 
 test: ccpm86.img ccpmtest.img
 	./ccpm86

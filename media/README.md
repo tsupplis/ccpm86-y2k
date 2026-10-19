@@ -1,7 +1,7 @@
 # Reproducible 320 KB media
 
 Run `make` here (or `make -C media` from the repository root). The build uses
-`base.img`, the supplied working **physical/CHS** 320 KB floppy, as its boot
+`base.img`, the empty **physical/CHS** 320 KB floppy with its working boot track, as its boot
 loader template. Keep that input file: it is never modified or removed by
 `make clean`. The loader does not need rebuilding for this media target.
 
@@ -9,9 +9,7 @@ The build:
 
 1. Builds the commands, console modules, RSPs, and `GENCCPM`, then generates
    `kernel/sysgen/ccpm.sys`. It also builds `HELP.HLP` from `HELP.DAT`.
-2. Runs `../tools/cpm86twist.py untwist` on `base.img`, preserves its 4 KB
-   boot track, removes its user-0 files with `cpmrm`, and twists the
-   result into `ccpm86base.img`.
+2. Copies the empty `base.img` template to `ccpm86base.img`.
 3. Untwists that empty base, populates it with **cpmtools format
    `ccpm86-320`**, then twists
    it back to physical order. Do not run cpmtools directly on a raw image.
@@ -19,9 +17,11 @@ The build:
 Outputs (each exactly 327,680 bytes):
 
 - `ccpm86.img`: rebuilt kernel, startup clock display, everyday commands,
-  and the indexed help file. `PIP.CMD` is the CP/M-oriented PIP3 build.
+  the indexed help file, and CONFIG, FUNCTION, PCETIME, and SYSDISK from `../base/`.
+  `PIP.CMD` is the CP/M-oriented PIP3 build.
 - `ccpmtools.img`: the same kernel plus assemblers, debugger, generators,
-  HEXCOM, PIP, TOD, and TCOPY. This disk can also boot by itself.
+  HEXCOM, PIP, TOD, and TCOPY, plus DSKMAINT, HDMAINT, and SETUP from
+  `../base/`. This disk can also boot by itself.
 - `ccpmtest.img`: empty scratch disk, created by `make ccpmtest.img` or
   `make test`.
 

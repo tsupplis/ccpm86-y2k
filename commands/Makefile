@@ -1,6 +1,6 @@
 SUBDIRS=tod asm86 ddt86 submit chset initdir pip era sdir ed \
     set show date gencmd dir ren vcmode type help systat \
-    genccpm asm80 hexcom
+    genccpm asm80 hexcom dredix
 
 DISTDIR=dist
 DISTZIP=dist.zip

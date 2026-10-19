@@ -1,0 +1,116 @@
+#!/usr/bin/env python3
+"""Boot both media images in an isolated QEMU VM and exercise the console."""
+import json
+from pathlib import Path
+import re
+import select
+import shutil
+import subprocess
+import tempfile
+import time
+
+MEDIA = Path(__file__).resolve().parent.parent / 'media'
+
+
+def check(image, second):
+    qemu = shutil.which('qemu-system-i386')
+    if not qemu:
+        raise SystemExit('boot check requires qemu-system-i386')
+    with tempfile.TemporaryDirectory(prefix='ccpm-boot-') as temporary:
+        memory = Path(temporary) / 'video.bin'
+        with (Path(temporary) / 'qemu.log').open('w') as log:
+            args = [qemu, '-machine', 'pc', '-accel', 'tcg', '-m', '16',
+                    '-display', 'none', '-serial', 'none', '-monitor', 'none',
+                    '-qmp', 'stdio', '-net', 'none', '-boot', 'a',
+                    '-no-fd-bootchk', '-no-reboot', '-snapshot',
+                    '-rtc', 'base=2026-10-19T12:34:56,clock=vm']
+            for index, disk in enumerate((image, second)):
+                args += ['-drive', f'file={disk},format=raw,if=floppy,index={index}']
+            process = subprocess.Popen(args, stdin=subprocess.PIPE,
+                                       stdout=subprocess.PIPE, stderr=log, bufsize=0)
+            def receive():
+                if not select.select([process.stdout], [], [], 10)[0]:
+                    raise RuntimeError('QEMU monitor timed out')
+                line = process.stdout.readline()
+                if not line:
+                    raise RuntimeError('QEMU exited before completing the boot check')
+                return json.loads(line)
+
+            def command(name, arguments=None):
+                request = {'execute': name, 'arguments': arguments or {}}
+                process.stdin.write((json.dumps(request) + '\n').encode())
+                while True:
+                    reply = receive()
+                    if 'error' in reply:
+                        raise RuntimeError(reply['error'])
+                    if 'return' in reply:
+                        return reply['return']
+
+            def hmp(text):
+                return command('human-monitor-command', {'command-line': text})
+
+            def screen():
+                hmp(f'pmemsave 0xb8000 4000 "{memory}"')
+                data = memory.read_bytes()
+                text = '\n'.join(''.join(chr(c) if 32 <= c < 127 else ' '
+                                        for c in data[row * 160:row * 160 + 160:2])
+                                 for row in range(25))
+                return text, data
+
+            def wait_for(predicate, seconds=25):
+                end = time.monotonic() + seconds
+                while time.monotonic() < end:
+                    text, data = screen()
+                    if predicate(text):
+                        return text, data
+                    if 'Interrupt from' in text or 'Read Error' in text:
+                        raise RuntimeError(text)
+                    time.sleep(.25)
+                raise RuntimeError('Boot/command timed out:\n' + screen()[0])
+
+            def type_command(text):
+                for char in text:
+                    keys = {'\n': 'ret', ' ': 'spc', '.': 'dot',
+                            '*': 'shift-8', '[': 'bracket_left', ']': 'bracket_right'}
+                    hmp('sendkey ' + keys.get(char, char))
+                    time.sleep(.08)
+
+            try:
+                receive()
+                command('qmp_capabilities')
+                text, data = wait_for(lambda t: re.search(r'^A>\s*$', t, re.M)
+                                     and '10/19/26' in t and 'Console=0' in t)
+                assert 0x0e in data[3841:4000:2], 'status line is not bright yellow'
+                type_command('dir\n')
+                wait_for(lambda t: 'CCPM' in t and 'SYS' in t and 'PIP' in t)
+                if image.name == 'ccpm86.img':
+                    wait_for(lambda t: re.search(r'^A>\s*$', t, re.M))
+                    for tail in ('sdir', 'sdir *.cmd', 'sdir [size]'):
+                        type_command(tail + '\n')
+                        text, _ = wait_for(lambda t: 'Files Found' in t
+                                           and re.search(r'^A>\s*$', t, re.M))
+                        assert 'Illegal command tail' not in text, text
+                        assert 'SDIR' in text, text
+                    print(f'{image.name}: SDIR empty tail, wildcard and options passed')
+                print(f'{image.name}: PASS (two drives, A> prompt, RTC, yellow status, DIR)')
+            finally:
+                process.terminate()
+                try:
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait()
+
+
+if __name__ == '__main__':
+    system = (MEDIA.parent / 'kernel/sysgen/ccpm.sys').read_bytes()
+    code_size = int.from_bytes(system[1:3], 'little') * 16
+    data_size = int.from_bytes(system[10:12], 'little') * 16
+    assert data_size <= 65536, 'CCPM.SYS data/RSP area exceeds 64K'
+    data = system[128 + code_size:128 + code_size + data_size]
+    flags = int.from_bytes(data[0x56:0x58], 'little')
+    count = data[0x4a]
+    assert data[flags:flags + count * 3] == b'\xff' * (count * 3), \
+        'GENCCPM generated an invalid RTM flag table'
+    check(MEDIA / 'ccpm86.img', MEDIA / 'ccpmtools.img')
+    check(MEDIA / 'ccpmtools.img', MEDIA / 'ccpm86.img')
