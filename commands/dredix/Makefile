@@ -15,7 +15,7 @@ dredix.cmd: ed.obj common.obj ekey.obj ebuf.obj ecmdglb.obj ecmdio.obj epat.obj 
 	$(DRLINK) '$(basename $@)[input]'
 	$(CMDINFO) $@
 
-$(patsubst %.c,%.obj,$(filter-out iosubs.c,$(wildcard *.c))): $(wildcard *.h)
+$(patsubst %.c,%.obj,$(wildcard *.c)): $(wildcard *.h)
 
 dredix.inp: Makefile
 	printf '%s\r\n' 'dredix=ed,' 'common,' 'ekey,' 'ebuf,' 'ecmdglb,' \

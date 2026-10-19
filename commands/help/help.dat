@@ -730,6 +730,8 @@
 
   Explanation:
 
+  This build displays CONCURRENT CP/M-86 PIP VERSION 3.1N.
+
   The file copy program  PIP  copies  files,  combines  files,  and
   transfers  files  between  disks,  printers,  consoles,  or other
   devices attached to your computer.  The  first  filespec  is  the
@@ -762,7 +764,7 @@
 
        A>PIP b:=draft.*
        A>PIP b:=*.*
-       B>PIP b:=c:.*.*
+       B>PIP b:=c:*.*
        C>PIP b:=*.txt[g5]
        C>PIP a:=*.cmd[wr]
        B>PIP a:[g3]=c:*.*
@@ -812,6 +814,11 @@
   V    Verify that data has been written correctly.
   W    Write over Read Only files without console query.
   Z    Zero the parity bit.
+
+  [A] and [C] apply to explicit filenames as well as wildcards.
+
+  With [H] or [I], the first printable character of each HEX
+  record must be a colon (:).
 
   All  options  except  C,G,K,O,R,V  and  W  force  an  ASCII  file
   transfer, character by character, terminated by a ^Z.

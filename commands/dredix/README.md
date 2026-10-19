@@ -1,7 +1,7 @@
 # DREDIX on Concurrent CP/M-86 3.1
 
-Build with `make`. The build generates its CRLF linker input file; the old
-XIOS and screen-copy assembly helpers are not linked.
+Build with `make`. The build generates its CRLF linker input file.
+Only the BDOS keyboard and display backends are built.
 
 The keyboard uses BDOS 6 and the console's non-expanded function-key codes.
 F1/F2 select editor windows, F7 opens help, F8 marks blocks, Alt-W saves,

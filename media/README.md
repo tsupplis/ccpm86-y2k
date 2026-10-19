@@ -18,7 +18,7 @@ Outputs (each exactly 327,680 bytes):
 
 - `ccpm86.img`: rebuilt kernel, startup clock display, everyday commands,
   the indexed help file, DREDIX, CONFIG, and SYSDISK.
-  `PIP.CMD` is the CP/M-oriented PIP3 build.
+  `PIP.CMD` is the PIP4 build with the Concurrent CP/M-86 `3.1N` banner.
 - `ccpmtools.img`: the same kernel plus assemblers, debugger, generators,
   HEXCOM, PIP, TOD, TCOPY, and SYSTAT, plus the other original utilities
   in `../base/`. This disk can also boot by itself.

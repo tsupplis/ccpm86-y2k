@@ -45,7 +45,7 @@ ccpm86base.img: base.img diskdefs ../tools/cpm86twist.py Makefile prepare
 ccpm86.img: ccpm86base.img startup.0 $(BASE_SYSTEM_COMMANDS) Makefile prepare
 	$(TWIST) untwist ccpm86base.img $@.logical.tmp
 	$(CPMCP) $@.logical.tmp ../kernel/sysgen/ccpm.sys startup.0 $(SYSTEM_COMMANDS) $(BASE_SYSTEM_COMMANDS) 0:
-	$(CPMCP) $@.logical.tmp ../commands/pip/pip3.cmd 0:PIP.CMD
+	$(CPMCP) $@.logical.tmp ../commands/pip/pip4.cmd 0:PIP.CMD
 	cpmls -F -f $(FORMAT) $@.logical.tmp '0:*.*'
 	$(TWIST) twist $@.logical.tmp $@.tmp
 	mv $@.tmp $@
@@ -54,7 +54,7 @@ ccpm86.img: ccpm86base.img startup.0 $(BASE_SYSTEM_COMMANDS) Makefile prepare
 ccpmtools.img: ccpm86base.img startup.0 $(BASE_TOOLS_COMMANDS) Makefile prepare
 	$(TWIST) untwist ccpm86base.img $@.logical.tmp
 	$(CPMCP) $@.logical.tmp ../kernel/sysgen/ccpm.sys startup.0 $(TOOLS_COMMANDS) $(BASE_TOOLS_COMMANDS) 0:
-	$(CPMCP) $@.logical.tmp ../commands/pip/pip3.cmd 0:PIP.CMD
+	$(CPMCP) $@.logical.tmp ../commands/pip/pip4.cmd 0:PIP.CMD
 	cpmls -F -f $(FORMAT) $@.logical.tmp '0:*.*'
 	$(TWIST) twist $@.logical.tmp $@.tmp
 	mv $@.tmp $@

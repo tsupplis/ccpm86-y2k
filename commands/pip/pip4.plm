@@ -101,7 +101,7 @@ DECLARE COPYRIGHT(*) BYTE DATA (
 $if cpm3
         ' (12/28/84) CP/M 3 PIP VERS 3.3 ');
 $else
-        ' (04/25/85) CCP/M-86 PIP VERS 4.1 ');
+        ' (04/25/85) CCP/M-86 PIP VERS 3.1N ');
 $endif
 
 
@@ -1852,7 +1852,7 @@ $endif
 $if cpm3
             call printx(.('CP/M 3 PIP VERSION 3.3$'));
 $else
-            call printx(.('CONCURRENT PIP VERSION 4.1$'));
+            call printx(.('CONCURRENT CP/M-86 PIP VERSION 3.1N$'));
 $endif
             call crlf;
             end;
