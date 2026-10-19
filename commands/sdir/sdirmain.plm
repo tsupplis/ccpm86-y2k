@@ -519,6 +519,8 @@ plmstart:
     
     /* note - initialized declarations set defaults */
     cur$drv = get$cur$drv;
+    /* CP/M supplies a length-prefixed tail; the scanner expects a zero. */
+    buff(double(buff(0)) + 1) = 0;
     call scan$init(.pcb);
     call scan(.pcb);
     no$page$mode = false; /********  getscbbyte(nopage$mode$offset); ***whf***/

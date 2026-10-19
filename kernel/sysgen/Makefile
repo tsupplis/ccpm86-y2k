@@ -24,40 +24,40 @@ rtm.con: ../con/rtm.con
 sup.con: ../con/sup.con
 	@cp $< .
 
-sysdat.con: ../con/sysdat.con .
+sysdat.con: ../con/sysdat.con
 	@cp $< .
 
-xios.con: ../con/xios.con .
+xios.con: ../con/xios.con
 	@cp $< .
 
-abort.rsp:
-	@cp ../rsp*/abort.rsp .
+abort.rsp: ../rsp2/abort.rsp
+	@cp $< .
 
-clock.rsp:
-	@cp ../rsp*/clock.rsp .
+clock.rsp: ../rsp2/clock.rsp
+	@cp $< .
 
-dir.rsp:
-	@cp ../rsp*/dir.rsp .
+dir.rsp: ../rsp2/dir.rsp
+	@cp $< .
 
-echo.rsp:
-	@cp ../rsp*/echo.rsp .
+echo.rsp: ../rsp2/echo.rsp
+	@cp $< .
 
-pin.rsp:
-	@cp ../rsp*/pin.rsp .
+pin.rsp: ../rsp1/pin.rsp
+	@cp $< .
 
-serin.rsp:
-	@cp ../rsp*/serin.rsp .
+serin.rsp: ../rsp1/serin.rsp
+	@cp $< .
 
-serout.rsp:
-	@cp ../rsp*/serout.rsp .
+serout.rsp: ../rsp1/serout.rsp
+	@cp $< .
 
-tmp.rsp:
-	@cp ../rsp*/tmp.rsp .
+tmp.rsp: ../rsp1/tmp.rsp
+	@cp $< .
 
-vout.rsp:
-	@cp ../rsp*/vout.rsp .
+vout.rsp: ../rsp1/vout.rsp
+	@cp $< .
 
-ccpm.sys: genccpm.in $(CONS) $(RSPS)
+ccpm.sys: ../../commands/genccpm/genccpm.cmd genccpm.in $(CONS) $(RSPS)
 	@emu2 ../../commands/genccpm/genccpm.cmd < genccpm.in
 	@cmdinfo ccpm.sys
 

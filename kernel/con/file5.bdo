@@ -134,6 +134,8 @@ endif
 	push es
 	pop ds! pop es			;restore DS and ES
 	mov byte ptr tod+4,0
+	mov al,io_setrtc		; persist time when BIOS RTC is available
+	call xiosif
 	popf
 	ret
 

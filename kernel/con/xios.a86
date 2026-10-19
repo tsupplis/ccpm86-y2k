@@ -45,6 +45,8 @@ include		xfloppy.lib	; floppy, mdisk, disk error handling
 
 include		xhard.lib	; XT hard disk, FIDDS
 
+include		xrtc.lib	; BIOS RTC read/write and calendar conversion
+
 include		xinit.lib	; startup, hardware init, int vectors
 
 	end

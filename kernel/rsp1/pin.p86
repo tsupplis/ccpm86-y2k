@@ -32,7 +32,7 @@ declare ncopies byte external,   /* copy number of this process, corresponds */
         cnsnum byte at(@ncopies);/* with physical console number */
 declare himark byte;             /* total physical consoles for this PIN */
 declare lomark byte;             /* first virtual console for this PIN   */
-declare ctrlC    lit '3';        /* some ASCII codes */
+/* ctrlC is already declared by comlit.lit. */
 declare ctrlD    lit '4';
 declare bell     lit '7';
 declare ctrlO    lit '15';

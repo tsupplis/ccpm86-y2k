@@ -11,6 +11,10 @@ SNIPPETS=
 
 all: $(TOOLS) $(SNIPPETS)
 
+help.hlp: help.cmd help.dat
+	emu2 help.cmd '[C]'
+	@test -s $@
+
 # BBB and MMM for gencmd's data[bBBB,mMMM,xfff], derived from help.mp2:
 #   BBB = start of dats segment / 16 (e.g. 1000)
 #   MMM = (start of memory segment - start of dats segment) / 16
@@ -42,5 +46,5 @@ help.loc: help.obj scd.obj
 	$(INTEL_PLM86) $^ debug 'optimize(3)' xref
 
 clean:
-	rm -f *.sys *.loc *.cmd *.obj *.h86 *.sym *.lin *.lst *.prn ccpmtest.img
+	rm -f help.hlp *.sys *.loc *.cmd *.obj *.h86 *.sym *.lin *.lst *.prn ccpmtest.img
 	rm -f *.loc *.mp? *.lnk

@@ -63,6 +63,7 @@ INIT:
 	call	check_hi_mem		; from C000 up
 	call	ndp_init		; check for an 8087
 	call	compaq			; do before any video setup
+	call	detect_cursor		; match active EGA/VGA character height
 	call	fix_crt			; mono/color vs_ variables
 	call	fix_disk_tables		; match disk tables to equip
 	call	printer_init		; reset the parallel printers
@@ -73,6 +74,7 @@ INIT:
 	call	try_mdisk		; done after setup data read
 	call	trim_memory		; fix up the partition list
 	call	do_config		; initial serial port init
+	call	rtc_start		; import BIOS RTC before replacing vectors
 	call	do_interrupts		; do all of the int stuff
 	call	sign_on			; print signon message
 	retf				; initializaiton done
@@ -89,6 +91,8 @@ set_sys_vars:
 	mov ax,2[bx]			;get the segment
 	mov cs:supervisor_s,ax		;save it
 	mov tod_hour,0			;start with zero time
+	mov tod_min,0
+	mov tod_sec,0
 	mov tod_day,0890h		;Jan 1, 1984
 	mov boot_disk,dl		;ros code for booter
 	ret
@@ -236,12 +240,53 @@ compaq:
 
 	mov	var_cursor,compaq_cursor
 	mov	var_sync,0	; no retrace sync
-	mov	sl_attrib,0Fh	; enhanced white
+	mov	sl_attrib,0Eh	; bright yellow on color displays
 	mov	alpha_str,offset compaq_str
 compaq_done:
 	ret			; all for now
 
 compaq_name	db	'COMPAQ'
+
+; Match the bottom two scan lines to the active enhanced adapter.
+; Legacy CGA/MDA and the Compaq override retain their separate defaults.
+detect_cursor:
+ push es
+ mov ah,12h
+ mov bx,0FF10h
+ int 10h
+ cmp bh,0FFh
+ je detect_cursor_done
+ cmp bh,1
+ ja detect_cursor_done
+ mov ax,40h
+ mov es,ax
+ mov dx,es:.063h
+ cmp dx,mono_port
+ je detect_cursor_read
+ cmp dx,color_port
+ jne detect_cursor_done
+detect_cursor_read:
+ mov al,9
+ out dx,al
+ inc dx
+ in al,dx
+ and al,1Fh
+ cmp al,1
+ jb detect_cursor_done
+ mov ah,al
+ dec ah
+ cmp dx,mono_port+1
+ je detect_cursor_mono
+ mov var_cursor,ax
+ mov var_sync,0		;EGA/VGA memory needs no CGA snow avoidance
+ jmps detect_cursor_done
+detect_cursor_mono:
+ mov var_mono_cursor,ax
+detect_cursor_done:
+ pop es
+ ret
+
+
 
 
 ;	set up the mono/color vs_ variables
@@ -270,10 +315,7 @@ fix_crt2:
 
 fix_disk_tables:
 	mov	ax,num_flop		; actual number of floppies
-	dec	ax
-	mov	sys_disk,al		; system disk = top flop
-	mov	temp_disk,al		; tempory disk too
-	inc	ax
+	; Keep the system and temporary drives selected by GENCCPM.
 	shl	al,1			; convert to word index
 	mov	di,ax			; point to first non-floppy
 
@@ -886,11 +928,13 @@ int_save_tbl	dw	single_step_interrupt
 		dw	hd_hard_interrupt
 		dw	async_int
 		dw	print_int
+		dw	1Ah		; BIOS RTC services
 		dw	hd_param_interrupt
 		dw	debugger_interrupt
 		dw	0FFFFh
 
 int_no_save	dw	hd_hard_interrupt
+		dw	1Ah		; BIOS RTC services
 		dw	hd_param_interrupt
 		dw	0FFFFh		; impossible code
 

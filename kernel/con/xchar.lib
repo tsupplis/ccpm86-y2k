@@ -586,6 +586,8 @@ sl_put1:
 	mov	dx,color_port+6	; crt status
 	mov	cx,3		; maximum wait
 
+	cmp	var_sync,0	;enhanced adapters need no snow avoidance
+	jz	sl_c_store
 	cli			;; hold the interrupts
 sl_c_norm1:
 	in	al,dx		;; wait for horiz retrace
@@ -595,6 +597,7 @@ sl_c_norm2:
 	in	al,dx		;; wait for a fresh
 	test	al,hrt		;;   horiz retrace
 	jz	sl_c_norm2
+sl_c_store:
 	xchg	ax,bx		;; char to ax
 	stosw			;; store and bump di
 	sti			;; ints back on
@@ -701,7 +704,7 @@ sline_locked	db	0	; semaphore for status line code
 sl_clk_flag	db	0FFh	; do we show the clock?
 sl_exit_value	db	0	; restore semaphore on exit
 
-sl_attrib	db	0Bh	; enhanced cyan for PC
+sl_attrib	db	0Eh	; bright yellow on black (mono: bright white)
 sl_off		dw	0ffffh	; offset of source
 sl_seg		dw	0	; segment of source
 sl_get_char	rw	1	; variable fetch vector

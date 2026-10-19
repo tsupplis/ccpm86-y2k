@@ -99,7 +99,7 @@ VOID gentables()
 	QCB qcb;			/*   "    queue control block */
 	CCB ccb;			/*   "    channel control block */
 	LOCK lock;			/*   "    lock list item */
-	FLAG flg;			/*   "    flag item */
+	BYTE flg[3];			/* on-disk flag: PD word, ignore byte */
 	SATITEM sat;			/*   "    sub allocation table item */
 
 	if(verbose) printf("Generating tables\n");
@@ -173,8 +173,10 @@ VOID gentables()
 
         *sd_xpcns = xt.xt_xpcns;        /* # physical consoles;FMB */
 	*sd_flags = doffset;		/* FLAG TABLE */
-	flg.fl_status = -1;
-	flg.fl_pd = -1;
+	/* Serialize the RTM three-byte flag explicitly, without C struct layout. */
+	flg[0] = 0xff;
+	flg[1] = 0xff;
+	flg[2] = 0xff;
 	for( count= *sd_nflags; count>0; --count ) {
 	    doffset += datwrite(&flg,sizeof(flg));
 	}

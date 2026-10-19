@@ -480,7 +480,7 @@ function_table:
 	dw	ww_wrap_column		;22 set wrap around column
 	dw	ww_full_window		;23 same as full key
 	dw	ww_switch_display	;24 mono/color monitors
-	dw	io_ret			;25 dummy
+	dw	io_rtc_set		;25 persist system date/time in BIOS RTC
 	dw	io_ret			;26 dummy
 	dw	io_ret			;27 dummy
 	dw	io_ret			;28 dummy

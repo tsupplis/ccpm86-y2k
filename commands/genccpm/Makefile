@@ -71,8 +71,8 @@ genccpm.cmd: genc1.obj genc2.obj genc3.obj genc4.obj genc5.obj genc6.obj
 %.obj: %.a86
 	$(ASM86) $^
 
-%.obj: %.c
-	$(DRC86) -o$@ $^
+%.obj: %.c genccpm.h portab.h machine.h
+	$(DRC86) -o$@ $<
 
 clean:
 	rm -f *.sys *.cmd *.obj *.h86 *.sym *.lin *.lst *.prn *.map

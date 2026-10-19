@@ -19,6 +19,7 @@ io_read		equ	10
 io_write	equ	11
 io_flush	equ	12
 io_polldev	equ	13
+io_setrtc	equ	25		; persist system date/time in BIOS RTC
 io_int13_read	equ	35
 io_int13_write	equ	36
 

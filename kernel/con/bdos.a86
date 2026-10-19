@@ -24,7 +24,7 @@
 	eject ! include xioscb.def
 	eject 
 
-PCMODE	equ	true
+PCMODE	equ	false		;standalone CP/M build, no DOS filesystem objects
 
 	        include bdosif.bdo	; system initialization
 	eject ! include file1.bdo	; file system part 1

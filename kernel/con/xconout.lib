@@ -23,7 +23,7 @@ mono_seg	equ	0B000h	; monochrome memory segment
 color_seg	equ	0B800h	; color memory segment
 mono_port	equ	03B4h	; monochrome controller addr
 color_port	equ	03D4h	; color controller addr
-mono_cursor	equ	0B0Ch	; monochrome cursor code
+mono_cursor	equ	0C0Dh	; bottom two scan lines of MDA cell
 color_cursor	equ	0607h	; color cursor code
 compaq_cursor	equ	0B0Ch	; hi-res cursor on color card
 
@@ -1036,7 +1036,8 @@ set_color:
 set_mono:
 	mov	vs_crt_seg,mono_seg
 	mov	vs_xlat,offset mono_xlat
-	mov	vs_cur_type,mono_cursor
+	mov	ax,var_mono_cursor
+	mov	vs_cur_type,ax
 	and	vs_mode,not sync_bit
 	mov	al,vs_bit
 	or	mono_bits,al	; add to mono vc's
@@ -1277,7 +1278,7 @@ new_mon2:
 	jz	new_mon3	;;   then skip erase
 
 	mov	dh,color_bits	;; which vc's are color
-	mov	dl,sync_bit	;; retrace sync
+	mov	dl,var_sync	;; only legacy CGA needs retrace sync
 	mov	bx,color_seg 
 	call	erase_crt	;; clear color screen
 new_mon3:
@@ -2257,6 +2258,7 @@ d_lines		dw	0FCDh,0FBAh
 ;	variable video params for the compaq
 
 var_cursor	dw	color_cursor	; hi or low res
+var_mono_cursor dw mono_cursor	; MDA or enhanced monochrome
 var_sync	db	sync_bit	; to sync or not
 		db	0DBh		; pad
 

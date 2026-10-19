@@ -1,0 +1,301 @@
+;
+; BIOS RTC support, independently implemented from the INT 1Ah interface.
+; CP/M day 1 is 1978-01-01.  Keep the software clock if no RTC is available.
+; All BIOS calls are made from initialization or process context, never IRQ0.
+;
+reorg_rtc equ offset $
+ cseg
+ org reorg_rtc
+
+; AL packed BCD -> AX binary; carry set for an invalid digit.
+rtc_unbcd:
+ mov ah,al
+ and al,0Fh
+ cmp al,9
+ ja rtc_bad_bcd
+ mov cl,4
+ shr ah,cl
+ cmp ah,9
+ ja rtc_bad_bcd
+ mov cl,al
+ mov al,ah
+ mov ah,10
+ mul ah
+ add al,cl
+ clc
+ ret
+rtc_bad_bcd:
+ stc
+ ret
+
+; AX (0..99) -> AL packed BCD.
+rtc_bcd:
+ mov cl,10
+ div cl
+ mov cl,4
+ shl al,cl
+ or al,ah
+ ret
+
+; SI Gregorian year -> AX days in year (full century rule).
+rtc_year_days:
+ mov ax,365
+ test si,3
+ jnz rtc_year_done
+ push bx
+ push dx
+ mov ax,si
+ xor dx,dx
+ mov bx,100
+ div bx
+ or dx,dx
+ jnz rtc_leap
+ test ax,3
+ jnz rtc_common
+rtc_leap:
+ mov ax,366
+ jmps rtc_year_pop
+rtc_common:
+ mov ax,365
+rtc_year_pop:
+ pop dx
+ pop bx
+rtc_year_done:
+ ret
+
+; SI year, DI month (1..12) -> AX month length.
+rtc_month_days:
+ mov bx,offset rtc_months-1
+ add bx,di
+ xor ax,ax
+ mov al,cs:[bx]
+ cmp di,2
+ jne rtc_month_done
+ call rtc_year_days
+ sub ax,337
+rtc_month_done:
+ ret
+rtc_months db 31,28,31,30,31,30,31,31,30,31,30,31
+
+; Read a coherent date/time/date snapshot, with bounded retries.
+rtc_start:
+ pushf
+ push ax ! push bx ! push cx ! push dx
+ push si ! push di ! push bp ! push es
+ xor ax,ax
+ mov es,ax
+ mov ax,es:.068h
+ or ax,es:.06Ah
+ jnz rtc_vector_ok
+ jmp rtc_start_done
+rtc_vector_ok:
+ mov bp,3
+rtc_read_again:
+ mov cx,0FFFFh
+ mov dx,cx
+ mov ah,4
+ stc
+ int 1Ah
+ jnc rtc_date_read
+ jmp rtc_start_done
+rtc_date_read:
+ mov rtc_date_c,cx
+ mov rtc_date_d,dx
+ mov cx,0FFFFh
+ mov dx,cx
+ mov ah,2
+ stc
+ int 1Ah
+ jc rtc_start_done
+ mov rtc_time_c,cx
+ mov rtc_time_d,dx
+ mov ah,4
+ stc
+ int 1Ah
+ jc rtc_start_done
+ cmp cx,rtc_date_c
+ jne rtc_retry
+ cmp dx,rtc_date_d
+ je rtc_decode
+rtc_retry:
+ dec bp
+ jnz rtc_read_again
+ jmps rtc_start_done
+rtc_decode:
+ call rtc_decode_date
+ jc rtc_start_done
+ mov rtc_days,ax
+ mov al,byte ptr rtc_time_c+1
+ call rtc_unbcd
+ jc rtc_start_done
+ cmp ax,23
+ ja rtc_start_done
+ mov al,byte ptr rtc_time_c
+ call rtc_unbcd
+ jc rtc_start_done
+ cmp ax,59
+ ja rtc_start_done
+ mov al,byte ptr rtc_time_d+1
+ call rtc_unbcd
+ jc rtc_start_done
+ cmp ax,59
+ ja rtc_start_done
+ cli
+ mov ax,rtc_days
+ mov tod_day,ax
+ mov ax,rtc_time_c
+ mov tod_hour,ah
+ mov tod_min,al
+ mov ax,rtc_time_d
+ mov tod_sec,ah
+ mov rtc_present,1
+ mov rtc_dst,al
+rtc_start_done:
+ pop es ! pop bp ! pop di ! pop si
+ pop dx ! pop cx ! pop bx ! pop ax
+ popf
+ ret
+
+; Stored BIOS date -> AX CP/M day, carry on invalid/out of range.
+rtc_decode_date:
+ mov al,byte ptr rtc_date_c+1
+ call rtc_unbcd
+ jc rtc_date_bad
+ mov bx,100
+ mul bx
+ mov si,ax
+ mov al,byte ptr rtc_date_c
+ call rtc_unbcd
+ jc rtc_date_bad
+ add si,ax
+ cmp si,1978
+ jb rtc_date_bad
+ cmp si,2157
+ ja rtc_date_bad
+ mov al,byte ptr rtc_date_d+1
+ call rtc_unbcd
+ jc rtc_date_bad
+ cmp ax,1
+ jb rtc_date_bad
+ cmp ax,12
+ ja rtc_date_bad
+ mov di,ax
+ mov al,byte ptr rtc_date_d
+ call rtc_unbcd
+ jc rtc_date_bad
+ cmp ax,1
+ jb rtc_date_bad
+ mov bp,ax
+ call rtc_month_days
+ cmp bp,ax
+ ja rtc_date_bad
+ mov dx,bp
+ mov bp,di
+ mov di,1
+rtc_sum_month:
+ cmp di,bp
+ je rtc_sum_year_init
+ call rtc_month_days
+ add dx,ax
+ inc di
+ jmps rtc_sum_month
+rtc_sum_year_init:
+ mov bp,si
+ mov si,1978
+rtc_sum_year:
+ cmp si,bp
+ je rtc_date_ok
+ call rtc_year_days
+ add dx,ax
+ jc rtc_date_bad
+ inc si
+ jmps rtc_sum_year
+rtc_date_ok:
+ mov ax,dx
+ clc
+ ret
+rtc_date_bad:
+ stc
+ ret
+
+; XIOS function 25: persist the current system time after BDOS 104.
+; Preserve registers/flags; the existing software clock remains authoritative.
+io_rtc_set:
+ pushf
+ cli
+ push ax ! push bx ! push cx ! push dx
+ push si ! push di ! push bp
+ cmp rtc_present,0
+ je rtc_set_done
+ mov bp,tod_day
+ or bp,bp
+ jz rtc_set_done
+ dec bp
+ mov si,1978
+rtc_find_year:
+ call rtc_year_days
+ cmp bp,ax
+ jb rtc_find_month_init
+ sub bp,ax
+ inc si
+ jmps rtc_find_year
+rtc_find_month_init:
+ mov di,1
+rtc_find_month:
+ call rtc_month_days
+ cmp bp,ax
+ jb rtc_encode_date
+ sub bp,ax
+ inc di
+ jmps rtc_find_month
+rtc_encode_date:
+ mov ax,si
+ xor dx,dx
+ mov bx,100
+ div bx
+ push dx
+ call rtc_bcd
+ mov ch,al
+ pop ax
+ push cx
+ call rtc_bcd
+ pop cx
+ mov cl,al
+ push cx
+ mov ax,di
+ call rtc_bcd
+ mov dh,al
+ mov ax,bp
+ inc ax
+ push dx
+ call rtc_bcd
+ pop dx
+ mov dl,al
+ pop cx
+ mov ah,5
+ stc
+ int 1Ah
+ jc rtc_set_done
+ mov ch,tod_hour
+ mov cl,tod_min
+ mov dh,tod_sec
+ mov dl,rtc_dst
+ mov ah,3
+ stc
+ int 1Ah
+rtc_set_done:
+ pop bp ! pop di ! pop si
+ pop dx ! pop cx ! pop bx ! pop ax
+ popf
+ ret
+
+reorg_rtc_data equ offset $
+ dseg
+ org reorg_rtc_data
+rtc_present db 0
+rtc_dst db 0
+rtc_date_c rw 1
+rtc_date_d rw 1
+rtc_time_c rw 1
+rtc_time_d rw 1
+rtc_days rw 1
