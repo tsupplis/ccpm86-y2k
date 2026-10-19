@@ -9,9 +9,16 @@ SNIPPETS=
 
 all: $(TOOLS) $(SNIPPETS)
 
-sysdisk.cmd: sysdisk.h86
+.PHONY: all check clean
+.DELETE_ON_ERROR:
+
+sysdisk.cmd: sysdisk.h86 Makefile
 	$(GENCMD) $<
 	cmdinfo $@
+
+check: sysdisk.cmd ../../base/sysdisk.cmd
+	cmp sysdisk.cmd ../../base/sysdisk.cmd
+	@echo "SYSDISK: byte-identical to base/sysdisk.cmd"
 
 %.h86: %.a86
 	$(ASM86) $^

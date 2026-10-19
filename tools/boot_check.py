@@ -70,7 +70,7 @@ def check(image, second):
 
             def type_command(text):
                 for char in text:
-                    keys = {'\n': 'ret', ' ': 'spc', '.': 'dot',
+                    keys = {'\n': 'ret', ' ': 'spc', '.': 'dot', ':': 'shift-semicolon',
                             '*': 'shift-8', '[': 'bracket_left', ']': 'bracket_right'}
                     hmp('sendkey ' + keys.get(char, char))
                     time.sleep(.08)
@@ -105,7 +105,15 @@ def check(image, second):
                         assert 'Illegal command tail' not in text, text
                         assert 'SDIR' in text, text
                     print(f'{image.name}: SDIR empty tail, wildcard and options passed')
-                    type_command('dredix\n')
+                    type_command('sysdisk\n')
+                    wait_for(lambda t: 'System disk is A:' in t and re.search(r'^A>\s*$', t, re.M))
+                    type_command('sysdisk a:\n')
+                    wait_for(lambda t: 'System disk is A:' in t and re.search(r'^A>\s*$', t, re.M))
+                    type_command('sysdisk nonsense\n')
+                    wait_for(lambda t: 'Invalid drive code' in t and re.search(r'^A>\s*$', t, re.M))
+                    print(f'{image.name}: reconstructed SYSDISK query, set and invalid syntax passed')
+
+                    type_command('b:dredix\n')
                     type_command('hello\nworld')
                     wait_for(lambda t: t.startswith('hello')
                              and t.splitlines()[1].startswith('world'))
@@ -125,7 +133,7 @@ def check(image, second):
                     text, data = wait_for(lambda t: re.search(r'^A>\s*$', t, re.M))
                     assert 0x0e in data[3841:4000:2], 'editor changed status line color'
                     type_command('dir\n')
-                    wait_for(lambda t: 'CCPM' in t and 'SYS' in t and 'DREDIX' in t)
+                    wait_for(lambda t: 'CCPM' in t and 'SYS' in t and 'SYSDISK' in t)
                     print(f'{image.name}: DREDIX editing, navigation, delete/backspace and exit passed')
 
                 print(f'{image.name}: PASS (two drives, A> prompt, RTC, yellow status, DIR)')
