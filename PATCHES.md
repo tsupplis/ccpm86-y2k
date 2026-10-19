@@ -67,24 +67,25 @@ The functional kernel/RSP changes can be compared with commit `033212a`.
 Cross-OS Y2K compatibility, physical machines, and all imported development
 binaries are not exhaustively covered by the automated 3.1 guest checks.
 
-## Custom resident commands
+## TMP built-in commands
 
-`kernel/custrsps/` adds one shared queue-driven process each for `CLS` and
-`SYSDISK`. CLS outputs VT52 ESC-E; SYSDISK queries or changes the system drive
-(`SYSDISK A:`), rejecting invalid drives and changes while files are open.
-The reconstructed original SYSDISK.CMD remains available and byte-identical.
-The resident queue takes precedence over the disk command.
+`kernel/rsp1/tmp.a86` implements `CLS` and `SYSDISK` as TMP built-ins.
+CLS outputs VT52 ESC-E. SYSDISK queries or changes the system drive
+(`SYSDISK A:`), rejecting invalid syntax, unavailable drives, and changes while
+files are open. Device validation preserves TMP's default drive and error mode.
+An explicit drive or extension still selects an external command; the original
+SYSDISK.CMD remains available as a byte-identical reconstruction.
 
-| Command | Resident code | Resident data (including PD, UDA, stack and queue) | Total |
-| --- | ---: | ---: | ---: |
-| CLS | 80 bytes | 800 bytes | 880 bytes |
-| SYSDISK | 208 bytes | 944 bytes | 1,152 bytes |
+| Resource | Added cost |
+| --- | ---: |
+| Shared TMP code and constants, both commands | 384 bytes (paragraph aligned) |
+| Data per console | 0 bytes |
+| Extra processes, UDAs, stacks or queues | None |
 
-Together these reserve 2,032 bytes at boot, with no transient program partition
-needed per invocation. Both sleep on their command queues when idle. There is
-one resident instance per command, shared across consoles, rather than a copy
-per console. These commands target this 3.1 kernel's system-data layout.
+TMP's code group grows from 1,280 to 1,664 bytes; its per-console data remains
+624 bytes. This saves 1,136 bytes compared with the separate 1,520-byte RSPs.
+The obsolete `kernel/custrsps/` implementations are removed. The system-image
+recipe also removes stale CLS/SYSDISK RSP copies before GENCCPM scans the folder.
 
-The status line displays `Console N` when owned by TMP; application names still
-appear while applications own the console. The nine-character display field
-uses one previously blank column, preserving the other status fields.
+The status line displays `Terminal` when owned by TMP; application names still
+appear while applications own the console.

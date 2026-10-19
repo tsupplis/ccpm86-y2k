@@ -41,7 +41,6 @@ prepare:
 	$(MAKE) -C ../kernel/con all
 	$(MAKE) -C ../kernel/rsp1 all
 	$(MAKE) -C ../kernel/rsp2 all
-	$(MAKE) -C ../kernel/custrsps all
 	$(MAKE) -C ../kernel/sysgen all
 	$(MAKE) -C ../boot tcopy.cmd
 

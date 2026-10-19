@@ -9,7 +9,7 @@ system useful today and accessible to anyone interested in its history.
 
 | Goal | Distribution |
 | --- | --- |
-| Full source distribution | Kernel, eleven RSPs, most commands; gaps below |
+| Full source distribution | Kernel, nine RSPs, most commands; gaps below |
 | Additional tools | ASM80, HEXCOM, DREDIX, DR development chain, Microsoft BASIC 5.50A |
 | Y2K components | SDIR, DATE, SHOW, TOD for CCP/M-86 3.2 through Concurrent DOS 4.1; 3.1 fixes included |
 
@@ -28,12 +28,12 @@ system useful today and accessible to anyone interested in its history.
 
 ## Tools
 
-Format: [cpm86-kernel](../cpm86-kernel/README.md). **3.1** = rebuildable sources; SYSDISK: byte-identical CMD plus resident version.
+Format: [cpm86-kernel](../cpm86-kernel/README.md). **3.1** = rebuildable sources; SYSDISK: byte-identical CMD plus TMP built-in.
 
 | Tool | Binary (`base/`) | Source (`commands/`) |
 | --- | --- | --- |
 | `asm86` | — | 3.1 |
-| `cls` | — | Resident; VT52 ESC-E (`kernel/custrsps/`) |
+| `cls` | — | TMP built-in; VT52 ESC-E |
 | `chset` | — | 3.1 |
 | `config` | Original | — |
 | `date` | — | 3.1, Y2K patched |
@@ -57,7 +57,7 @@ Format: [cpm86-kernel](../cpm86-kernel/README.md). **3.1** = rebuildable sources
 | `setup` | Original | — |
 | `show` | — | 3.1, Y2K patched |
 | `submit` | — | ASM-86 source |
-| `sysdisk` | — | ASM-86 reconstruction; byte-identical to `sysdisk.ref` |
+| `sysdisk` | — | TMP built-in; CMD reconstruction byte-identical to `sysdisk.ref` |
 | `systat` | — | 3.1 |
 | `tcopy` | — | ASM-86 source in `boot/` |
 | `tod` | — | 3.1, Y2K patched |
