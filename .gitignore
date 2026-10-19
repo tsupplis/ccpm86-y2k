@@ -45,3 +45,7 @@ local/**
 !/base/*.cmd
 !/dev/*.cmd
 !/media/base.img
+
+# Source-built boot images.
+/boot/*.bin
+/boot/*.tmp

@@ -21,6 +21,7 @@ media: commands kernel boot
 	$(MAKE) -C media all
 
 check: all
+	$(MAKE) -C boot check
 	$(MAKE) -C commands/sysdisk check
 	$(MAKE) -C media check-media
 
@@ -31,12 +32,12 @@ test: all
 	$(MAKE) -C media test
 
 # Include tracked inputs and new sources, but no ignored build products.
-# Skip deleted paths awaiting a commit and the legacy generated boot/track0.
+# Skip deleted paths awaiting a commit.
 source-dist:
 	mkdir -p $(DISTDIR)
 	@git ls-files --cached --others --exclude-standard | LC_ALL=C sort -u | \
 	  while IFS= read -r source; do \
-	    if test -f "$$source" && test "$$source" != boot/track0; then \
+	    if test -f "$$source"; then \
 	      printf '%s\n' "$$source"; \
 	    fi; \
 	  done > $(DISTDIR)/source-files.txt

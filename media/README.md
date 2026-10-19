@@ -2,17 +2,18 @@
 
 Run `make` here, or `make -C media` from the repository root.
 Root `make dist` copies the three distribution images to the root alongside
-`y2k-dist.zip`.
+`y2k-dist.zip` and `disks.zip`.
 
 | Image | Bootable | Contents |
 | --- | --- | --- |
 | `ccpm86.img` | Yes | Kernel, stock commands, ED, HELP, SYSTAT, original configuration/maintenance utilities, source-rebuilt SYSDISK |
-| `ccpmtools.img` | Yes | Kernel, DREDIX, INITDIR, ASM86, DDT86, GENCMD, GENCCPM, TCOPY, PIP, TOD |
+| `ccpmtools.img` | Yes | Kernel, DREDIX, INITDIR, ASM86, DDT86, GENCMD, GENCCPM, PIP, TOD |
 | `ccpmdev.img` | No | RASM86, LINK86, LIB86, XREF86, SID86, CBAS86, CRUN86, Personal BASIC, Microsoft BASIC 5.50A, ASM80, HEXCOM, GENTAB |
 
 Each image is 327,680 bytes. `PIP.CMD` is PIP4 with the `3.1N` banner.
-`base.img` is an empty physical/CHS template preserving the working boot track;
-`make clean` leaves it intact. The older `dev/mbas522.cmd` remains an archive
+`base.img` is the empty physical/CHS filesystem template and original boot
+reference; `make clean` leaves it intact. Every generated image receives the
+source-built `../boot/boottrack.bin`, verified byte-for-byte against that reference. The older `dev/mbas522.cmd` remains an archive
 reference and is not placed on the developer disk.
 
 ## Build pipeline
@@ -20,14 +21,16 @@ reference and is not placed on the developer disk.
 | Step | Operation |
 | --- | --- |
 | Sources | Build commands, kernel components and all nine RSPs; run GENCCPM |
+| Boot | Assemble the boot sector and loader; build and verify the complete 4 KB track |
 | Reference check | Require rebuilt SYSDISK to match `../commands/sysdisk/sysdisk.ref` byte-for-byte |
 | Help | Compile `HELP.DAT` into indexed `HELP.HLP` |
-| Template | Copy the empty `base.img` to `ccpm86base.img` |
+| Template | Copy empty `base.img`, then install the source-built boot track |
 | Populate | Untwist → cpmtools format `ccpm86-320` → twist back |
-| Verify | Extract and compare every packaged file; compare boot tracks and sizes |
+| Verify | Extract and compare every packaged file; compare boot tracks with the source-built track and verify sizes |
 
-Recipes are in the Makefile. The only Python needed for assembly is the
-existing `../tools/cpm86twist.py`. Never use cpmtools directly on a physical
+Recipes are in the Makefiles. `../tools/h862bin.py` extracts the assembled
+boot binaries; `../tools/cpm86twist.py` converts floppy track order.
+[Boot sources and track layout](../boot/README.md). Never use cpmtools directly on a physical
 320 KB image: head 1 has reversed cylinder order.
 
 ## Run and verify

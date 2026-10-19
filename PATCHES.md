@@ -33,7 +33,8 @@ The functional kernel/RSP changes can be compared with commit `033212a`.
 | Three-byte RTM flags | `commands/genccpm/genc3.c` | Serialize each flag as explicit bytes `FF FF FF`. Compiler-dependent structure layout previously produced `00 FF FF`, allowing the scheduler to interpret FF00h as a process pointer. |
 | Kernel data size | `kernel/sysgen/genccpm.in` | Four directory buffers and two data buffers per shared pool keep data plus resident-process data within 64 KB. |
 | Rebuild dependencies | `kernel/con/Makefile`, `kernel/sysgen/Makefile` | Track included assembly and actual RSP sources; depend on GENCCPM so changed components regenerate the system image. |
-| Media construction | `media/Makefile`, `tools/cpm86twist.py` | Preserve the working boot track. Use CP/M logical track order for cpmtools, then restore physical CHS order, including reversed head-1 cylinders. |
+| Boot track | `boot/bootsect.a86`, `boot/loader.a86`, `boot/Makefile`, `tools/h862bin.py` | Rebuild all 4,096 bytes of the working boot track from reconstructed sources; match the local loader extent-counter value of 3. Remove the unrelated alternate loader and TCOPY. |
+| Media construction | `media/Makefile`, `tools/cpm86twist.py` | Install the verified source-built boot track. Use CP/M logical track order for cpmtools, then restore physical CHS order, including reversed head-1 cylinders. |
 
 ## Command changes
 
@@ -61,7 +62,7 @@ The functional kernel/RSP changes can be compared with commit `033212a`.
 | Check | Coverage |
 | --- | --- |
 | `make -C commands/sysdisk check` | Every byte of the reconstructed CMD, including its 128-byte header and padding. |
-| `make check` | Reconstructed SYSDISK, image geometry, original boot track, embedded kernel and expected payloads. |
+| `make check` | Reconstructed SYSDISK, image geometry, source-built boot track versus original reference, embedded kernel and expected payloads. |
 | `make check-qemu` | Both bootable disks, RTC startup, yellow status, direct/round-robin/keypad switching, SDIR empty/wildcard/options, SYSDISK query/set/syntax, and DREDIX editing/navigation/exit with console switching. |
 
 Cross-OS Y2K compatibility, physical machines, and all imported development

@@ -21,7 +21,7 @@ BASE_SYSTEM_COMMANDS = $(wildcard ../base/*.cmd)
 
 TOOLS_COMMANDS = ../commands/asm86/asm86.cmd ../commands/ddt86/ddt86.cmd \
     ../commands/gencmd/gencmd.cmd ../commands/genccpm/genccpm.cmd \
-    ../commands/tod/tod.cmd ../boot/tcopy.cmd ../commands/dredix/dredix.cmd \
+    ../commands/tod/tod.cmd ../commands/dredix/dredix.cmd \
     ../commands/initdir/initdir.cmd
 
 # Data-only developer disk; omit the older MBASIC 5.22 reference binary.
@@ -42,11 +42,16 @@ prepare:
 	$(MAKE) -C ../kernel/rsp1 all
 	$(MAKE) -C ../kernel/rsp2 all
 	$(MAKE) -C ../kernel/sysgen all
-	$(MAKE) -C ../boot tcopy.cmd
+	$(MAKE) -C ../boot check
 
-# base.img is the empty template with the original working boot track.
-ccpm86base.img: base.img diskdefs ../tools/cpm86twist.py Makefile prepare
+# prepare also builds and checks the source boot track for a direct media build.
+../boot/boottrack.bin: prepare
+	@test -f $@
+
+# Keep the empty filesystem template, but always install the source-built boot.
+ccpm86base.img: base.img ../boot/boottrack.bin diskdefs ../tools/cpm86twist.py Makefile prepare
 	cp base.img $@
+	dd if=../boot/boottrack.bin of=$@ bs=4096 count=1 conv=notrunc 2>/dev/null
 
 ccpm86.img: ccpm86base.img startup.0 $(BASE_SYSTEM_COMMANDS) Makefile prepare
 	$(TWIST) untwist ccpm86base.img $@.logical.tmp
@@ -97,10 +102,9 @@ check-media: all
 	      cmp ../commands/pip/pip4.cmd $$image.file.tmp; \
 	    fi; \
 	    dd if=$$image of=$$image.boot.tmp bs=4096 count=1 2>/dev/null; \
-	    dd if=base.img of=$$image.baseboot.tmp bs=4096 count=1 2>/dev/null; \
-	    cmp $$image.boot.tmp $$image.baseboot.tmp; \
+	    cmp $$image.boot.tmp ../boot/boottrack.bin; \
 	    test "$$(wc -c < $$image)" -eq 327680; \
-	    $(RM) $$image.verify.tmp $$image.file.tmp $$image.boot.tmp $$image.baseboot.tmp; \
+	    $(RM) $$image.verify.tmp $$image.file.tmp $$image.boot.tmp; \
 	    echo "$$image: all payloads, boot track and size verified"; \
 	done
 

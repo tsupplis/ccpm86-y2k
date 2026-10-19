@@ -18,13 +18,14 @@ system useful today and accessible to anyone interested in its history.
 | Image | Bootable | Contents |
 | --- | --- | --- |
 | `ccpm86.img` | Yes | Kernel, stock commands, ED, HELP, SYSTAT, configuration/maintenance utilities, reconstructed SYSDISK |
-| `ccpmtools.img` | Yes | DREDIX, INITDIR, ASM86, DDT86, GENCMD, GENCCPM, TCOPY, PIP, TOD |
+| `ccpmtools.img` | Yes | DREDIX, INITDIR, ASM86, DDT86, GENCMD, GENCCPM, PIP, TOD |
 | `ccpmdev.img` | No | DR development/BASIC tools, Microsoft BASIC, ASM80, HEXCOM, GENTAB |
 
 `make dist` places the images above and `disks.zip` containing all three at the repository root.
 
 320 KB: **untwist → cpmtools `ccpm86-320` → twist**.
 [Media recipes and emulator usage](media/README.md).
+The [source-built boot track](boot/README.md) reproduces all 4,096 bytes of the original.
 
 ## Tools
 
@@ -59,7 +60,6 @@ Format: [cpm86-kernel](../cpm86-kernel/README.md). **3.1** = rebuildable sources
 | `submit` | — | ASM-86 source |
 | `sysdisk` | — | TMP built-in; CMD reconstruction byte-identical to `sysdisk.ref` |
 | `systat` | — | 3.1 |
-| `tcopy` | — | ASM-86 source in `boot/` |
 | `tod` | — | 3.1, Y2K patched |
 | `type` | — | 3.1 |
 | `vcmode` | — | 3.1 |
@@ -112,7 +112,7 @@ cpmtools, Python 3, Git, tar, zip. Emulators: PCE (interactive), QEMU (checks).
 | --- | --- |
 | `make` | Commands, kernel/RSPs, boot sources, three images |
 | `make -C commands/sysdisk check` | Byte-identical SYSDISK reconstruction |
-| `make check` | SYSDISK identity, every packaged file, boot tracks, sizes |
+| `make check` | SYSDISK identity, source-built boot identity, every packaged file, sizes |
 | `make check-qemu` | Boot, RTC, status, switching, SDIR, SYSDISK, DREDIX |
 | `make test` | Launch PCE |
 | `make dist` | `y2k-dist.zip`, `disks.zip` and the three disk images at the repository root |
