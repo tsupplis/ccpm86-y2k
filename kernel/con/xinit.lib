@@ -277,8 +277,13 @@ detect_cursor_height:
  dec ah                         ; start scan line = height - 2
  cmp dx,mono_port
  je detect_cursor_mono
+ mov enhanced_video,1            ; color EGA/VGA uses BIOS mode setting
  mov var_cursor,ax
  mov var_sync,0                 ; enhanced adapters need no snow avoidance
+ mov ah,0Fh
+ int 10h
+ and al,7Fh
+ mov enhanced_text,al
  jmps detect_cursor_done
 detect_cursor_mono:
  mov var_mono_cursor,ax
@@ -926,16 +931,28 @@ su_pfk_tbl	rb	360	; one console's pfk's
 int_save_tbl	dw	single_step_interrupt
 		dw	one_byte_interrupt
 		dw	hd_hard_interrupt
+		dw	10h		; video BIOS (including recursive calls)
 		dw	async_int
 		dw	print_int
 		dw	1Ah		; BIOS RTC services
+		dw	1Dh		; video parameter table
+		dw	1Fh		; graphics font extension
 		dw	hd_param_interrupt
+		dw	42h		; EGA/VGA BIOS entry
+		dw	43h		; enhanced font pointer
+		dw	6Dh		; IBM VGA ROM INT 10h trampoline
 		dw	debugger_interrupt
 		dw	0FFFFh
 
 int_no_save	dw	hd_hard_interrupt
+		dw	10h		; video BIOS
 		dw	1Ah		; BIOS RTC services
+		dw	1Dh		; video parameter table
+		dw	1Fh		; graphics font extension
 		dw	hd_param_interrupt
+		dw	42h		; EGA/VGA BIOS entry
+		dw	43h		; enhanced font pointer
+		dw	6Dh		; IBM VGA ROM INT 10h trampoline
 		dw	0FFFFh		; impossible code
 
 ;	Interrupt setup table

@@ -15,6 +15,7 @@ The functional kernel/RSP changes can be compared with commit `033212a`.
 | Status color | `xchar.lib`: `sl_attrib`; `xinit.lib`: Compaq defaults | Color status text uses attribute 0Eh, bright yellow on black; monochrome renders its corresponding attribute. |
 | Cursor shape | `xinit.lib`: `detect_cursor`, `fix_crt`; `xconout.lib`: `set_mono`, cursor parameters | Use enhanced-adapter BIOS character height before vector takeover; use the bottom two scan lines without reading write-only legacy CRTC registers. Keep CGA, MDA and Compaq defaults as fallbacks. Reapply cursor shape/visibility after graphics-to-text register initialization. |
 | CGA graphics palette | `xconout.lib`: `color_320`, `black_white_320` | Set the CGA intensity bit at graphics-mode entry for bright colours. |
+| EGA/VGA CGA compatibility | `xinit.lib`, `xconout.lib` | Detect the enhanced color adapter at startup; preserve video BIOS/font vectors, including IBM VGA INT 6Dh. Set CGA modes through BIOS on a private stack with IRQs masked, save the console image, restore standard BIOS text/font before redrawing, and block console switching until text returns. Keep legacy CGA register setup. Function 30 CH=2 adds owner-checked packed-CGA palette handling via ESC !. |
 | Enhanced-adapter waits | `xchar.lib`: `sl_put1`; `xconout.lib`: screen clearing; `xinit.lib`: `var_sync` | Disable CGA snow/retrace waits on EGA/VGA while retaining them for legacy CGA. |
 | Configured drives | `xinit.lib`: `fix_disk_tables` | Retain GENCCPM system/temporary drives instead of replacing them with the last floppy drive. |
 | Console shortcuts | `xbegin.lib`: `key_make`, `key_next_console`, `key_console_event` | Ctrl+Alt+top-row 1–4 selects consoles 0–3. Ctrl+Alt+Tab advances from the foreground console and wraps at four consoles. Emit existing switch events, retaining PIN ownership/restrictions and keypad aliases. |
@@ -56,7 +57,7 @@ The functional kernel/RSP changes can be compared with commit `033212a`.
 | GENCCPM default pool `400,6000,400` | Physical 04000h–60000h in 16 KiB partitions, 368 KiB before overhead and concurrent use. Adjacent free partitions can be combined. |
 | CMD group minimum/maximum | Per-program loader requests; they do not override the process allocation limit. |
 | 8086 segment | 64 KiB addressable with one segment value; DREDIX's small-model data/heap remains within one data segment. |
-| Video BIOS | Preserving INT 10h alone would not synchronize BIOS mode/cursor/screen changes with virtual consoles. Existing graphics ownership and mode support are CGA-oriented. No general INT 10h gateway has been added. |
+| Video BIOS | XIOS uses video BIOS internally for CGA modes 4/6 on EGA/VGA. Calls restore registers, flags and PIC mask; a private 1,024-byte stack avoids consuming the application's UDA stack. This is not a general application INT 10h gateway. Native EGA modes, custom text fonts/row counts and graphics context switching are not supported. |
 
 ## Verification
 
@@ -106,3 +107,27 @@ CARDDECK.SUB, CLEAR.SUB, GLASS.SUB and WORDPROC.SUB layout samples. Put HDMAINT
 and INITDIR on a fourth, bootable maintenance disk, keeping both existing
 system disks bootable and the complete rebuilt HELP on the main 320 KB disk.
 Select base binaries explicitly instead of adding every new reference binary.
+
+
+## EGA/VGA graphics interface
+
+XIOS function 30 keeps CH=0 for mode setting and CH=1 for mode queries.
+CH=2 sets the CGA color-select byte in CL (bits 0..5) for the graphics owner.
+The console ESC ! back door now accepts function 30 and replaces the supplied
+DL with the calling virtual console number. Original 3.1 kernels reject that
+escape request without printing its eight parameter bytes. The companion
+cpm86-hacking library retains its direct CGA port write as a fallback and
+sends this palette extension only on BDOS 31h.
+
+On enhanced adapters, modes 4/5 use BIOS palette function 0Bh; mode 6 sets
+the two attribute palette entries through function 1000h so palette selection
+cannot accidentally turn monochrome graphics into green/white graphics.
+Text mode 2/3 resets the BIOS font and hardware before XIOS redraws the
+saved console and restores cursor/status visibility. Arbitrary custom fonts
+and row counts are not preserved.
+
+Verification uses headless PCE with IBM EGA and VGA ROMs: both bright
+four-color palettes, mode 6, repeated transitions via BALLC, saved console
+restoration, blocked graphics-console switching and working console
+switching/DIR after exit. The BIOS stack's lower 512 bytes remain untouched
+in these runs. Physical cards and other ROM implementations remain untested.

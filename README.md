@@ -115,8 +115,10 @@ Audit: CCP/M-86/Concurrent DOS 3.2; boot regressions: 3.1.
 
 [PATCHES.md](PATCHES.md): RTC startup/persistence, yellow status, adapter-aware
 cursor, EGA/VGA retrace handling, console shortcuts, configured drives,
-GENCCPM flag records, PIN and build corrections. Graphics remain CGA-oriented;
-no general application INT 10h layer is provided.
+GENCCPM flag records, PIN and build corrections. CGA graphics modes 4/6 now
+use kernel-controlled BIOS mode/palette calls on EGA/VGA, preserving the CGA
+path and restoring text. Native EGA modes and a general application INT 10h
+layer are not provided.
 
 ## Build and checks
 
