@@ -57,7 +57,7 @@ The functional kernel/RSP changes can be compared with commit `033212a`.
 | GENCCPM default pool `400,6000,400` | Physical 04000h–60000h in 16 KiB partitions, 368 KiB before overhead and concurrent use. Adjacent free partitions can be combined. |
 | CMD group minimum/maximum | Per-program loader requests; they do not override the process allocation limit. |
 | 8086 segment | 64 KiB addressable with one segment value; DREDIX's small-model data/heap remains within one data segment. |
-| Video BIOS | XIOS uses video BIOS internally for CGA modes 4/6 on EGA/VGA. Calls restore registers, flags and PIC mask; a private 1,024-byte stack avoids consuming the application's UDA stack. This is not a general application INT 10h gateway. Native EGA modes, custom text fonts/row counts and graphics context switching are not supported. |
+| Video BIOS | XIOS uses video BIOS internally for CGA modes 4/6 on EGA/VGA. Calls restore registers, flags and PIC mask; a private 1,024-byte stack avoids consuming the application's UDA stack. This is not a general application INT 10h gateway. Native EGA mode 10h is capability-gated; other native EGA modes, custom text fonts/row counts and graphics context switching are not supported. |
 
 ## Verification
 
@@ -131,3 +131,33 @@ four-color palettes, mode 6, repeated transitions via BALLC, saved console
 restoration, blocked graphics-console switching and working console
 switching/DIR after exit. The BIOS stack's lower 512 bytes remain untouched
 in these runs. Physical cards and other ROM implementations remain untested.
+
+
+## Native EGA 640x350, 16 colours
+
+The enhanced graphics path accepts BIOS mode 10h through ESC a and XIOS
+function 30 graphics nibble 5 (mode byte 50h). It rejects the request before
+changing ownership on CGA/MDA, a 64 KB EGA, or an adapter without the enhanced
+colour BIOS response. Startup records the EGA BIOS memory code (1..3 means
+128..256 KB).
+
+Reserved INT E6h v1 selector 30 now returns AX=4745h and BX bit 0 when native
+mode 10h is available. The original 3.1 selector was a no-op. The companion
+library supplies BX=0 and requires the signature/capability before issuing
+the native mode request. It probes only Concurrent BDOS 31h.
+
+Function 30 CH=3 sets native EGA palette entry CL (0..15) to raw six-bit color
+DH (0..63). The ESC ! back door forces DL to the caller's console and the
+handler checks mode/graphics ownership. CH=2 remains CGA-only. The kernel
+uses its protected BIOS function 1000h path, not application BIOS calls.
+
+The companion graphics library draws four planes at A000h with EGA write
+mode 2, latches, bit masks and optional XOR. It restores known drawing
+defaults rather than reading write-only original EGA registers. Text uses
+the 8x14 ROM font selected through vector 43h.
+
+PCE EGA and VGA checks cover all 16 default colours, palette remapping and
+invalid arguments, XOR and neighboring pixels, the bottom-right edge,
+8x14 text, SINE, repeated text restoration and console switching after exit.
+Older kernels reject the capability probe without changing video mode.
+Physical EGA/VGA adapters and 64 KB EGA memory detection remain untested.

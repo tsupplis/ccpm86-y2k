@@ -280,6 +280,12 @@ detect_cursor_height:
  mov enhanced_video,1            ; color EGA/VGA uses BIOS mode setting
  mov var_cursor,ax
  mov var_sync,0                 ; enhanced adapters need no snow avoidance
+ cmp bl,1                       ; EGA 64 KB cannot supply 16 colors at 640x350
+ jb detect_ega_done
+ cmp bl,3                       ; BIOS memory codes 1..3: 128..256 KB
+ ja detect_ega_done
+ mov enhanced_ega,1
+detect_ega_done:
  mov ah,0Fh
  int 10h
  and al,7Fh

@@ -329,6 +329,7 @@ ww_sw_disp2:
 ;	entry:	dl = vc number
 ;		ch = 0 for set,  ch = 1 for get
 ;		ch = 2 sets packed CGA color-select byte in CL
+;		ch = 3 sets native EGA palette CL=index, DH=color
 ;		cl = x,y nibbles when ch = 0 (set)
 ;		     x = graphics mode (most sig)
 ;		     y = alpha mode (least sig)
@@ -340,6 +341,10 @@ get_set_screen:
 	jae	screen_bad_param	; skip if too high
 
 	call	point_vs		; bx -> vs_
+	cmp	ch,3
+	jnz	screen_regular
+	jmp	screen_ega_palette
+screen_regular:
 	cmp	ch,0			; if set mode
 	jz	screen_set		;   then skip
 
@@ -405,6 +410,10 @@ screen_not_sup:
 ; The console escape back door supplies the calling console number.
 ; Older kernels reject function 30 through that back door without output.
 screen_palette:
+	cmp	vs_screen_mode,50h
+	jnz	screen_cga_palette
+	jmp	screen_not_sup		; use CH=3 for native EGA colors
+screen_cga_palette:
 	mov	al,vs_bit
 	test	graphic_bits,al
 	jz	screen_not_sup		; only the graphics owner changes colors
@@ -457,6 +466,30 @@ screen_palette_640_dim:
 	sub	ax,ax
 	ret
 
+; Native EGA palette: CH=3, CL=entry 0..15, DH=6-bit EGA color.
+screen_ega_palette:
+	cmp	cl,16
+	jae	screen_ega_bad
+	cmp	dh,40h
+	jae	screen_ega_bad
+	cmp	vs_screen_mode,50h
+	jnz	screen_ega_unsupported
+	mov	al,vs_bit
+	test	graphic_bits,al
+	jz	screen_ega_unsupported
+	push	bx
+	mov	bl,cl
+	mov	bh,dh
+	mov	ax,1000h
+	call	video_bios
+	pop	bx
+	sub	ax,ax
+	ret
+screen_ega_bad:
+	jmp	screen_bad_param
+screen_ega_unsupported:
+	jmp	screen_not_sup
+
 alpha_vector	dw	screen_bad_param, general_alpha
 		dw	screen_not_sup, screen_not_sup
 		dw	black_white_80, color_80
@@ -468,7 +501,7 @@ alpha_vector	dw	screen_bad_param, general_alpha
 
 graph_vector	dw	screen_bad_param, general_graph
 		dw	color_320, black_white_320
-		dw	black_white_640, screen_not_sup
+		dw	black_white_640, ega_640_350
 		dw	screen_not_sup, screen_not_sup
 		dw	screen_not_sup, screen_not_sup
 		dw	screen_not_sup, screen_not_sup
@@ -563,7 +596,16 @@ black_white_320:
 
 black_white_640:
 	mov	ax,071Eh		; video mode / color sel
-;	jmps	color_graph_init	; fall through
+	jmp	color_graph_init	; native EGA entry follows
+
+ega_640_350:
+	cmp	enhanced_ega,0
+	jnz	ega_640_go
+	jmp	screen_not_sup
+ega_640_go:
+	call	general_graph
+	mov	al,10h
+	jmp	enhanced_graph_init
 
 color_graph_init:
 	cmp	enhanced_video,0
@@ -1213,10 +1255,16 @@ z_video_mode:
 
 z_video_param:
 	call	restore_state	; back to con_normal
+	cmp	al,10h			; native 640x350x16 extension
+	jnz	z_video_legacy
+	mov	cl,50h			; new XIOS graphics mode nibble
+	jmp	z_video_set
+z_video_legacy:
 	and	al,07h		; allow only mode 0-7
 	cbw
 	mov	si,ax		; table index
 	mov	cl,ds:screen_table[si]
+z_video_set:
 	mov	ch,0		; set mode code
 	mov	dl,vs_number	; vc number
 	jmp	get_set_screen	; just like a back door
@@ -2408,8 +2456,8 @@ mono_bits	rb	1	; which vc's are mono
 color_bits	rb	1	; which vc's are color
 graphic_bits	db	0	; which vc's in graphics
 enhanced_video db 0	; active color EGA/VGA detected at startup
+enhanced_ega db 0	; 128 KB or more, native 640x350x16 permitted
 enhanced_text db 3	; BIOS text mode to restore
- db 0			; word alignment
 bios_graphics db 0	; enhanced hardware currently in graphics
 video_bios_mask db 0
 		 db 0		; word alignment

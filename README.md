@@ -117,8 +117,9 @@ Audit: CCP/M-86/Concurrent DOS 3.2; boot regressions: 3.1.
 cursor, EGA/VGA retrace handling, console shortcuts, configured drives,
 GENCCPM flag records, PIN and build corrections. CGA graphics modes 4/6 now
 use kernel-controlled BIOS mode/palette calls on EGA/VGA, preserving the CGA
-path and restoring text. Native EGA modes and a general application INT 10h
-layer are not provided.
+path and restoring text. Native EGA mode 10h (640x350, 16 colours) is also
+available on EGA with >=128 KB or VGA. Other native EGA modes and a general
+application INT 10h layer are not provided.
 
 ## Build and checks
 

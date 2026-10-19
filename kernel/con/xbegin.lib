@@ -564,9 +564,18 @@ xios_v1_table	dw	xios_v1_status_on	; 18
 		dw	v1_null,v1_null,v1_null	; 25,26,27
 		dw	v1_null			; 28
 		dw	xios_v1_hd		; 29
-		dw	v1_null			; 30
+		dw	xios_v1_graph_caps	; 30: enhanced graphics capability
 		dw	xios_v1_pfk_vc		; 31
 		dw	xios_v1_max_disk	; 32
+
+; Reserved v1 selector 30 was a no-op in the original 3.1 kernel.
+; AX='EG' identifies this interface; BX bit 0 permits 640x350x16.
+; Query only on Concurrent BDOS 31h, with input BX=0 for old-kernel fallback.
+xios_v1_graph_caps:
+	mov	ax,4745h
+	sub	bx,bx
+	mov	bl,enhanced_ega
+	ret
 
 ;	restore normal status line operation
 
