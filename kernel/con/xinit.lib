@@ -248,37 +248,37 @@ compaq_done:
 compaq_name	db	'COMPAQ'
 
 ; Match the bottom two scan lines to the active enhanced adapter.
-; Legacy CGA/MDA and the Compaq override retain their separate defaults.
+; INT 10h/12h distinguishes EGA/VGA from legacy CGA/MDA. BIOS data
+; 40:85 holds the enhanced text character height. Do not read CRTC 9:
+; that register is write-only on the original 6845, and reads may return
+; zero or a floating-bus value. Leave CGA, MDA and Compaq defaults alone.
 detect_cursor:
  push es
  mov ah,12h
  mov bx,0FF10h
  int 10h
- cmp bh,0FFh
- je detect_cursor_done
  cmp bh,1
  ja detect_cursor_done
  mov ax,40h
  mov es,ax
  mov dx,es:.063h
  cmp dx,mono_port
- je detect_cursor_read
+ je detect_cursor_height
  cmp dx,color_port
  jne detect_cursor_done
-detect_cursor_read:
- mov al,9
- out dx,al
- inc dx
- in al,dx
- and al,1Fh
- cmp al,1
+detect_cursor_height:
+ mov ax,es:.085h
+ cmp ax,8
  jb detect_cursor_done
+ cmp ax,32
+ ja detect_cursor_done
+ dec al                         ; end scan line = height - 1
  mov ah,al
- dec ah
- cmp dx,mono_port+1
+ dec ah                         ; start scan line = height - 2
+ cmp dx,mono_port
  je detect_cursor_mono
  mov var_cursor,ax
- mov var_sync,0		;EGA/VGA memory needs no CGA snow avoidance
+ mov var_sync,0                 ; enhanced adapters need no snow avoidance
  jmps detect_cursor_done
 detect_cursor_mono:
  mov var_mono_cursor,ax

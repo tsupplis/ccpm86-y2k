@@ -432,7 +432,10 @@ color_alpha_init:
 	call	general_alpha		; take care of variables
 	pop	ax			; restore video mode
 	mov	si,alpha_str		; alpha video init string
-	jmps	color_video_init	; set string and blast
+	call	color_video_init	; table also writes cursor registers
+	call	new_cursor_on		; restore shape/on-off after the table
+	sub	ax,ax			; successful mode request
+	ret
 
 
 ;	graphics screen modes
@@ -457,11 +460,11 @@ general_graph_go:
 	ret				 ; and go home
 
 color_320:
-	mov	ax,200Ah		; video mode / color sel
+	mov	ax,300Ah		; bright CGA palette / video mode
 	jmps	color_graph_init	; blast it and return
 
 black_white_320:
-	mov	ax,200Eh		; video mode / color sel
+	mov	ax,300Eh		; bright CGA palette / video mode
 	jmps	color_graph_init	; blast it and return
 
 black_white_640:
