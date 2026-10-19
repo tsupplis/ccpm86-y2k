@@ -65,7 +65,7 @@ Format: [cpm86-kernel](../cpm86-kernel/README.md). **3.1** = rebuildable sources
 | `tod` | Display or set date and time | — | 3.1, Y2K patched |
 | `type` | Display a text file | — | 3.1 |
 | `vcmode` | Set virtual-console background modes | — | 3.1 |
-| `asm80` | 8080 assembler | — | CP/M 8080 ASM; XLT86-translated and fixed |
+| `asm80` | 8080 assembler | — | CP/M 2.2 8080 ASM; XLT86-translated and fixed |
 | `hexcom` | Convert Intel HEX to COM binaries | — | HEXCOM 3.00-compatible C from [tpzasm](https://github.com/johnsonjh/tpzasm) |
 | `dredix` | Full-screen text editor | — | 4.1; DREDIX C Backported from Concurrent DOS 4.1 |
 
