@@ -305,9 +305,42 @@ end
         disk = Path(temporary) / (letter + '.img')
         run('python3', str(MEDIA.parent / 'tools/cpm86twist.py'),
             'untwist', str(original), str(logical))
+        # Additional SUB fixtures use space only in these disposable copies.
+        run('cpmrm', '-f', 'ccpm86-320', str(logical),
+            '0:ED.CMD' if letter == 'A' else '0:ASM86.CMD')
+        if letter == 'A':
+            run('cpmrm', '-f', 'ccpm86-320', str(logical), '0:CONFIG.CMD')
         probe = str(Path(temporary) / ('probe' + letter.lower() + '.cmd'))
         for name in ('SDPTEST', 'SYSFALL') + (('SDONLY',) if letter == 'B' else ()):
             run('cpmcp', '-f', 'ccpm86-320', str(logical), probe, '0:' + name + '.CMD')
+        scripts = {'ONLYSUB': 'ECHO SCRIPT ' + letter + ' $1 $2'}
+        if letter == 'A':
+            scripts['SYSBATCH'] = 'ECHO SYSTEM SCRIPT A'
+            scripts['USERTEST'] = (';user-zero record padding\r\n' * 6 + 'ECHO USER ZERO A')
+            run('cpmcp', '-f', 'ccpm86-320', str(logical), probe, '0:EARLY.CMD')
+            run('cpmchattr', '-f', 'ccpm86-320', str(logical), 's', '0:SUBMIT.CMD')
+        else:
+            scripts.update({'SDPTEST': 'ECHO WRONG SUB SHADOW',
+                            'EARLY': 'ECHO EARLY SUB B',
+                            'INNER': 'ECHO INNER $1',
+                            'NEST': 'ECHO NEST START\r\nINNER ARG\r\nECHO NEST END',
+                            'INCLUDE': '$INCLUDE B:INNER ARG\r\nECHO INCLUDE END',
+                            'BADCMD': 'ECHO WRONG BAD CMD FALLBACK',
+                            'SUBMIT': 'ECHO WRONG INTERPRETER RECURSION'})
+        if letter == 'B':
+            empty = Path(temporary) / 'empty.cmd'
+            empty.write_bytes(b'')
+            run('cpmcp', '-f', 'ccpm86-320', str(logical), str(empty), '0:BADCMD.CMD')
+        for name, content in scripts.items():
+            source = Path(temporary) / (name + '.sub')
+            source.write_bytes(content.encode() + b'\r\n\x1a')
+            run('cpmcp', '-f', 'ccpm86-320', str(logical), str(source), '0:' + name + '.SUB')
+        if letter == 'A':
+            run('cpmchattr', '-f', 'ccpm86-320', str(logical), 's',
+                '0:SYSBATCH.SUB', '0:USERTEST.SUB')
+            source = Path(temporary) / 'userone.sub'
+            source.write_bytes(b'ECHO WRONG USER ONE\r\n\x1a')
+            run('cpmcp', '-f', 'ccpm86-320', str(logical), str(source), '1:USERTEST.SUB')
         run('cpmchattr', '-f', 'ccpm86-320', str(logical), 's', '0:SYSFALL.CMD')
         if letter == 'A':
             run('cpmcp', '-f', 'ccpm86-320', str(logical), str(script), '0:SEARCH.SUB')
@@ -318,6 +351,24 @@ end
     return disks
 
 
+def search_display_matches(text, expected):
+    """Compare all displayed search entries and exact order, ignoring padding."""
+    if isinstance(expected, tuple):
+        if 'Drive Search Path:' not in text:
+            return False
+        text = text.rsplit('Drive Search Path:', 1)[1]
+        field, value = expected
+        if field == 'path':
+            rows = re.findall(r'^[1-4](?:st|nd|rd|th) Drive +-[ ]+(Default|[A-P]:)[ ]*$',
+                              text, re.M)
+            fixed = re.findall(r'^([2-5])(?:nd|rd|th) Drive +-[ ]+Sys Disk \([A-P]:\)[ ]*$', text, re.M)
+            return (','.join('*' if row == 'Default' else row for row in rows) == value
+                    and fixed == [str(len(rows) + 1)])
+        order = re.search(r'^Search Order +-[ ]+([A-Z, ]+?)[ ]*$', text, re.M)
+        return bool(order) and order.group(1).replace(' ', '') == value
+    return expected in text
+
+
 def check_setdef(type_command, wait_for, shortcut):
     def prompt(t, drive='A'):
         lines = [line.rstrip() for line in t.splitlines()[:24] if line.strip()]
@@ -325,43 +376,45 @@ def check_setdef(type_command, wait_for, shortcut):
 
     def command(tail, expected, drive='A'):
         type_command('cls\n')
-        wait_for(lambda t: expected not in t and prompt(t, drive))
+        wait_for(lambda t: not search_display_matches(t, expected) and prompt(t, drive))
         type_command(tail + '\n')
-        text, _ = wait_for(lambda t: expected in t and prompt(t, drive))
+        text, _ = wait_for(lambda t: search_display_matches(t, expected) and prompt(t, drive))
         assert 'BDOS Err' not in text, text
         return text
 
-    command('setdef', 'Command search: *')
-    command('setdef b:,a:', 'Command search: B:,A:')
+    command('setdef', ('path', '*'))
+    command('setdef b:,a:', ('path', 'B:,A:'))
     command('sdptest', 'PATH B DEFAULT A')
     command('a:sdptest', 'PATH A DEFAULT A')
-    command('a:setdef a:,b:', 'Command search: A:,B:')
+    command('a:setdef a:,b:', ('path', 'A:,B:'))
     command('sdptest', 'PATH A DEFAULT A')
-    command('a:setdef c:,b:', 'Command search: C:,B:')
+    command('a:setdef c:,b:', ('path', 'C:,B:'))
     command('sdonly', 'PATH B DEFAULT A')
     command('sysfall', 'PATH B DEFAULT A')
     command('a:submit a:search', 'PATH B DEFAULT A')
-    command('a:submit a:profile', 'Command search: C:,B:')
-    command('a:setdef', 'Command search: C:,B:')
-    command('a:setdef b:,b:,*,a:', 'Command search: B:,B:,*,A:')
+    command('a:submit a:profile', ('path', 'C:,B:'))
+    command('a:setdef', ('path', 'C:,B:'))
+    command('a:setdef b:,b:,*,a:', ('path', 'B:,B:,*,A:'))
     command('sdptest', 'PATH B DEFAULT A')
-    for bad in ('a:,,b:', 'a:,', 'q:', 'sys:', 'a', '*,a:,b:,c:,d:', '[order=(cmd,sub)]'):
+    for bad in ('a:,,b:', 'a:,', 'q:', 'sys:', 'a', '*,a:,b:,c:,d:', '[order=(sub,cmd)]'):
         command('a:setdef ' + bad, 'Usage: SETDEF')
-        command('a:setdef', 'Command search: B:,B:,*,A:')
-    command('a:setdef \t b: , a: \t', 'Command search: B:,A:')
+        command('a:setdef', ('path', 'B:,B:,*,A:'))
+    command('a:setdef \t b: , a: \t', ('path', 'B:,A:'))
     shortcut('ctrl-alt-2', 1)
-    command('setdef', 'Command search: *')
+    command('setdef', ('path', '*'))
     command('sdptest', 'PATH A DEFAULT A')
-    command('setdef a:', 'Command search: A:')
+    command('setdef a:', ('path', 'A:'))
     shortcut('ctrl-alt-1', 0)
-    command('a:setdef', 'Command search: B:,A:')
-    command('a:setdef c:', 'Command search: C:')
+    command('a:setdef', ('path', 'B:,A:'))
+    command('a:setdef c:', ('path', 'C:'))
     command('sysfall', 'PATH A DEFAULT A')
     command('sysdisk b:', 'System disk is B:')
+    text = command('a:setdef', ('path', 'C:'))
+    assert 'Sys Disk (B:)' in text, text
     command('sysfall', 'PATH B DEFAULT A')
     command('sdonly', 'Command not found. Use ? for help')
     command('sysdisk a:', 'System disk is A:')
-    command('a:setdef *', 'Command search: *')
+    command('a:setdef *', ('path', '*'))
     type_command('help setdef [nopage]\n')
     wait_for(lambda t: 'HELP>' in t and 'SETDEF does not allocate' in t)
     type_command('\n')
@@ -369,14 +422,71 @@ def check_setdef(type_command, wait_for, shortcut):
     type_command('b:\n')
     wait_for(lambda t: prompt(t, 'B'))
     command('sdptest', 'PATH B DEFAULT B', 'B')
-    command('a:setdef', 'Command search: *', 'B')
+    command('a:setdef', ('path', '*'), 'B')
     type_command('a:\n')
     wait_for(prompt)
     shortcut('ctrl-alt-2', 1)
-    command('setdef *', 'Command search: *')
+    command('setdef *', ('path', '*'))
     shortcut('ctrl-alt-1', 0)
     print('SETDEF: defaults, ordering, explicit drive, absent drive, duplicates, '
           'syntax atomicity, console isolation, working drive, SUBMIT/chain and fixed SYS fallback passed', flush=True)
+
+
+def check_subsearch(type_command, wait_for, shortcut):
+    def prompt(t):
+        lines = [line.rstrip() for line in t.splitlines()[:24] if line.strip()]
+        return bool(lines) and bool(re.fullmatch(r'(?:[0-9]+)?A>', lines[-1]))
+    def command(tail, expected):
+        type_command('cls\n')
+        wait_for(lambda t: not search_display_matches(t, expected) and prompt(t))
+        type_command(tail + '\n')
+        text, _ = wait_for(lambda t: search_display_matches(t, expected) and prompt(t))
+        assert 'WRONG' not in text, text
+        return text
+    command('a:setdef b:,a:', ('order', 'CMD'))
+    command('onlysub', 'Command not found. Use ? for help')
+    command('b:onlysub.sub first second', 'SCRIPT B FIRST SECOND')
+    command('a:setdef [order=(cmd,sub)]', ('order', 'CMD,SUB'))
+    command('a:setdef', ('path', 'B:,A:'))
+    command('onlysub first second', 'SCRIPT B FIRST SECOND')
+    command('sdptest', 'PATH B DEFAULT A')
+    command('early', 'EARLY SUB B')
+    command('badcmd', 'Invalid or empty CMD file')
+    command('a:early.cmd', 'PATH A DEFAULT A')
+    command('b:onlysub.cmd', 'Command not found. Use ? for help')
+    command('onlysub.txt', 'Invalid command extension')
+    command('nest', 'NEST END')
+    command('include', 'INCLUDE END')
+    command('a:setdef b:', ('order', 'CMD,SUB'))
+    command('sysbatch', 'SYSTEM SCRIPT A')
+    command('user 1', 'User Number = 1')
+    command('usertest', 'USER ZERO A')
+    command('user 0', 'User Number = 0')
+    for invalid in ('[order=(sub)]', '[order=(sub,cmd)]', '[order=(cmd,cmd)]',
+                    '[order=(cmd,sub,cmd)]', '[order=(cmd)] extra',
+                    'a: [order=(sub)]', '[temporary=b:]', '[order=(cmd)'):
+        command('a:setdef ' + invalid, 'Usage: SETDEF')
+        text = command('a:setdef', ('order', 'CMD,SUB'))
+        assert search_display_matches(text, ('path', 'B:')), text
+    command('onlysub ' + 'x' * 112, 'SCRIPT B ' + 'X' * 12)
+    command('onlysub ' + 'x' * 113, 'Command tail too long for SUBMIT')
+    command('onlysub ' + 'x' * 119, 'Command tail too long for SUBMIT')
+    shortcut('ctrl-alt-2', 1)
+    command('a:setdef', ('order', 'CMD'))
+    command('a:setdef b:,a: [order=(cmd,sub)]', ('order', 'CMD,SUB'))
+    command('onlysub isolated', 'SCRIPT B ISOLATED')
+    command('a:setdef [order=(cmd)]', ('order', 'CMD'))
+    command('onlysub', 'Command not found. Use ? for help')
+    command('a:setdef *', ('path', '*'))
+    shortcut('ctrl-alt-1', 0)
+    command('a:setdef', ('order', 'CMD,SUB'))
+    command('sysdisk b:', 'System disk is B:')
+    command('onlysub', 'SUBMIT.CMD not found')
+    command('sysdisk a:', 'System disk is A:')
+    command('a:setdef * [order=(cmd)]', ('order', 'CMD'))
+    command('onlysub', 'Command not found. Use ? for help')
+    print('SUB search: opt-in, explicit types, drive/type precedence, arguments, '
+          'nested/include/chain, SYS user zero, overflow, invalid options and isolation passed', flush=True)
 
 
 def check(image, second):
@@ -469,6 +579,7 @@ def check(image, second):
                     check_editor(type_command, hmp, wait_for, shortcut)
                     check_shell(type_command, hmp, wait_for)
                     check_setdef(type_command, wait_for, shortcut)
+                    check_subsearch(type_command, wait_for, shortcut)
                 type_command('dir\n')
                 wait_for(lambda t: 'CCPM' in t and 'SYS' in t and 'PIP' in t)
                 if image.name == 'ccpm86.img':

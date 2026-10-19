@@ -1,83 +1,131 @@
-title 'SETDEF - per-console command drive search'
-; Local CCP/M-86 extension. Drive search only; system fallback is fixed.
-; BDOS 165: ten-byte versioned packet, see kernel/con/command.sup.
+title 'SETDEF - per-console command search settings'
+; Version 2 of local BDOS 165; v1 drive-only clients remain supported.
 bdos equ 0e0h
 cseg
 org 0
 start:
     pushf ! pop bx ! cli
     mov ax,ds ! mov ss,ax ! mov sp,offset stack_top
-    push bx ! popf
-    cld
+    push bx ! popf ! cld
+    call api
     mov si,081h
     xor ax,ax ! mov al,command_length
     mov di,si ! add di,ax
     call spaces
-    cmp si,di ! jb parse_path
-    jmp call_api
+    cmp si,di ! jb arguments
+    jmp display
+arguments:
+    cmp byte ptr [si],'[' ! jne parse_path
+    jmp parse_order
 parse_path:
-    mov operation,1
+    or operation,1
     xor bp,bp
 next_entry:
     cmp bp,4 ! jb room
     jmp syntax_error
 room:
-    cmp si,di ! jb token
-    jmp syntax_error
-token:
-    lodsb
+    call getchr
     cmp al,'*' ! je current
-    and al,05fh
-    cmp al,'A' ! jb syntax_error
-    cmp al,'P' ! ja syntax_error
-    sub al,'A'
-    cmp si,di ! jae syntax_error
-    cmp byte ptr [si],':' ! jne syntax_error
-    inc si
+    cmp al,'A' ! jb bad_path
+    cmp al,'P' ! ja bad_path
+    sub al,'A' ! mov dl,al
+    call getchr
+    cmp al,':' ! jne bad_path
+    mov al,dl
     jmps store
+bad_path:
+    jmp syntax_error
 current:
     mov al,0ffh
 store:
-    mov entries[bp],al
-    inc bp
-    call spaces
-    cmp si,di ! jae parsed
-    cmp byte ptr [si],',' ! jne syntax_error
-    inc si ! call spaces
-    jmps next_entry
-parsed:
+    mov entries[bp],al ! inc bp
     mov ax,bp ! mov entry_count,al
-    jmps call_api
+    call spaces
+    cmp si,di ! jae apply
+    cmp byte ptr [si],'[' ! je parse_order
+    call getchr
+    cmp al,',' ! jne bad_path
+    call spaces
+    jmps next_entry
+parse_order:
+    or operation,2
+    mov bx,offset order_prefix ! call match
+    mov type_order,0
+    call spaces ! call getchr
+    cmp al,')' ! je close_order
+    cmp al,',' ! jne bad_path
+    call spaces
+    mov bx,offset sub_text ! call match
+    mov type_order,1
+    call spaces ! call getchr
+    cmp al,')' ! jne bad_path
+close_order:
+    call spaces ! call getchr
+    cmp al,']' ! jne bad_path
+    call spaces
+    cmp si,di ! jne bad_path
+apply:
+    call api
+    jmp display
 syntax_error:
     mov dx,offset usage ! jmp print_exit
-call_api:
+api:
     mov cl,165 ! mov dx,offset packet ! int bdos
     cmp bx,0 ! jne not_supported
     cmp entry_count,1 ! jb not_supported
-    cmp entry_count,4 ! jbe display
+    cmp entry_count,4 ! ja not_supported
+    cmp type_order,1 ! ja not_supported
+    ret
 not_supported:
     mov dx,offset unavailable ! jmp print_exit
+getchr:
+    cmp si,di ! jb have_chr
+    jmp syntax_error
+have_chr:
+    lodsb
+    cmp al,'a' ! jb got_chr
+    cmp al,'z' ! ja got_chr
+    sub al,020h
+got_chr:
+    ret
+match:
+    cmp cs:byte ptr [bx],0 ! je matched
+    call getchr
+    cmp al,cs:[bx] ! je match_next
+    jmp syntax_error
+match_next:
+    inc bx ! jmps match
+matched:
+    ret
 display:
     mov dx,offset path_message ! call print
     xor bp,bp
 print_entry:
+    mov bx,bp ! shl bx,1
+    mov dx,row_labels[bx] ! call print
     mov al,entries[bp]
     cmp al,0ffh ! jne letter
-    mov dl,'*' ! call put
+    mov dx,offset default_text ! call print
     jmps printed
 letter:
     add al,'A' ! mov dl,al ! call put
     mov dl,':' ! call put
 printed:
+    mov dx,offset newline ! call print
     inc bp
     xor ax,ax ! mov al,entry_count
-    cmp bp,ax ! jae system_message
-    mov dl,',' ! call put
-    jmps print_entry
-system_message:
+    cmp bp,ax ! jb print_entry
+    mov bx,bp ! shl bx,1
+    mov dx,row_labels[bx] ! call print
     mov dx,offset system_text ! call print
     mov dl,system_drive ! add dl,'A' ! call put
-    mov dx,offset final_text
+    mov dx,offset system_end ! call print
+    mov dx,offset newline ! call print
+    mov dx,offset type_message ! call print
+    cmp type_order,0 ! je end_settings
+    mov dx,offset sub_message ! call print
+end_settings:
+    mov dx,offset newline
 print_exit:
     call print
 exit:
@@ -94,24 +142,37 @@ print:
     mov cl,9 ! int bdos ! ret
 put:
     mov cl,2 ! int bdos ! ret
+order_prefix db '[ORDER=(CMD',0
+sub_text db 'SUB',0
 
 dseg
 org 080h
 command_length rb 1
 org 100h
-packet db 'SD',1
+packet db 'SD',2
 operation db 0
 entry_count db 0
 entries db 0,0,0,0
 system_drive db 0
-path_message db 'Command search: $'
-system_text db 13,10,'System fallback: $'
-final_text db ': (always last)',13,10,'$'
-usage db 'Usage: SETDEF [drive-list]',13,10
-      db 'Example: SETDEF *,A:,C: (up to four entries)',13,10
-      db 'SETDEF displays settings; SETDEF * restores the default.',13,10
-      db 'The system fallback is always last.',13,10,'$'
-unavailable db 'SETDEF requires a kernel with command search support.',13,10,'$'
+type_order db 0
+path_message db 13,10,'Drive Search Path:',13,10,'$'
+row_labels dw first_row,second_row,third_row,fourth_row,fifth_row
+first_row db '1st Drive            - $'
+second_row db '2nd Drive            - $'
+third_row db '3rd Drive            - $'
+fourth_row db '4th Drive            - $'
+fifth_row db '5th Drive            - $'
+default_text db 'Default$'
+newline db 13,10,'$'
+type_message db 'Search Order         - CMD$'
+sub_message db ', SUB$'
+system_text db 'Sys Disk ($'
+system_end db ':)',13,10,'$'
+usage db 'Usage: SETDEF [drive-list] [ORDER=(CMD)]',13,10
+      db '       SETDEF [drive-list] [ORDER=(CMD,SUB)]',13,10
+      db 'Drive list: up to four entries, for example *,A:,C:',13,10
+      db 'SETDEF displays settings. CMD only is the default.',13,10,'$'
+unavailable db 'SETDEF requires a kernel with CMD/SUB search support.',13,10,'$'
 rb 128
 stack_top equ offset $
 end

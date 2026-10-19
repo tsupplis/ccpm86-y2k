@@ -65,13 +65,28 @@ names/extensions/password syntax, memory/process limits and malformed or
 unreadable CMD files. Unknown errors retain their numeric code. Explicit
 drive checks preserve the current drive when the requested drive is unavailable.
 
-`SETDEF` configures command drive searching independently for each console:
+`SETDEF` configures command searching independently for each console:
 
 ```text
 SETDEF             Display the current settings
-SETDEF *           Restore the default: current drive
+SETDEF *           Reset the drive list to current drive
 SETDEF *,A:,C:     Search current drive, A:, then C:
 SETDEF M:,*        Prefer utilities on the memory disk
+SETDEF [ORDER=(CMD,SUB)]  Enable automatic SUB scripts
+SETDEF [ORDER=(CMD)]      Restore CMD-only searching
+```
+
+The display follows the CP/M Plus layout, with a leading blank line and a blank
+line after the drives. The fixed Sys Disk role is always the last displayed row. For `SETDEF *,A:,C:` with default CMD-only searching:
+
+```text
+Drive Search Path:
+1st Drive            - Default
+2nd Drive            - A:
+3rd Drive            - C:
+4th Drive            - Sys Disk (A:)
+
+Search Order         - CMD
 ```
 
 The list accepts one to four comma-separated entries (`*` or `A:` through `P:`).
@@ -94,9 +109,30 @@ SUBMIT script. If SETDEF itself is outside the path, specify its drive, for
 example `A:SETDEF *`. Copy frequently used CMD files to M: before using
 `SETDEF M:,*`; SETDEF does not create, format or populate the memory disk.
 
-This is drive searching only: CMD remains the executable type, and SUB files
-still require SUBMIT. CP/M Plus ORDER, TEMPORARY and DISPLAY options are not
-implemented.
+The default file order is **CMD only**. The only other allowed order is
+`CMD,SUB`, enabled with `SETDEF [ORDER=(CMD,SUB)]`. Path and order settings are
+independent: changing one preserves the other. Bare SETDEF displays both;
+`SETDEF * [ORDER=(CMD)]` restores both defaults. SUB-only and SUB-first orders
+are rejected, as are TEMPORARY and DISPLAY options.
+
+With CMD,SUB enabled, each listed drive is searched for CMD and then SUB before
+moving to the next drive. The system fallback follows the entire list, using
+its SYS-file rules for both types. Thus an earlier drive's SUB can precede a
+later drive's CMD; a CMD on the same drive always wins. Explicit `.CMD` selects
+only CMD; explicit `.SUB` runs a script even in CMD-only mode. An explicit type
+bypasses resident-command lookup; an explicit drive also bypasses the drive list.
+An existing but invalid CMD produces its load error rather than falling back to
+SUB. Other extensions are rejected.
+
+Automatic SUB execution uses the matching rebuilt `SUBMIT.CMD`, located through
+the same drive list and system fallback, with CMD-only lookup. The script's
+resolved drive/user and original arguments are preserved. `SUBMIT.CMD not found`
+identifies a missing interpreter; the script does not run. Oversized expanded
+tails report `Command tail too long for SUBMIT`; arguments are never truncated.
+The expanded interpreter tail (qualified script name, optional password and
+arguments) may contain at most 126 characters. Automatic lookup uses SETDEF;
+typing `SUBMIT script` retains SUBMIT's explicit current/system script lookup.
+SUBMIT's existing parameter and quoting rules remain unchanged.
 
 ## Distributions
 

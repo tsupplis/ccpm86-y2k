@@ -46,4 +46,6 @@ e_no_mimic	   equ  39  ; can't mimic or unmimic
 e_abort		   equ	40  ; external termination occured
 e_fixuprec         equ  41  ; fixup error
 e_flag_ignr        equ  42  ; flag set ignored
+e_nosubmit         equ  44  ; SUBMIT.CMD not found
+e_subtail          equ  43  ; expanded SUBMIT command tail too long
 

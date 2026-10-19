@@ -6,25 +6,38 @@ The functional kernel/RSP changes can be compared with commit `033212a`.
 
 ## Kernel
 
-`SETDEF.CMD` and the shared CLI now support one to four command search entries
-per console (default `*`). The system drive remains an automatic final fallback;
-normal list entries retain normal file visibility, explicit drives bypass the
-list, and resident commands keep priority. Missing optional drives are skipped;
-other open errors stop the search. Successful loads preserve the caller's working
-drive/user. SUBMIT and chaining use the same path. Extension ordering is unchanged.
+`SETDEF.CMD` and the shared CLI support one to four drive entries per console
+(default `*`) and file order CMD (default) or CMD,SUB. Search is drive-by-drive,
+CMD then SUB, with the fixed SYS-restricted system fallback last. Explicit drive
+and type restrict lookup; explicit SUB is allowed in CMD-only mode. Resident
+commands retain priority for untyped names. Invalid CMD files stop with a load
+error; arguments are not truncated. Errors 43/44 identify expanded SUBMIT tail
+overflow (126-character limit) and a missing SUBMIT.CMD interpreter.
 
-The local BDOS 165 extension accepts a ten-byte packet at DS:DX:
-`'S','D',1,operation,count,entry[4],system_drive`, where operation 0 queries and
-1 sets, count is 1..4, and each entry is 0..15 (A..P) or FFh (current drive).
-On success BX/AX and CX are zero; the packet returns the effective list and
-current system drive. On failure BX/AX=FFFFh and CX is the error code. The kernel
-validates the entire update before publishing it atomically. The API supports
-console IDs 0..15; CLI callers outside that range retain default `*` searching.
-Settings and CLI snapshots use 121 bytes of SUP's existing 128-byte patch
-reserve (`patch.cod`), leaving historic
-SYSDAT, PD and UDA layouts unchanged. `supif.sup` dispatches function 165 locally
-without extending SYSENT; unmodified kernels reject the utility's API call.
+BDOS 165 v1 accepts ten bytes at DS:DX:
+`'S','D',1,operation,count,entry[4],system_drive`, operation 0=query, 1=set path.
+V2 uses version byte 2 and adds byte 10 (0=CMD, 1=CMD,SUB). V2 operations are
+0=query, 1=set path, 2=set order, 3=set both. Count is 1..4; entries are 0..15
+(A..P) or FFh (current drive). V1 clients preserve the type order. Successful
+calls return BX/AX=CX=0 and the effective settings; errors return BX/AX=FFFFh
+and CX=error. Updates validate fully before atomic publication. IDs 0..15 have
+independent records; CLI callers outside that range get default CMD/* behavior.
 
+Bit 7 of each private console record's count byte enables SUB (masked from API
+counts). The existing 128-byte SUP patch reserve holds records and path scratch;
+additional shared launch scratch is in SUP's code segment under CLI_SYNC.
+Historic SYSDAT, PD and UDA layouts remain unchanged. Function 165 is dispatched
+locally in supif.sup without extending SYSENT.
+
+When a SUB is found, CLI closes it, qualifies its name, preserves its password
+and arguments, and loads SUBMIT.CMD using CMD-only lookup. The new process has
+the original caller's working drive/user. Reserved base-page bytes 58h..5Bh
+carry 'SU',1,resolved_script_user to the matching rebuilt SUBMIT. CLI clears
+that marker for ordinary launches. SUBMIT uses this exact user and explicit
+script drive without its legacy fallback; reopening each record retains that
+selection. Explicit SUBMIT invocations retain their original lookup behavior.
+SUBMIT passes the parsed script password through DMA on each reopen. Nested
+scripts, final-command chaining and $INCLUDE continue to use the common CLI.
 
 | Change | Sources / entry points | Behavior |
 | --- | --- | --- |

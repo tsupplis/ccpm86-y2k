@@ -14,7 +14,7 @@
 
 	jmps submit
 
-	db	'SUBMIT 1.3 '
+	db	'SUBMIT 1.4 '
 	db	'COPYRIGHT (C) 1983,'
 	db	' DIGITAL RESEARCH '
 	db	'3/21/83'
@@ -72,6 +72,8 @@ e_bad_open	   equ  30  ; bad ret. from BDOS open
 e_nullcmd	   equ	31  ; null command sent
 e_ill_lst	   equ	37  ; illegal list device
 e_ill_passwd	   equ	38  ; illegal password
+e_nosubmit         equ  44
+e_subtail          equ  43
 e_abort            equ  40  ; aborted in CLI
 
 p_prior			equ	05H		;process descriptor priority
@@ -138,6 +140,19 @@ setp:	mov cl,mpm_setprior
 	mov command_user,al
 	mov defuser,al
 
+    mov bx,058h
+    cmp word ptr [bx],05553h ! jne normal_script
+    cmp byte ptr 2[bx],1 ! jne normal_script
+    cmp byte ptr 3[bx],15 ! ja normal_script
+    mov dl,3[bx] ! mov command_user,dl
+    call setuser
+    mov si,offset fcb
+    mov word ptr ftype[si],05553h ! mov byte ptr ftype+2[si],'B'
+    or byte ptr mode2[si],80h
+    mov dx,si ! call openfile
+    cmp al,0ffh ! jne exists
+    jmp openfail
+normal_script:
 	mov si,offset fcb
 	mov byte ptr ftype[si],'S'	;look for file with type = SUB
 	mov byte ptr ftype+1[si],'U'
@@ -588,16 +603,29 @@ notprinter:
 			    jz notinclude
 			call parsefilename	; CX = 0 if ok
 			cmp cx,0 ! jne includerr; no tail
-			    mov si,pdadr
-			    add si,p_name
-			    mov di,offset clicmd
-			    mov cl,4
-			    push ds ! pop es
-			    push ds ! mov ds,sysdatseg
-			             		; overwrite $include with
-			    rep movsw		; name of this program
-						; for recursive submits
-			    pop ds
+    ; Build self.CMD plus the original arguments in the disposable CMD
+    ; buffer. An earlier SUBMIT.SUB must never intercept $INCLUDE.
+    mov si,pdadr ! add si,p_name
+    mov di,offset cmd
+    push ds ! pop es
+    push ds ! mov ds,sysdatseg
+    mov cx,8
+include_self:
+    lodsb
+    cmp al,' ' ! je include_suffix
+    stosb ! loop include_self
+include_suffix:
+    pop ds
+    mov ax,0432eh ! stosw        ; '.C'
+    mov ax,0444dh ! stosw        ; 'MD'
+    mov si,offset clicmd+8       ; keep the blank after $INCLUDE
+include_tail:
+    cmp di,offset cmd+129 ! jae includerr
+    lodsb ! stosb
+    or al,al ! jnz include_tail
+    mov cx,di ! sub cx,offset cmd ! dec cx
+    mov clicmdlen,cx ! inc cx
+    mov si,offset cmd ! mov di,offset clicmd ! rep movsb
 			    mov dx,offset includemsg
 			    call print_string
 			    
@@ -861,11 +889,11 @@ prnum:		; dl = num (0-15)
 prnum_one:	add dl,'0'
 		jmp prchar
 
-terminate:	xor dx,dx ! mov cx,dx ! jmps mpm1
-charin:		mov cl,mpm_conin ! jmps mpm1
-prchar:		mov cl,mpm_conout ! jmps mpm1
+terminate:	xor dx,dx ! mov cx,dx ! jmp mpm1
+charin:		mov cl,mpm_conin ! jmp mpm1
+prchar:		mov cl,mpm_conout ! jmp mpm1
 getuser:	mov dl,0ffh
-setuser:	mov cl,mpm_usercode ! jmps mpm1
+setuser:	mov cl,mpm_usercode ! jmp mpm1
 crlf:		mov dx,offset crlfstr
 		;jmp printstring
 print_string:	push ds ! mov ax,cs ! mov ds,ax
@@ -883,19 +911,31 @@ mask:
 		loop mask
 print_it:
 		pop es
-		mov cl,mpm_conwrite ! jmps mpm1
-getconsole:	mov cl,mpm_getdefcon ! jmps mpm1
-setconsole:	mov cl,mpm_setdefcon ! jmps mpm1
-setdisk:	mov cl,mpm_diskselect ! jmps mpm1
-getdisk:	mov cl,mpm_getdefdisk ! jmps mpm1
-setlist:	mov cl,mpm_setdeflst ! jmps mpm1
-getlist:	mov cl,mpm_getdeflst ! jmps mpm1
-attach:		mov cl,mpm_conattach ! jmps mpm1
-detach:		mov cl,mpm_condetach ! jmps mpm1
-conread:	mov cl,mpm_conread ! jmps mpm1
-openfile:	mov cl,mpm_openfile ! jmps mpm1
-closefile:	mov cl,mpm_closefile ! jmps mpm1
-readfile:	mov cl,mpm_readfile ;!; jmps mpm1
+		mov cl,mpm_conwrite ! jmp mpm1
+getconsole:	mov cl,mpm_getdefcon ! jmp mpm1
+setconsole:	mov cl,mpm_setdefcon ! jmp mpm1
+setdisk:	mov cl,mpm_diskselect ! jmp mpm1
+getdisk:	mov cl,mpm_getdefdisk ! jmp mpm1
+setlist:	mov cl,mpm_setdeflst ! jmp mpm1
+getlist:	mov cl,mpm_getdeflst ! jmp mpm1
+attach:		mov cl,mpm_conattach ! jmp mpm1
+detach:		mov cl,mpm_condetach ! jmp mpm1
+conread:	mov cl,mpm_conread ! jmp mpm1
+openfile:
+    push dx ! push si ! push di ! push es
+    push ds ! pop es
+    mov di,offset dma ! mov al,' ' ! mov cx,8 ! rep stosb
+    mov bx,051h
+    xor cx,cx ! mov cl,2[bx]
+    cmp cl,8 ! ja no_script_password
+    mov si,[bx]
+    mov di,offset dma
+    rep movsb
+no_script_password:
+    pop es ! pop di ! pop si ! pop dx
+    mov cl,mpm_openfile ! jmp mpm1
+closefile:	mov cl,mpm_closefile ! jmp mpm1
+readfile:	mov cl,mpm_readfile ;!; jmp mpm1
 mpm1:
 	jmp mpm
 
@@ -917,6 +957,8 @@ clierrtab	dw	e_nullcmd,	0	;null command
 		dw	e_bad_read,	loaderr	;
 		dw	e_bad_open,	openerr	;
 		dw	e_q_full,	qfullerr;
+		dw	e_nosubmit,	nosubmiterr;
+		dw	e_subtail,	subtailerr;
 		dw	e_abort,	aborterr;
 
 			; a few extra entries for future errors
@@ -945,6 +987,8 @@ errstr		db	'CP/M Error: $'
 memerr		db	'Not Enough Memory$'
 pderr		db	'PD Table Full$'
 fnameerr	db	'Bad File Spec$'
+nosubmiterr db 'SUBMIT.CMD not found$'
+subtailerr db 'Command tail too long for SUBMIT$'
 catcherr	db	'Unknown CLI Error$'	;we should never print
 						;this error, it means
 						;we have added CLI

@@ -1632,42 +1632,58 @@
 
     SETDEF
     SETDEF drive-list
+    SETDEF [ORDER=(CMD)]
+    SETDEF [ORDER=(CMD,SUB)]
+    SETDEF drive-list [ORDER=(CMD,SUB)]
 
-    Display or change the command drive search list for this console.
-    With no arguments, SETDEF displays the current settings. The default
-    is *. SETDEF * restores that default.
+    Display or change command search settings for this console. With no
+    arguments, SETDEF displays the drive list and file order. Defaults
+    are * (current drive) and CMD only. Sys Disk is shown last in the
+    drive list as a fixed role. Path and order are independent:
+    changing either preserves the other. Invalid input changes neither.
 
-    A list contains one to four comma-separated entries: * for the current
+    A list has one to four comma-separated entries: * for the current
     drive, or A: through P:. Spaces/tabs around entries are allowed.
-    Invalid input leaves the previous settings unchanged.
 
-    Examples:
+    SETDEF *,A:,C:                 Search current drive, A:, then C:.
+    SETDEF M:,*                    Prefer utilities copied to M:.
+    SETDEF [ORDER=(CMD,SUB)]        Enable automatic SUB scripts.
+    SETDEF * [ORDER=(CMD)]          Restore both defaults.
 
-    SETDEF *,A:,C:   Search current drive, then A:, then C:.
-    SETDEF M:,*      Prefer commands copied to the memory disk.
-    A:SETDEF *       Restore the default using SETDEF on A:.
+    CMD only is the default. CMD,SUB is the only alternative. SUB alone
+    and SUB,CMD are rejected. Bare SETDEF displays both settings.
 
-    Resident commands have priority. An explicit drive bypasses the list.
-    Missing drives are skipped and duplicate drives are searched once.
-    Loading from another drive preserves your working drive and user.
+    With CMD,SUB enabled, try CMD then SUB on each drive before moving
+    to the next drive. A SUB on an earlier drive can therefore precede
+    a CMD on a later drive. Explicit .CMD selects only CMD. Explicit
+    .SUB selects a script even in CMD-only mode. Other types are invalid.
+    An existing invalid CMD reports its load error without trying SUB.
 
-    The system drive is always the final fallback, using the existing SYS
-    file rules. SETDEF cannot remove or reorder this fallback. If the
-    system drive is also in the normal list, it is searched there normally
-    and is not searched a second time. SYSDISK changes the system drive
-    globally; SETDEF settings belong only to this console.
+    Resident commands have priority for names without an explicit type.
+    An explicit drive bypasses the list. Missing drives are skipped and
+    duplicates searched once. Your working drive and user are preserved.
 
-    The list applies to commands from TMP, SUBMIT and program chaining.
-    Each console starts with *. Settings last until reboot or a new
-    SETDEF. Put SETDEF in STARTUP.nnn, or in a startup SUBMIT script, to
-    configure a console automatically.
+    The system drive is the final fallback, with existing SYS-file
+    rules for CMD and SUB. If also in the normal list, it is searched
+    there normally and not again. SYSDISK changes that drive globally;
+    SETDEF settings are local to this console and last until reboot.
 
-    M: must already exist and contain the utilities you want to run.
+    Automatic SUB execution requires the matching rebuilt SUBMIT.CMD,
+    searched as CMD only through the same path and system fallback.
+    SUBMIT.CMD not found means the script did not run. An oversized
+    expanded tail reports Command tail too long for SUBMIT; arguments
+    are never truncated. The expanded tail (qualified script name,
+    optional password and arguments) can contain at most 126 characters.
+
+    SUBMIT's parameter/quoting rules are unchanged. Commands inside
+    scripts and program chaining use these settings. An explicit SUBMIT
+    script command retains SUBMIT's current/system script lookup.
+
+    Put SETDEF in STARTUP.nnn or a startup SUBMIT script to configure a
+    console automatically. A:SETDEF specifies the utility's own drive.
+    M: must already exist and contain the utilities to run.
     SETDEF does not allocate, format or copy files to the memory disk.
-
-    This version supports drive searching only. CMD is still the program
-    type; use SUBMIT for SUB files. ORDER, TEMPORARY and DISPLAY options
-    are not supported.
+    TEMPORARY and DISPLAY options are not implemented.
 
 ///1SYSDISK
     Syntax:

@@ -137,6 +137,24 @@ cli_parse:
 	    mov clierr,cx
 	    jmp cli_exit
 cli_gprs:
+    ; Explicit file types bypass resident queues. Only CMD and SUB execute.
+    mov cs:cp_wanted,0
+    cmp word ptr cli_fcb+9,02020h ! jne cp_typed
+    cmp byte ptr cli_fcb+11,' ' ! je cp_untyped
+cp_typed:
+    mov cs:cp_wanted,1
+    cmp word ptr cli_fcb+9,04d43h ! jne cp_subtype
+    cmp byte ptr cli_fcb+11,'D' ! je cp_type_ok
+cp_subtype:
+    mov cs:cp_wanted,2
+    cmp word ptr cli_fcb+9,05553h ! jne cp_badtype
+    cmp byte ptr cli_fcb+11,'B' ! je cp_type_ok
+cp_badtype:
+    mov clierr,e_badftype ! jmp cli_exit
+cp_type_ok:
+    call shtal
+    jmp cli_fload
+cp_untyped:
 
 	call shtal
 
@@ -261,17 +279,15 @@ cli_gpd:
 	mov u_dma_ofst,offset cli_dma
 	mov u_dma_seg,ds
 
-	mov si,offset cli_fcb
-	mov byte ptr fcb_type[si],'C'
-	mov byte ptr fcb_type+1[si],'M'
-	mov byte ptr fcb_type+2[si],'D'
-
-		; Open the CMD file
-
+    mov cs:cp_script,0
     call cli_path_open
+    cmp bl,0ffh ! je cp_open_error
+    cmp cs:cp_script,0 ! je cli_gopen
+    ; A script is data: retain its exact location, then load SUBMIT as CMD.
+    call cp_launch_submit
     cmp bl,0ffh ! jne cli_gopen
+cp_open_error:
     mov clierr,e_bad_open
-    cmp bh,0 ! je cli_rmpd2
     or cx,cx ! jz cli_rmpd2
     mov clierr,cx
 cli_rmpd2:
@@ -453,6 +469,14 @@ endtail:
 			rep movsw
 			pop es
 ctdone:
+    push es ! mov es,cli_bpage
+    mov di,058h ! xor ax,ax ! stosw ! stosw
+    cmp cs:cp_script,0 ! je cp_no_marker
+    mov di,058h ! mov ax,05553h ! stosw
+    mov al,1 ! stosb
+    mov al,cs:cp_script_user ! stosb
+cp_no_marker:
+    pop es
 
 		; 10. Create the process
 
@@ -692,12 +716,10 @@ conasn:	mov cx,f_conassign ! mov dx,offset cli_acb
 	jmps jos
 
 
-; SETDEF local API, BDOS 165, DS:DX -> ten-byte versioned packet:
-; 'S','D',1, operation (0=query,1=set), count (1..4), four entries,
-; system drive (query output). Entries: FF=current drive, 00..0F=A..P.
-; Unused entries are zero. BX=0 success, FFFF failure (CX=error).
-; Settings belong to the caller's console. Zero table count means default *.
-; No SYSDAT/PD/UDA offsets change. This API does not dispatch or perform I/O.
+; Local BDOS 165: v1 packet is ten bytes (drive search API).
+; v2 adds byte 10: order 0=CMD, 1=CMD,SUB. Operations are bit masks:
+; 0=query, 1=set path, 2=set order, 3=set both (v1 supports 0/1 only).
+; Count byte in each private console record has order in bit 7.
 setdef_ent:
     mov bx,rlr
     xor ax,ax ! mov al,p_cns[bx]
@@ -706,14 +728,22 @@ setdef_ent:
 sd_console:
     mov bx,ax ! shl bx,1 ! shl bx,1 ! add bx,ax
     add bx,offset sd_paths
-    push ds
-    mov ds,u_wrkseg
+    push ds ! mov ds,u_wrkseg
     mov si,dx
     cmp si,0fff6h ! ja sd_invalid
     cmp word ptr [si],04453h ! jne sd_invalid
-    cmp byte ptr 2[si],1 ! jne sd_invalid
-    cmp byte ptr 3[si],0 ! je sd_query
-    cmp byte ptr 3[si],1 ! jne sd_invalid
+    mov al,2[si]
+    cmp al,1 ! je sd_v1
+    cmp al,2 ! jne sd_invalid
+    cmp si,0fff5h ! ja sd_invalid
+    cmp byte ptr 3[si],3 ! ja sd_invalid
+    test byte ptr 3[si],2 ! jz sd_check_path
+    cmp byte ptr 10[si],1 ! ja sd_invalid
+    jmps sd_check_path
+sd_v1:
+    cmp byte ptr 3[si],1 ! ja sd_invalid
+sd_check_path:
+    test byte ptr 3[si],1 ! jz sd_validated
     xor cx,cx ! mov cl,4[si]
     cmp cl,1 ! jb sd_invalid
     cmp cl,4 ! ja sd_invalid
@@ -729,21 +759,27 @@ sd_invalid:
     pop ds
     mov cx,e_badfname ! mov bx,0ffffh ! ret
 sd_validated:
-    ; Validate fully before publishing. Interrupt exclusion makes a whole
-    ; settings record atomic against CLI snapshots and another SETDEF.
     pushf ! cli
-    mov al,4[si] ! mov cs:[bx],al
-    xor cx,cx ! mov cl,al
+    test byte ptr 3[si],1 ! jz sd_order
+    mov al,cs:[bx] ! and al,080h ! or al,4[si]
+    mov cs:[bx],al
+    xor cx,cx ! mov cl,4[si]
     mov di,si ! add di,5
     push bx ! inc bx
 sd_publish:
     mov al,[di] ! mov cs:[bx],al
     inc di ! inc bx ! loop sd_publish
     pop bx
-    popf
+sd_order:
+    test byte ptr 3[si],2 ! jz sd_query
+    and cs:byte ptr [bx],07fh
+    cmp byte ptr 10[si],0 ! je sd_query
+    or cs:byte ptr [bx],080h
 sd_query:
-    pushf ! cli
-    mov al,cs:[bx]
+    cmp byte ptr 2[si],2 ! jne sd_read_count
+    mov al,cs:[bx] ! mov cl,7 ! shr al,cl ! mov 10[si],al
+sd_read_count:
+    mov al,cs:[bx] ! and al,07fh
     or al,al ! jnz sd_read
     mov byte ptr 4[si],1
     mov byte ptr 5[si],0ffh
@@ -760,8 +796,7 @@ sd_read_loop:
     mov al,cs:[bx] ! mov [di],al
     inc bx ! inc di ! loop sd_read_loop
 sd_read_done:
-    popf
-    pop ds
+    popf ! pop ds
     mov al,srchdisk
     push ds ! mov ds,u_wrkseg
     mov 9[si],al ! pop ds
@@ -769,15 +804,12 @@ sd_read_done:
 ; Called while CLI_SYNC is owned. Take a stable path snapshot, and preserve
 ; the pristine parsed FCB because BDOS open overwrites reserved/attribute fields.
 cli_path_open:
-    cmp cli_fcb,0 ! je cp_implicit
-    mov u_error_mode,0feh
-    call flopn ! ret
-cp_implicit:
     push es
     mov ax,cs ! mov es,ax
     mov si,offset cli_fcb ! mov di,offset cp_fcb
     mov cx,fcblen+1 ! rep movsb
     pop es
+    mov cs:cp_mode,0
     xor bx,bx ! mov bl,cli_cns
     cmp bl,16 ! jb cp_console
     xor bx,bx
@@ -787,6 +819,8 @@ cp_console:
     add bx,offset sd_paths
     pushf ! cli
     mov al,cs:[bx]
+    mov cs:cp_mode,al
+    and al,07fh
     or al,al ! jz cp_default_locked
     mov cs:cp_count,al
     mov ax,cs:1[bx] ! mov cs:word ptr cp_entries,ax
@@ -802,6 +836,11 @@ cp_begin:
     mov cs:cp_index,0
     mov cs:cp_seen,0
     mov u_error_mode,0ffh
+    cmp cli_fcb,0 ! je cp_next
+    mov u_error_mode,0feh
+    mov al,cli_fcb ! dec al
+    mov cs:cp_sys,0
+    jmp cp_try_drive
 cp_next:
     xor bx,bx ! mov bl,cs:cp_index
     cmp bl,cs:cp_count ! jae cp_system
@@ -812,43 +851,152 @@ cp_next:
 cp_drive:
     call cp_mark
     jnz cp_next
-    call cp_restore
-    inc al ! mov cli_fcb,al
-    call flopn
+    mov cs:cp_sys,0
+    call cp_try_drive
     cmp bl,0ffh ! jne cp_return
     cmp bh,0 ! je cp_next
-    cmp bh,4 ! je cp_next       ; absent optional drive: continue quietly
-    ret                         ; do not mask other disk/password errors
+    cmp bh,4 ! je cp_next
+    ret
 cp_system:
     mov al,srchdisk
     call cp_mark
-    jnz cp_missing              ; already searched this drive normally
-    call cp_restore
-    inc al ! mov cli_fcb,al
-    call flopn
-    cmp bl,0ffh ! je cp_system_fail
-    mov si,offset cli_fcb
-    test byte ptr fcb_type+1[si],080h ! jnz cp_return
-    call flclse
-    mov bx,rlr
-    cmp p_user[bx],0 ! je cp_missing
-    mov p_user[bx],0
-    mov al,srchdisk
-    call cp_restore
-    inc al ! mov cli_fcb,al
-    call flopn
-    cmp bl,0ffh ! je cp_system_fail
-    mov si,offset cli_fcb
-    test byte ptr fcb_type+1[si],080h ! jnz cp_return
-    call flclse
-    jmps cp_missing
-cp_system_fail:
+    jnz cp_missing
+    mov cs:cp_sys,1
+    call cp_try_drive
+    cmp bl,0ffh ! jne cp_return
     cmp bh,0 ! je cp_missing
     cmp bh,4 ! je cp_missing
 cp_return:
     ret
 cp_missing:
     mov bx,00ffh ! mov cx,e_bad_open ! ret
+
+; Try CMD then SUB on one drive. Explicit extensions select one type.
+cp_try_drive:
+    mov cs:cp_disk,al
+    mov cs:cp_type,0
+    cmp cs:cp_wanted,2 ! jne cp_try_type
+    mov cs:cp_type,1
+cp_try_type:
+    mov bx,rlr ! mov al,cli_user ! mov p_user[bx],al
+    call cp_restore
+    mov al,cs:cp_disk ! inc al ! mov cli_fcb,al
+    mov word ptr cli_fcb+9,04d43h ! mov byte ptr cli_fcb+11,'D'
+    cmp cs:cp_type,0 ! je cp_do_open
+    mov word ptr cli_fcb+9,05553h ! mov byte ptr cli_fcb+11,'B'
+cp_do_open:
+    call flopn
+    cmp bl,0ffh ! je cp_type_fail
+    cmp cs:cp_sys,0 ! jne cp_check_sys
+    jmp cp_found
+cp_check_sys:
+    test byte ptr cli_fcb+10,080h ! jnz cp_found
+    call flclse
+    mov bx,rlr
+    cmp p_user[bx],0 ! je cp_type_missing
+    mov p_user[bx],0
+    call cp_restore
+    mov al,cs:cp_disk ! inc al ! mov cli_fcb,al
+    mov word ptr cli_fcb+9,04d43h ! mov byte ptr cli_fcb+11,'D'
+    cmp cs:cp_type,0 ! je cp_sys_open
+    mov word ptr cli_fcb+9,05553h ! mov byte ptr cli_fcb+11,'B'
+cp_sys_open:
+    call flopn
+    cmp bl,0ffh ! je cp_type_fail
+    test byte ptr cli_fcb+10,080h ! jnz cp_found
+    call flclse
+    jmps cp_type_missing
+cp_type_fail:
+    cmp bh,0 ! je cp_type_missing
+    ret
+cp_type_missing:
+    cmp cs:cp_type,0 ! jne cp_local_missing
+    cmp cs:cp_wanted,0 ! jne cp_local_missing
+    test cs:cp_mode,080h ! jz cp_local_missing
+    mov cs:cp_type,1
+    jmp cp_try_type
+cp_local_missing:
+    jmp cp_missing
+cp_found:
+    cmp cs:cp_type,0 ! jne cp_sub_found
+    ret
+cp_sub_found:
+    mov cs:cp_script,1
+    ret
+
+; Launch exact script via SUBMIT.CMD using the same drive path, CMD-only.
+; Base-page 58h..5Bh carries 'SU',1,user to the matching SUBMIT utility.
+cp_launch_submit:
+    mov bx,rlr ! mov al,p_user[bx]
+    test byte ptr cli_fcb+8,080h ! jz cp_user_known
+    xor al,al
+cp_user_known:
+    mov cs:cp_script_user,al
+    call flclse
+    push ds ! push es
+    mov ax,cs ! mov es,ax
+    mov di,offset cp_tail
+    mov al,cs:cp_disk ! add al,'A' ! stosb
+    mov al,':' ! stosb
+    mov si,offset cp_fcb+1 ! mov cx,8
+cp_script_name:
+    mov al,cs:[si] ! inc si ! and al,07fh
+    cmp al,' ' ! je cp_name_done
+    stosb ! loop cp_script_name
+cp_name_done:
+    mov ax,0532eh ! stosw         ; '.S'
+    mov ax,04255h ! stosw         ; 'UB'
+    mov si,offset cp_fcb+16
+    xor cx,cx
+    ; cp_fcb lives in CS, so read password length there explicitly.
+    mov cl,cs:cp_fcb+26
+    jcxz cp_no_password
+    mov al,';' ! stosb
+    push ds ! mov ax,cs ! mov ds,ax
+    rep movsb ! pop ds
+cp_no_password:
+    cmp cli_cmdtail,0 ! je cp_tail_end
+    mov si,offset cli_cmdtail
+    cmp byte ptr [si],' ' ! je cp_copy_args
+    cmp byte ptr [si],9 ! je cp_copy_args
+    mov al,' ' ! stosb
+cp_copy_args:
+    cmp di,offset cp_tail+127 ! jae cp_tail_long
+    lodsb ! stosb
+    or al,al ! jnz cp_copy_args
+    jmps cp_tail_ready
+cp_tail_end:
+    xor al,al ! stosb
+cp_tail_ready:
+    push ds ! pop es
+    mov ax,cs ! mov ds,ax
+    mov si,offset cp_tail ! mov di,offset cli_cmdtail
+    mov cx,128 ! rep movsb
+    pop es ! pop ds
+    ; Reset the caller's user before locating the executable.
+    mov bx,rlr ! mov al,cli_user ! mov p_user[bx],al
+    mov di,offset cli_fcb ! mov cx,fcblen+1
+    push es ! push ds ! pop es
+    xor ax,ax ! rep stosb
+    mov di,offset cli_fcb+1
+    mov si,offset cp_submit
+    push ds ! mov ax,cs ! mov ds,ax
+    mov cx,11 ! rep movsb
+    pop ds ! pop es
+    mov bx,cli_pd ! add bx,p_name
+    mov si,offset cli_fcb+1 ! mov di,bx
+    push es ! push ds ! pop es
+    mov cx,8 ! rep movsb ! pop es
+    mov cs:cp_wanted,1
+    call cli_path_open
+    cmp bl,0ffh ! jne cp_submit_done
+    cmp bh,0 ! jne cp_submit_done
+    mov cx,e_nosubmit
+cp_submit_done:
+    ret
+cp_tail_long:
+    pop es ! pop ds
+    mov bx,00ffh ! mov cx,e_subtail ! ret
 cp_mark:
     ; AL=zero-based drive; ZF=1 when first visit. Preserve AL.
     mov cl,al ! mov dx,1 ! shl dx,cl
@@ -863,6 +1011,16 @@ cp_restore:
     mov si,offset cp_fcb ! mov di,offset cli_fcb
     mov cx,fcblen+1 ! rep movsb
     pop es ! pop ds ! pop ax ! ret
+
+cp_mode db 0
+cp_wanted db 0
+cp_sys db 0
+cp_disk db 0
+cp_type db 0
+cp_script db 0
+cp_script_user db 0
+cp_tail rb 128
+cp_submit db 'SUBMIT  CMD'
 
 questr		db	' Msg Qued',0
 userstr		db	'(User 0)',0

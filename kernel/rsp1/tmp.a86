@@ -100,6 +100,8 @@ e_no_umd           equ  18  ; no memory descriptors
 e_nondp            equ  17  ; no 8087
 e_no_cseg          equ  33  ; CMD has no code group
 e_fixuprec         equ  41  ; invalid CMD relocation
+e_nosubmit         equ  44
+e_subtail          equ  43
 e_abort            equ  40  ; aborted in CLI
 
 
@@ -648,6 +650,8 @@ clierrtab	dw	e_nullcmd,	0	;null command
 		dw	e_no_umd,	mdfullerr
         dw e_nondp,ndperr
         dw e_no_cseg,csegerr
+        dw e_nosubmit,nosubmiterr
+        dw e_subtail,subtailerr
         dw e_fixuprec,fixuperr
         dw e_ill_lst,listerr
 		dw	e_abort,	aborterr;
@@ -678,6 +682,8 @@ ndperr db 'Command requires an 8087 coprocessor$'
 csegerr db 'Invalid CMD file: missing code group$'
 fixuperr db 'Invalid CMD relocation data$'
 listerr db 'Invalid printer/list device$'
+nosubmiterr db 'SUBMIT.CMD not found$'
+subtailerr db 'Command tail too long for SUBMIT$'
 catcherr db 'Unknown command error, code $'
 drive_unavailable db 'Drive unavailable: $'
 help_too_long db 'Help request too long (maximum 125 characters including ?)$'
