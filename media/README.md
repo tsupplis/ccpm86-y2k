@@ -17,11 +17,11 @@ The build:
 Outputs (each exactly 327,680 bytes):
 
 - `ccpm86.img`: rebuilt kernel, startup clock display, everyday commands,
-  the indexed help file, and CONFIG, FUNCTION, PCETIME, and SYSDISK from `../base/`.
+  the indexed help file, DREDIX, CONFIG, and SYSDISK.
   `PIP.CMD` is the CP/M-oriented PIP3 build.
 - `ccpmtools.img`: the same kernel plus assemblers, debugger, generators,
-  HEXCOM, PIP, TOD, and TCOPY, plus DSKMAINT, HDMAINT, and SETUP from
-  `../base/`. This disk can also boot by itself.
+  HEXCOM, PIP, TOD, TCOPY, and SYSTAT, plus the other original utilities
+  in `../base/`. This disk can also boot by itself.
 - `ccpmtest.img`: empty scratch disk, created by `make ccpmtest.img` or
   `make test`.
 

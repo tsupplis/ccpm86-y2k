@@ -51,7 +51,6 @@ update_phys()
 {
     WORD r, c, end, a;
     BYTE line[81];
-    bdos_conout("\033w");
     for (r = 0; r < 24; r++) {
         if (!dirty[r]) continue;
         c = 0;
@@ -349,7 +348,7 @@ VDscroll(r1, c1, r2, c2, dir, amt)
 WORD r1, c1, r2, c2, dir, amt;
 {
     WORD r, c, src, dest, step, last;
-    if (amt <= 0) return;
+    if (amt <= 0 || r1 > r2 || c1 > c2) return;
     /* The editor supplies source rows, with destination displaced by amt. */
     step = dir == D_UP ? 1 : -1;
     r = dir == D_UP ? r1 : r2;

@@ -5,6 +5,9 @@ CMDINFO=cmdinfo
 
 TOOLS=dredix.cmd
 
+.DELETE_ON_ERROR:
+.PHONY: all clean
+
 all: $(TOOLS)
 
 dredix.cmd: ed.obj common.obj ekey.obj ebuf.obj ecmdglb.obj ecmdio.obj epat.obj \
@@ -16,7 +19,7 @@ dredix.cmd: ed.obj common.obj ekey.obj ebuf.obj ecmdglb.obj ecmdio.obj epat.obj 
 $(patsubst %.c,%.obj,$(filter-out iosubs.c,$(wildcard *.c))): $(wildcard *.h)
 
 dredix.inp: Makefile
-	printf '%s\n' 'dredix=ed,' 'common,' 'ekey,' 'ebuf,' 'ecmdglb,' \
+	printf '%s\r\n' 'dredix=ed,' 'common,' 'ekey,' 'ebuf,' 'ecmdglb,' \
 	  'ecmdio,' 'epat,' 'emem,' 'ecmdblk,' 'ewv,' 'ehelp,' 'elesson,' \
 	  'ewdv,' 'ecmdsta,' 'vd,' 'vk' > $@
 

@@ -12,18 +12,18 @@ SYSTEM_COMMANDS = ../commands/chset/chset.cmd ../commands/date/date.cmd \
     ../commands/help/help.cmd ../commands/help/help.hlp \
     ../commands/initdir/initdir.cmd ../commands/ren/ren.cmd \
     ../commands/sdir/sdir.cmd ../commands/set/set.cmd ../commands/show/show.cmd \
-    ../commands/submit/submit.cmd ../commands/systat/systat.cmd \
+    ../commands/submit/submit.cmd \
     ../commands/tod/tod.cmd ../commands/type/type.cmd \
     ../commands/vcmode/vcmode.cmd ../commands/dredix/dredix.cmd
 
-BASE_SYSTEM_COMMANDS = ../base/config.cmd ../base/function.cmd \
-    ../base/pcetime.cmd ../base/sysdisk.cmd
-BASE_TOOLS_COMMANDS = ../base/dskmaint.cmd ../base/hdmaint.cmd ../base/setup.cmd
+BASE_SYSTEM_COMMANDS = ../base/config.cmd ../base/sysdisk.cmd
+BASE_TOOLS_COMMANDS = $(filter-out $(BASE_SYSTEM_COMMANDS),$(wildcard ../base/*.cmd))
 
 TOOLS_COMMANDS = ../commands/asm86/asm86.cmd ../commands/asm80/asm80.cmd \
     ../commands/ddt86/ddt86.cmd ../commands/ddt86/gentab.cmd \
     ../commands/gencmd/gencmd.cmd ../commands/genccpm/genccpm.cmd \
-    ../commands/hexcom/hexcom.cmd ../commands/tod/tod.cmd ../boot/tcopy.cmd
+    ../commands/hexcom/hexcom.cmd ../commands/tod/tod.cmd ../boot/tcopy.cmd \
+    ../commands/systat/systat.cmd
 
 COMMAND_DIRS = chset date era help initdir pip ren sdir set show submit systat tod \
     type vcmode asm86 asm80 ddt86 gencmd genccpm hexcom dredix
@@ -82,7 +82,7 @@ check: test
 check-qemu: check-media
 	$(PYTHON) ../tools/boot_check.py
 
-test: ccpm86.img ccpmtest.img
+test: ccpm86.img ccpmtools.img
 	./ccpm86
 
 clean:
