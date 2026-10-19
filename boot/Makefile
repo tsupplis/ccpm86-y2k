@@ -1,6 +1,6 @@
 PYTHON ?= python3
 ASM86 = cpm86_asm86
-H862BIN = $(PYTHON) ../tools/h862bin.py
+H862BIN = h862bin
 
 .PHONY: all check clean
 .DELETE_ON_ERROR:
@@ -9,7 +9,7 @@ all: boottrack.bin
 %.h86: %.a86
 	$(ASM86) $<
 
-%.bin: %.h86 ../tools/h862bin.py
+%.bin: %.h86
 	$(H862BIN) $< $@
 
 # The working 320 KB disk's reserved track, built entirely from source:

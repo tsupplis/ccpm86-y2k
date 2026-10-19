@@ -107,6 +107,7 @@ no general application INT 10h layer is provided.
 
 Build: [cpm86-crossdev](https://github.com/tsupplis/cpm86-crossdev), make,
 cpmtools, Python 3, Git, tar, zip. Emulators: PCE (interactive), QEMU (checks).
+The boot build requires native `h862bin` from `cpm86-cmdtools` on PATH.
 
 | Command | Result |
 | --- | --- |

@@ -13,8 +13,9 @@ Root `make dist` copies the three distribution images to the root alongside
 Each image is 327,680 bytes. `PIP.CMD` is PIP4 with the `3.1N` banner.
 `base.img` is the empty physical/CHS filesystem template and original boot
 reference; `make clean` leaves it intact. Every generated image receives the
-source-built `../boot/boottrack.bin`, verified byte-for-byte against that reference. The older `dev/mbas522.cmd` remains an archive
-reference and is not placed on the developer disk.
+source-built `../boot/boottrack.bin`, verified byte-for-byte against that reference.
+The older `dev/mbas522.cmd` remains an archive reference and is not placed on the
+developer disk.
 
 ## Build pipeline
 
@@ -28,10 +29,10 @@ reference and is not placed on the developer disk.
 | Populate | Untwist → cpmtools format `ccpm86-320` → twist back |
 | Verify | Extract and compare every packaged file; compare boot tracks with the source-built track and verify sizes |
 
-Recipes are in the Makefiles. `../tools/h862bin.py` extracts the assembled
-boot binaries; `../tools/cpm86twist.py` converts floppy track order.
-[Boot sources and track layout](../boot/README.md). Never use cpmtools directly on a physical
-320 KB image: head 1 has reversed cylinder order.
+Recipes are in the Makefiles. `h862bin` from the companion `cpm86-cmdtools`
+extracts the assembled boot binaries; `../tools/cpm86twist.py` converts floppy track order.
+[Boot sources and track layout](../boot/README.md).
+Never use cpmtools directly on a physical 320 KB image: head 1 has reversed cylinder order.
 
 ## Run and verify
 

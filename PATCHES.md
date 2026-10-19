@@ -33,7 +33,7 @@ The functional kernel/RSP changes can be compared with commit `033212a`.
 | Three-byte RTM flags | `commands/genccpm/genc3.c` | Serialize each flag as explicit bytes `FF FF FF`. Compiler-dependent structure layout previously produced `00 FF FF`, allowing the scheduler to interpret FF00h as a process pointer. |
 | Kernel data size | `kernel/sysgen/genccpm.in` | Four directory buffers and two data buffers per shared pool keep data plus resident-process data within 64 KB. |
 | Rebuild dependencies | `kernel/con/Makefile`, `kernel/sysgen/Makefile` | Track included assembly and actual RSP sources; depend on GENCCPM so changed components regenerate the system image. |
-| Boot track | `boot/bootsect.a86`, `boot/loader.a86`, `boot/Makefile`, `tools/h862bin.py` | Rebuild all 4,096 bytes of the working boot track from reconstructed sources; match the local loader extent-counter value of 3. Remove the unrelated alternate loader and TCOPY. |
+| Boot track | `boot/bootsect.a86`, `boot/loader.a86`, `boot/Makefile`, `../cpm86-cmdtools/h862bin.c` | Rebuild all 4,096 bytes of the working boot track from reconstructed sources; match the local loader extent-counter value of 3. Remove the unrelated alternate loader and TCOPY. |
 | Media construction | `media/Makefile`, `tools/cpm86twist.py` | Install the verified source-built boot track. Use CP/M logical track order for cpmtools, then restore physical CHS order, including reversed head-1 cylinders. |
 
 ## Command changes

@@ -1,6 +1,9 @@
 # Source-built 320 KB boot track
 
 `make` assembles the boot sector and loader and creates `boottrack.bin`.
+The native `h862bin` converter comes from the companion `cpm86-cmdtools`.
+The Makefile uses `h862bin` on PATH, like the other cross-development tools.
+
 `make check` compares all 4,096 bytes with the original track in
 `../media/base.img`. The media build installs this generated track before
 untwisting and populating the disk images.
