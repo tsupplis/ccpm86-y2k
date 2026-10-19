@@ -368,6 +368,78 @@ prprinter:		mov dx,offset printermsg
 			call crlf
 			jmp nextcommand
 notprinter:
+; These commands share TMP's existing console, stack and buffers.
+    ; An explicit file extension still selects an external command.
+    cmp word ptr fcb+9,'  ' ! jne builtin_external
+    cmp byte ptr fcb+11,' ' ! jne builtin_external
+    mov di,offset clscmd ! call match_builtin
+    jne try_sysdisk
+    mov dx,offset cls_sequence ! call printstring
+    jmp nextcommand
+try_sysdisk:
+    mov di,offset sysdiskcmd ! call match_builtin
+    jne builtin_external
+    jmp builtin_sysdisk
+builtin_external:
+    jmp not_builtin
+match_builtin:
+    mov si,offset fcb+1
+    push cs ! pop es
+    mov cx,4 ! repz cmpsw
+    ret
+
+builtin_sysdisk:
+    mov si,parseret
+    or si,si ! jz sysdisk_show
+    inc si
+    cld
+sysdisk_space:
+    lodsb
+    cmp al,' ' ! je sysdisk_space
+    cmp al,tab ! je sysdisk_space
+    or al,al ! jz sysdisk_show
+    and al,5fh ! sub al,'A'
+    cmp al,15 ! ja sysdisk_syntax
+    mov fcb,al                 ; reuse the parsed FCB's drive byte
+    lodsb ! cmp al,':' ! jne sysdisk_syntax
+sysdisk_tail:
+    lodsb
+    cmp al,' ' ! je sysdisk_tail
+    cmp al,tab ! je sysdisk_tail
+    or al,al ! jne sysdisk_syntax
+    mov es,sysdatseg
+    mov bx,0088h ! mov ax,es:[bx]
+    or ax,ax ! jne sysdisk_busy
+    ; Preserve TMP's error mode and default disk across device validation.
+    push word ptr uda+10h
+    call getdisk ! push bx
+    mov cl,45 ! mov dl,0ffh ! call ccpm
+    mov dl,fcb ! call setdisk
+    pop dx                   ; TMP's original default disk
+    pop cx                   ; TMP's original error mode (low byte)
+    push ax ! push cx
+    call setdisk
+    pop dx ! mov cl,45 ! call ccpm
+    pop ax
+    or al,al ! jne sysdisk_device
+    mov es,sysdatseg
+    mov bx,004bh ! mov al,fcb ! mov es:[bx],al
+sysdisk_show:
+    mov dx,offset sysdisk_message ! call printstring
+    mov es,sysdatseg
+    mov bx,004bh ! mov dl,es:[bx]
+    add dl,'A' ! call prchar
+    mov dl,':' ! call prchar
+    call crlf ! jmp nextcommand
+sysdisk_syntax:
+    mov dx,offset sysdisk_badsyntax ! jmps sysdisk_error
+sysdisk_busy:
+    mov dx,offset sysdisk_openfiles ! jmps sysdisk_error
+sysdisk_device:
+    mov dx,offset sysdisk_nodevice
+sysdisk_error:
+    call printstring ! call crlf ! jmp nextcommand
+
 not_builtin:
 			; initialize Cli Control Block
 
@@ -511,6 +583,14 @@ printermsg	db	13,10,'Printer Number = $'
 
 usercmd		db	'USER    '
 printercmd	db	'PRINTER '
+
+clscmd db 'CLS     '
+sysdiskcmd db 'SYSDISK '
+cls_sequence db 27,'E','$'
+sysdisk_message db 'System disk is $'
+sysdisk_badsyntax db 'Invalid drive code, use SYSDISK A:$'
+sysdisk_openfiles db 'Unable to set new system disk because of open files$'
+sysdisk_nodevice db 'Specified device does not exist$'
 
 supmsg		db	'Start up command: $'
 
