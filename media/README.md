@@ -1,50 +1,51 @@
 # Reproducible 320 KB media
 
-Run `make` here (or `make -C media` from the repository root). The build uses
-`base.img`, the empty **physical/CHS** 320 KB floppy with its working boot track, as its boot
-loader template. Keep that input file: it is never modified or removed by
-`make clean`. The loader does not need rebuilding for this media target.
+Run `make` here, or `make -C media` from the repository root.
+Root `make dist` copies the three distribution images to the root alongside
+`y2k-dist.zip`.
 
-The build:
+| Image | Bootable | Contents |
+| --- | --- | --- |
+| `ccpm86.img` | Yes | Kernel, stock commands, ED, HELP, SYSTAT, original configuration/maintenance utilities, source-rebuilt SYSDISK |
+| `ccpmtools.img` | Yes | Kernel, DREDIX, INITDIR, ASM86, DDT86, GENCMD, GENCCPM, TCOPY, PIP, TOD |
+| `ccpmdev.img` | No | RASM86, LINK86, LIB86, XREF86, SID86, CBAS86, CRUN86, Personal BASIC, Microsoft BASIC 5.50A, ASM80, HEXCOM, GENTAB |
 
-1. Builds the commands, console modules, RSPs, and `GENCCPM`, then generates
-   `kernel/sysgen/ccpm.sys`. It also builds `HELP.HLP` from `HELP.DAT`.
-2. Copies the empty `base.img` template to `ccpm86base.img`.
-3. Untwists that empty base, populates it with **cpmtools format
-   `ccpm86-320`**, then twists
-   it back to physical order. Do not run cpmtools directly on a raw image.
+Each image is 327,680 bytes. `PIP.CMD` is PIP4 with the `3.1N` banner.
+`base.img` is an empty physical/CHS template preserving the working boot track;
+`make clean` leaves it intact. The older `dev/mbas522.cmd` remains an archive
+reference and is not placed on the developer disk.
 
-Outputs (each exactly 327,680 bytes):
+## Build pipeline
 
-- `ccpm86.img`: rebuilt kernel, startup clock display, everyday commands,
-  the indexed help file, DREDIX, CONFIG, and SYSDISK.
-  `PIP.CMD` is the PIP4 build with the Concurrent CP/M-86 `3.1N` banner.
-- `ccpmtools.img`: the same kernel plus assemblers, debugger, generators,
-  HEXCOM, PIP, TOD, TCOPY, and SYSTAT, plus the other original utilities
-  in `../base/`. This disk can also boot by itself.
-- `ccpmtest.img`: empty scratch disk, created by `make ccpmtest.img` or
-  `make test`.
+| Step | Operation |
+| --- | --- |
+| Sources | Build commands, kernel components and all nine RSPs; run GENCCPM |
+| Reference check | Require rebuilt SYSDISK to match `../commands/sysdisk/sysdisk.ref` byte-for-byte |
+| Help | Compile `HELP.DAT` into indexed `HELP.HLP` |
+| Template | Copy the empty `base.img` to `ccpm86base.img` |
+| Populate | Untwist → cpmtools format `ccpm86-320` → twist back |
+| Verify | Extract and compare every packaged file; compare boot tracks and sizes |
 
-`STARTUP.0` runs `A:TOD`; clock initialization comes from the kernel's BIOS
-RTC support. The system and temporary drive settings come from
-`kernel/sysgen/genccpm.in`, including when two floppy drives are present.
+Recipes are in the Makefile. The only Python needed for assembly is the
+existing `../tools/cpm86twist.py`. Never use cpmtools directly on a physical
+320 KB image: head 1 has reversed cylinder order.
 
-All image assembly steps are ordinary Makefile recipes; the only Python
-needed for image assembly is the existing track-order conversion tool.
+## Run and verify
 
-## Verification and emulators
+| Command | Action |
+| --- | --- |
+| `make test` / `make check` | Launch PCE |
+| `./ccpm86 vga` | Launch the PCE VGA configuration |
+| `make check-media` | Verify all three distributions and their payloads |
+| `make check-qemu` | Boot both system disks; exercise consoles, SDIR, SYSDISK and DREDIX |
 
-`make test` (also `make check`) builds the system and scratch disks and
-starts the existing PCE launcher. PCE is the default emulator.
+For DREDIX, mount `ccpmtools.img` in B: and run `B:DREDIX`.
+Mount `ccpmdev.img` as a data disk after booting either system disk.
+`STARTUP.0` runs `A:TOD`; kernel RTC support supplies startup date/time.
+Drive defaults, allocation settings and buffers are in
+`../kernel/sysgen/genccpm.in`; patch details are in `../PATCHES.md`.
 
-The optional `make check-qemu` builds the disks and boots both in QEMU with two drives. It
-checks the `A>` prompt, BIOS date/time, yellow status line, and a `DIR`
-command. QEMU runs with `-snapshot`, so verification does not modify media.
-
-`make test` starts the existing PCE launcher, with the system disk in A:
-and the scratch disk in B:. `./ccpm86 vga` can also launch it directly.
-
-For a manual QEMU session:
+A manual QEMU session:
 
 ```sh
 qemu-system-i386 -m 16 -no-fd-bootchk -boot a \
@@ -52,30 +53,25 @@ qemu-system-i386 -m 16 -no-fd-bootchk -boot a \
   -drive file=ccpmtools.img,format=raw,if=floppy,index=1
 ```
 
-`-no-fd-bootchk` is necessary because the DRI media byte at offset 511 is
-`01`, rather than the final byte of a DOS boot signature.
+The DRI media byte at offset 511 is `01`, so `-no-fd-bootchk` is required.
+Automated QEMU checks use snapshots and leave images unchanged.
 
-`make check-media` independently checks image sizes, preserved boot tracks,
-and embedded kernel contents. The optional QEMU check also validates the
-64 KB kernel data limit and RTM flag entries. Directory/data buffers are
-configured as four/two per shared pool to keep the data and RSP area below
-64 KB. A malformed flag table previously let the scheduler interpret
-`FF00` as a process address and crash before the prompt.
-
-To inspect a generated disk:
+Inspect a generated disk:
 
 ```sh
 python3 ../tools/cpm86twist.py untwist ccpm86.img /tmp/ccpm-logical.img
 cpmls -f ccpm86-320 /tmp/ccpm-logical.img
 ```
 
-After making changes with cpmtools, run `twist` on the logical copy to
-produce a physical image. Running `make` again discards manual edits to
-its generated outputs.
+After manual cpmtools edits, twist the logical copy back to physical order.
+The next `make` replaces generated images.
 
 ## Console shortcuts
 
-Ctrl+Alt+1 through Ctrl+Alt+4 select consoles 0 through 3 using the top-row
-number keys. Ctrl+Alt+Tab cycles 0, 1, 2, 3, then back to 0. The original
-Ctrl+numeric-keypad shortcuts remain available. These shortcuts use the
-normal console-switch mechanism and honor its switching restrictions.
+| Keys | Action |
+| --- | --- |
+| Ctrl+Alt+top-row 1–4 | Select console 0–3 |
+| Ctrl+Alt+Tab | Next console, wrapping from 3 to 0 |
+| Ctrl+numeric keypad | Original selection aliases |
+
+All use the normal switch events and honor console ownership/restrictions.

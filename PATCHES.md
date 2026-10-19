@@ -66,3 +66,25 @@ The functional kernel/RSP changes can be compared with commit `033212a`.
 
 Cross-OS Y2K compatibility, physical machines, and all imported development
 binaries are not exhaustively covered by the automated 3.1 guest checks.
+
+## Custom resident commands
+
+`kernel/custrsps/` adds one shared queue-driven process each for `CLS` and
+`SYSDISK`. CLS outputs VT52 ESC-E; SYSDISK queries or changes the system drive
+(`SYSDISK A:`), rejecting invalid drives and changes while files are open.
+The reconstructed original SYSDISK.CMD remains available and byte-identical.
+The resident queue takes precedence over the disk command.
+
+| Command | Resident code | Resident data (including PD, UDA, stack and queue) | Total |
+| --- | ---: | ---: | ---: |
+| CLS | 80 bytes | 800 bytes | 880 bytes |
+| SYSDISK | 208 bytes | 944 bytes | 1,152 bytes |
+
+Together these reserve 2,032 bytes at boot, with no transient program partition
+needed per invocation. Both sleep on their command queues when idle. There is
+one resident instance per command, shared across consoles, rather than a copy
+per console. These commands target this 3.1 kernel's system-data layout.
+
+The status line displays `Console N` when owned by TMP; application names still
+appear while applications own the console. The nine-character display field
+uses one previously blank column, preserving the other status fields.

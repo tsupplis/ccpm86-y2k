@@ -105,13 +105,18 @@ def check(image, second):
                         assert 'Illegal command tail' not in text, text
                         assert 'SDIR' in text, text
                     print(f'{image.name}: SDIR empty tail, wildcard and options passed')
+                    type_command('cls\n')
+                    text, _ = wait_for(lambda t: re.search(r'^A>\s*$', t, re.M) and 'Copyright' not in t)
+                    assert 'Console 0' in text, text
                     type_command('sysdisk\n')
                     wait_for(lambda t: 'System disk is A:' in t and re.search(r'^A>\s*$', t, re.M))
+                    type_command('sysdisk b:\n')
+                    wait_for(lambda t: 'System disk is B:' in t and re.search(r'^A>\s*$', t, re.M))
                     type_command('sysdisk a:\n')
                     wait_for(lambda t: 'System disk is A:' in t and re.search(r'^A>\s*$', t, re.M))
                     type_command('sysdisk nonsense\n')
                     wait_for(lambda t: 'Invalid drive code' in t and re.search(r'^A>\s*$', t, re.M))
-                    print(f'{image.name}: reconstructed SYSDISK query, set and invalid syntax passed')
+                    print(f'{image.name}: resident CLS and SYSDISK query, set and invalid syntax passed')
 
                     type_command('b:dredix\n')
                     type_command('hello\nworld')
@@ -136,6 +141,10 @@ def check(image, second):
                     wait_for(lambda t: 'CCPM' in t and 'SYS' in t and 'SYSDISK' in t)
                     print(f'{image.name}: DREDIX editing, navigation, delete/backspace and exit passed')
 
+                if image.name == 'ccpmtools.img':
+                    # This disk has no SYSDISK.CMD: execution proves residency.
+                    type_command('sysdisk\n')
+                    wait_for(lambda t: 'System disk is A:' in t and re.search(r'^A>\s*$', t, re.M))
                 print(f'{image.name}: PASS (two drives, A> prompt, RTC, yellow status, DIR)')
             finally:
                 process.terminate()

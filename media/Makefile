@@ -17,7 +17,7 @@ SYSTEM_COMMANDS = ../commands/chset/chset.cmd ../commands/date/date.cmd \
     ../commands/vcmode/vcmode.cmd ../commands/sysdisk/sysdisk.cmd
 
 # SYSDISK now comes from its byte-identical source reconstruction.
-BASE_SYSTEM_COMMANDS = $(filter-out ../base/sysdisk.cmd,$(wildcard ../base/*.cmd))
+BASE_SYSTEM_COMMANDS = $(wildcard ../base/*.cmd)
 
 TOOLS_COMMANDS = ../commands/asm86/asm86.cmd ../commands/ddt86/ddt86.cmd \
     ../commands/gencmd/gencmd.cmd ../commands/genccpm/genccpm.cmd \
@@ -41,6 +41,7 @@ prepare:
 	$(MAKE) -C ../kernel/con all
 	$(MAKE) -C ../kernel/rsp1 all
 	$(MAKE) -C ../kernel/rsp2 all
+	$(MAKE) -C ../kernel/custrsps all
 	$(MAKE) -C ../kernel/sysgen all
 	$(MAKE) -C ../boot tcopy.cmd
 

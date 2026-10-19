@@ -28,11 +28,12 @@ system useful today and accessible to anyone interested in its history.
 
 ## Tools
 
-Format: [cpm86-kernel](../cpm86-kernel/README.md). **3.1** = rebuildable sources; SYSDISK: byte-identical.
+Format: [cpm86-kernel](../cpm86-kernel/README.md). **3.1** = rebuildable sources; SYSDISK: byte-identical CMD plus resident version.
 
 | Tool | Binary (`base/`) | Source (`commands/`) |
 | --- | --- | --- |
 | `asm86` | — | 3.1 |
+| `cls` | — | Resident; VT52 ESC-E (`kernel/custrsps/`) |
 | `chset` | — | 3.1 |
 | `config` | Original | — |
 | `date` | — | 3.1, Y2K patched |
