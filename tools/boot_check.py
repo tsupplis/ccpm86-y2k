@@ -12,6 +12,228 @@ import time
 MEDIA = Path(__file__).resolve().parent.parent / 'media'
 
 
+def check_recall(type_command, hmp, wait_for, shortcut):
+    """Exercise single-line recall through the real keyboard, CIO and TMP."""
+    def key(name):
+        reply = hmp('sendkey ' + name + ' 50')
+        assert not reply, reply
+        time.sleep(.12)
+
+    def current(expected):
+        # The current input is the last nonblank line above the status row.
+        def matches(text):
+            lines = [line.rstrip() for line in text.splitlines()[:24] if line.strip()]
+            return (''.join(lines).endswith('A>' + expected)
+                    or bool(expected) and bool(lines) and lines[-1].lstrip() == expected)
+        return wait_for(matches)
+
+    # No saved line yet.  Comment commands avoid launching a program.
+    key('ctrl-w')
+    current('')
+    type_command(';recallone\n')
+    current('')
+    key('ctrl-w')
+    current(';recallone')
+    key('ctrl-w')
+    current(';recallone')
+    type_command('x')
+    key('ctrl-w')
+    current(';recallonex')
+    key('backspace')
+    type_command('y\n')
+    current('')
+
+    # A new accepted line replaces the only saved line.  Blank submission
+    # and abandoning an edit with ^U retain it.
+    type_command('\n')
+    key('ctrl-w')
+    current(';recalloney')
+    key('ctrl-u')
+    key('ctrl-w')
+    current(';recalloney')
+    key('ctrl-x')
+    type_command('\n')
+    current('')
+
+    shortcut('ctrl-alt-2', 1)
+    key('ctrl-w')
+    current('')
+    type_command(';otherconsole\n')
+    current('')
+    key('ctrl-w')
+    current(';otherconsole')
+    key('ctrl-x')
+    shortcut('ctrl-alt-1', 0)
+    key('ctrl-w')
+    current(';recalloney')
+    key('ctrl-x')
+    type_command('\n')
+    current('')
+    # TMP's 128-byte limit auto-accepts typed input.  Recall of a full
+    # buffer must instead wait for Return and reject additional bytes.
+    full = ';' + 'a' * 127
+    type_command(full)
+    current('')
+    key('ctrl-w')
+    current(full)
+    type_command('z')
+    current(full)
+    key('backspace')
+    key('backspace')
+    type_command('x')
+    current(full[:-2] + 'x')
+    type_command('\n')
+    current('')
+    key('ctrl-w')
+    current(full[:-2] + 'x')
+    key('ctrl-x')
+    type_command('\n')
+    current('')
+    print('single-line recall: replacement, editing, blank/^U, console isolation and full-buffer recall passed')
+
+
+
+def check_editor(type_command, hmp, wait_for, shortcut):
+    """Edit real Function 10 input using control keys and native navigation."""
+    def key(name):
+        assert not hmp('sendkey ' + name + ' 50')
+        time.sleep(.12)
+
+    def current(expected):
+        expanded = ('A>' + expected).expandtabs(8)
+        def matches(text):
+            lines = [line.rstrip() for line in text.splitlines()[:24] if line.strip()]
+            return ''.join(lines).endswith(expanded)
+        return wait_for(matches)
+
+    type_command(';abcd')
+    key('ctrl-a')
+    key('ctrl-a')
+    type_command('x')
+    current(';abxcd')
+    key('ctrl-f')
+    key('ctrl-g')
+    current(';abxc')
+    key('ctrl-b')
+    key('ctrl-f')
+    type_command('z')
+    current(';zabxc')
+    key('ctrl-b')
+    key('ctrl-b')
+    type_command('e\n')
+    current('')
+    key('up')
+    current(';zabxce')
+    key('home')
+    key('up')                   # Up is exactly ^W: nonempty means End.
+    type_command('f')
+    current(';zabxcef')
+    key('home')
+    key('right')
+    type_command('q')
+    current(';qzabxcef')
+    key('end')
+    key('left')
+    key('delete')
+    current(';qzabxce')
+    key('backspace')
+    current(';qzabxc')
+    key('home')
+    key('right')
+    key('ctrl-k')
+    type_command('fresh')
+    current(';fresh')
+    key('home')
+    key('ctrl-x')               # Nothing to delete to the left of Home.
+    current(';fresh')
+    for _ in range(3):
+        key('right')
+    key('ctrl-x')
+    # Prefix removal must retain the suffix in the actual returned buffer.
+    key('home')
+    type_command(';')
+    current(';esh')
+    key('end')
+    key('ctrl-x')
+    type_command('\n')
+    current('')
+
+    type_command(';a\tbc')
+    key('home')
+    key('right')
+    key('right')
+    type_command('z')
+    current(';az\tbc')
+    key('right')               # Cross the tab as one buffer character.
+    key('backspace')
+    current(';azbc')
+    key('end')
+    key('ctrl-x')
+    type_command('\n')
+    current('')
+
+    # Retyping and physical newlines must preserve the logical cursor.
+    type_command(';abc')
+    key('left')
+    key('ctrl-r')
+    type_command('x\n')
+    current('')
+    key('up')
+    current(';abxc')
+    key('left')
+    key('ctrl-e')
+    type_command('y\n')
+    current('')
+    key('up')
+    current(';abxyc')
+    key('end')
+    key('ctrl-x')
+    type_command('\n')
+    current('')
+
+    type_command(';a')
+    key('ctrl-d')               # Literal ^D displays in two screen cells.
+    type_command('b')
+    key('home')
+    for _ in range(3):
+        key('right')
+    key('left')
+    key('delete')
+    current(';ab')
+    key('end')
+    key('ctrl-x')
+    type_command('\n')
+    current('')
+
+    wrapped = ';' + 'a' * 77 + 'bcd'
+    type_command(wrapped)
+    key('home')
+    key('end')
+    for _ in range(3):
+        key('left')
+    type_command('x')
+    current(wrapped[:-3] + 'xbcd')
+    # The cursor remains inside the line across a console switch.
+    shortcut('ctrl-alt-2', 1)
+    type_command(';side')
+    key('home')
+    key('end')
+    key('ctrl-x')
+    type_command('\n')
+    shortcut('ctrl-alt-1', 0)
+    type_command('y')
+    current(wrapped[:-3] + 'xybcd')
+    type_command('\n')          # Return from the middle accepts the suffix.
+    current('')
+    key('up')
+    current(wrapped[:-3] + 'xybcd')
+    key('end')
+    key('ctrl-x')
+    type_command('\n')
+    current('')
+    print('line editor: insertion/deletion, controls, arrows/Home/End, Up=^W, tabs, control widths, retype, wrapping and console switching passed')
+
+
 def check(image, second):
     qemu = shutil.which('qemu-system-i386')
     if not qemu:
@@ -71,8 +293,8 @@ def check(image, second):
             def type_command(text):
                 for char in text:
                     keys = {'\n': 'ret', ' ': 'spc', '.': 'dot', ':': 'shift-semicolon',
-                            '*': 'shift-8', '[': 'bracket_left', ']': 'bracket_right'}
-                    hmp('sendkey ' + keys.get(char, char))
+                            '*': 'shift-8', ';': 'semicolon', '\t': 'tab', '[': 'bracket_left', ']': 'bracket_right'}
+                    hmp('sendkey ' + keys.get(char, char) + ' 50')
                     time.sleep(.08)
 
             try:
@@ -94,6 +316,9 @@ def check(image, second):
                 shortcut('ctrl-kp_1', 1)
                 shortcut('ctrl-kp_0', 0)
                 print(f'{image.name}: direct, round-robin and keypad console switching passed')
+                if image.name == 'ccpm86.img':
+                    check_recall(type_command, hmp, wait_for, shortcut)
+                    check_editor(type_command, hmp, wait_for, shortcut)
                 type_command('dir\n')
                 wait_for(lambda t: 'CCPM' in t and 'SYS' in t and 'PIP' in t)
                 if image.name == 'ccpm86.img':
@@ -106,7 +331,7 @@ def check(image, second):
                         assert 'SDIR' in text, text
                     print(f'{image.name}: SDIR empty tail, wildcard and options passed')
                     type_command('cls\n')
-                    text, _ = wait_for(lambda t: re.search(r'^A>\s*$', t, re.M) and 'Copyright' not in t)
+                    text, _ = wait_for(lambda t: re.search(r'^A>\s*$', t, re.M) and 'Copyright' not in t and 'Terminal' in t)
                     assert 'Terminal' in text, text
                     type_command('sysdisk\n')
                     wait_for(lambda t: 'System disk is A:' in t and re.search(r'^A>\s*$', t, re.M))

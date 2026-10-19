@@ -25,7 +25,7 @@ system useful today and accessible to anyone interested in its history.
 
 The current version already incorporate:
 - command line editing,
-- support for CGA, EGA modes even on VGA
+- support for CGA, EGA modes even on VGA card,
 - Y2K compliance,
 - New terminal commands (cls, sysdisk)
 

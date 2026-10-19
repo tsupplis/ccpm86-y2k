@@ -101,6 +101,7 @@ cf_compc	equ	002h	;suppress output
 cf_switchs	equ	004h	;XIOS supports switch screening
 cf_conout	equ	008h	;ownership flag of console output
 cf_vout		equ	010h	;process writing to VOUTQ
+cf_lineedit	equ	040h	;Function 10 navigation-key delivery
 cf_bufp		equ	020h	;just sent a char to a VOUTQ, don't
 				;echo to list if csm_ctrlP is set.
 ;CCB state flags

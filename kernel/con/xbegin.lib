@@ -236,6 +236,8 @@ pf_dskld	equ	02000h	;process was loaded from disk
 ;*	maxbufsiz - maximum file size for buffered mode
 
 c_owner		equ	word ptr 00h
+c_editflag	equ	byte ptr 04h
+cf_lineedit	equ	040h	;CIO Function 10 is active
 c_mimic		equ	byte ptr 08h
 c_state		equ	word ptr 0Eh
 c_maxbufsiz	equ	word ptr 10h

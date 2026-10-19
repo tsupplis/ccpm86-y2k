@@ -30,7 +30,9 @@ io_conin:
 	mov	dl,top_screen		; current foreground console
 	call	point_vs		; point to console structure
 	cmp	vs_pfk_count,0		; check for pfk's waiting
-	jz	conin_wait		; skip if none
+	jnz conin_expand
+    jmp conin_wait
+conin_expand:		; skip if none
 
 	mov	si,vs_pfk_ptr		; else get the current ptr
 	lodsb				; grab the value
@@ -58,9 +60,13 @@ conin_wait:
 	jz	conin_done		; normal ascii then leap
 
 	cmp	al,wake_key		; switch to window manager?
-	jz	w_wake
+	jnz conin_not_wake
+    jmp w_wake
+conin_not_wake:
 	cmp	al,full_key		; switch to full screen?
-	jz	w_full
+	jnz conin_not_full
+    jmp w_full
+conin_not_full:
 
 	cmp	al,070h
 	jb	new_pfk			; set pfk pointer and count
@@ -77,13 +83,39 @@ high_pfks	equ	40		; number of 4 char pfk codes
 ;	a pfk has just been typed, set pointers and count
 
 new_pfk:
+    ; Override only navigation keys while CIO Function 10 owns this console.
+    ; Outside line input retain programmable expansion/raw application codes.
+    push ax ! push bx
+    xor bx,bx ! mov bl,top_screen ! shl bx,1
+    mov bx,ccb_list[bx]
+    test c_editflag[bx],cf_lineedit
+    pop bx ! pop ax
+    jz pfk_normal
+    cmp al,10 ! je pfk_home
+    cmp al,11 ! je pfk_up
+    cmp al,13 ! je pfk_left
+    cmp al,14 ! je pfk_right
+    cmp al,15 ! je pfk_end
+    cmp al,19 ! je pfk_delete
+pfk_normal:
 	cmp	al,low_pfks + high_pfks	; if pfk code is too big
-	jae	conin_wait		;   then ignore it
+	jb pfk_valid
+    jmp conin_wait
+pfk_valid:		;   then ignore it
 	cmp	vs_pfk_exp,0		; if pfk expansion flag off
 	jz	no_pfk_exp		;   then just return code
 
 	call	point_pfk		; set pointer and count
-	jmps	io_conin		; back to return the value
+	jmp	io_conin		; back to return the value
+
+; AH=1 distinguishes editor Home/End from literal high-bit characters.
+; PIN passes these tagged data events through without treating them as switches.
+pfk_home:   mov ax,0180h ! ret
+pfk_end:    mov ax,0181h ! ret
+pfk_up:     mov ax,0117h ! ret ; exactly ^W, including its end-of-line meaning
+pfk_left:   mov ax,0101h ! ret ; ^A
+pfk_right:  mov ax,0106h ! ret ; ^F
+pfk_delete: mov ax,0107h ! ret ; ^G
 
 no_pfk_exp:
 	mov	bx,offset pfk_code_tbl
@@ -121,11 +153,17 @@ point_pfk1:
 
 w_wake:
 	cmp	im_here,1		; see if manager is resident
-	jb	conin_wait		; ignore if not
+	jae wake_present
+    jmp conin_wait
+wake_present:		; ignore if not
 	call	check_no_switch		; if console is no switch
-	jnz	conin_wait		;   then ignore wmenu key
+	jz wake_switchable
+    jmp conin_wait
+wake_switchable:		;   then ignore wmenu key
 	cmp	graphic_bits,0		; if anyone is in graphics
-	jnz	conin_wait		;   then block out wmenu
+	jz wake_text
+    jmp conin_wait
+wake_text:		;   then block out wmenu
 
 	mov	im_here,2		; resident and active
 	mov	dx,ww_flag

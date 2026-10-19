@@ -161,3 +161,58 @@ invalid arguments, XOR and neighboring pixels, the bottom-right edge,
 8x14 text, SINE, repeated text restoration and console switching after exit.
 Older kernels reject the capability probe without changing video mode.
 Physical EGA/VGA adapters and 64 KB EGA memory detection remain untested.
+
+## Console line editing and single-line recall
+
+BDOS Function 10 in `kernel/con/chario.cio` supports an independent cursor,
+character insertion and deletion, and one saved nonempty input line per
+console. There is no history list. Blank submissions and abandoned edits
+retain the saved line; each accepted nonempty line replaces it.
+
+| Control | Action |
+| --- | --- |
+| Ctrl-A / Ctrl-F | Move left / right by one buffer character |
+| Ctrl-B | Go to beginning; at beginning, go to end |
+| Ctrl-W | Recall on an empty line; otherwise go to end |
+| Ctrl-G | Delete at cursor |
+| Backspace / Rubout | Delete left of cursor |
+| Ctrl-K | Delete from cursor to end |
+| Ctrl-X | Delete everything to the left of cursor |
+| Ctrl-U | Abandon line and advance to a new line |
+| Ctrl-R | Retype the whole line on a new line, preserving cursor position |
+| Ctrl-E | Physical newline and redraw without accepting input |
+| Return / Ctrl-J | Accept the entire line, including the suffix after cursor |
+
+XIOS maps Left/Right to Ctrl-A/Ctrl-F, **Up to Ctrl-W exactly**, Home/End to
+absolute beginning/end, and Delete to Ctrl-G, only while Function 10 is
+active. The spare CCB flag bit 40h marks this interval and is cleared on
+normal return or process termination. PIN forwards tagged editor events
+through the existing 16-bit queues. Raw applications and programmable
+function-key expansion outside Function 10 retain their existing behavior.
+
+Tabs are measured at eight-column stops and displayed control characters
+occupy two cells. Cursor movement follows buffer characters; repainting
+erases the old suffix and restores the cursor across wrapped rows using
+the existing PC XIOS backspace/wrap behavior. Ordinary appending uses the
+fast echo path rather than repainting the line. Editor state uses ten
+bytes in the calling process's UDA stack frame, so console switches keep
+independent cursor state without enlarging shared structures.
+
+Recall remains console-wide, including application Function 10 prompts,
+rather than TMP-only command history. This is CP/M 3-style editing, not
+complete CP/M 3 control semantics: Ctrl-R/Ctrl-U do not save unsubmitted
+prefixes, Ctrl-R redraws the whole buffer, and Ctrl-E redraws the whole
+buffer on the next line. Printer/scroll controls remain handled by PIN.
+
+The sixteen private 256-byte recall slots (length plus up to 255 input
+bytes) remain in CIO's code group. Out-of-range console numbers have no
+recall. Recall truncates to destination capacity. Full buffers reject extra
+characters before any write; a full recalled line waits for Return. A line
+filled by appending typed characters retains the original auto-accept
+convention; filling the buffer by insertion in the middle waits for Return.
+
+`tools/boot_check.py` covers recall, buffer limits, insertion/deletion,
+control and native navigation keys, Up's two meanings, tabs, wrapped rows,
+Return from the middle, console isolation and cursor state across switches.
+The existing DREDIX checks exercise raw application navigation after the
+line editor exits.
