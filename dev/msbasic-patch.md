@@ -1,3 +1,16 @@
+# Current BASIC inventory
+
+| File | Shipped version | Role |
+| --- | --- | --- |
+| `mbasic86.cmd` | 5.50A | Current BASIC-86 recreation from [cpm86-msbasic](https://github.com/tsupplis/cpm86-msbasic); included on the developer disk |
+| `mbas522.cmd` | 5.22 | Earlier CP/M-86 reference; included in archives only |
+
+The notes below describe historical 5.22/5.28 binaries and their old filenames.
+They do not describe the current 5.50A `mbasic86.cmd`. The DOS binaries and
+unpatched originals mentioned below are not shipped in this repository.
+
+---
+
 # Microsoft BASIC Patch Notes
 
 This repository includes two Microsoft BASIC binaries, both patched:

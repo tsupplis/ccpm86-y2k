@@ -1,4 +1,4 @@
-SUBDIRS=con rsp1 rsp2
+SUBDIRS=con rsp1 rsp2 custrsps
 
 DISTDIR=dist
 DISTZIP=dist.zip

@@ -4,7 +4,7 @@ TOOLS=
 SNIPPETS= ccpm.sys
 
 CONS=bdos.con cio.con mem.con rtm.con sup.con sysdat.con xios.con
-RSPS=abort.rsp clock.rsp dir.rsp echo.rsp pin.rsp serin.rsp serout.rsp tmp.rsp vout.rsp
+RSPS=cls.rsp sysdisk.rsp abort.rsp clock.rsp dir.rsp echo.rsp pin.rsp serin.rsp serout.rsp tmp.rsp vout.rsp
 
 all: $(TOOLS) $(SNIPPETS)
 
@@ -55,6 +55,9 @@ tmp.rsp: ../rsp1/tmp.rsp
 	@cp $< .
 
 vout.rsp: ../rsp1/vout.rsp
+	@cp $< .
+
+cls.rsp sysdisk.rsp: %.rsp: ../custrsps/%.rsp
 	@cp $< .
 
 ccpm.sys: ../../commands/genccpm/genccpm.cmd genccpm.in $(CONS) $(RSPS)

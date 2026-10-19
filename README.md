@@ -1,88 +1,74 @@
 # Concurrent CP/M-86 3.1 Kernel and Tools
 
-Source-built CCP/M-86 3.1 for the IBM PC/XT, with modern host builds,
-320 KB floppy images, additional development tools, and Y2K utilities.
-The full-source goal is in progress: binary-only commands are listed below.
+This project preserves Digital Research's Concurrent CP/M-86 3.1 as a usable,
+rebuildable system for running and exploring classic 16-bit software. Runnable
+disks and development tools accompany the sources and patch notes, making the
+system useful today and accessible to anyone interested in its history.
 
-| Focus | Distribution |
+![Concurrent CP/M-86 3.1 running in PCE](images/ccpm86.png)
+
+| Goal | Distribution |
 | --- | --- |
-| Rebuild CCP/M-86 3.1 from source | Kernel, all nine RSPs, and most stock commands; SYSDISK reconstructed byte-for-byte |
-| Extend the toolset | ASM80, HEXCOM, DREDIX, Digital Research development tools, and Microsoft BASIC 5.50A |
-| Supply Y2K components | SDIR, DATE, SHOW, TOD for the 3.2 family through Concurrent DOS 4.1, plus 3.1 fixes |
+| Full source distribution | Kernel, eleven RSPs, most commands; gaps below |
+| Additional tools | ASM80, HEXCOM, DREDIX, DR development chain, Microsoft BASIC 5.50A |
+| Y2K components | SDIR, DATE, SHOW, TOD for CCP/M-86 3.2 through Concurrent DOS 4.1; 3.1 fixes included |
 
 ## Distributions
 
 | Image | Bootable | Contents |
 | --- | --- | --- |
-| `media/ccpm86.img` | Yes | Kernel, stock commands, ED, HELP, SYSTAT, original configuration/maintenance tools, rebuilt SYSDISK |
-| `media/ccpmtools.img` | Yes | DREDIX, INITDIR, ASM86, DDT86, GENCMD, GENCCPM, TCOPY, PIP, TOD |
-| `media/ccpmdev.img` | No | RASM86, LINK86, LIB86, XREF86, SID86, CBAS86, CRUN86, Personal BASIC, Microsoft BASIC, ASM80, HEXCOM, GENTAB |
-| `media/ccpmtest.img` | No | Empty scratch disk; created by `make test` |
+| `ccpm86.img` | Yes | Kernel, stock commands, ED, HELP, SYSTAT, configuration/maintenance utilities, reconstructed SYSDISK |
+| `ccpmtools.img` | Yes | DREDIX, INITDIR, ASM86, DDT86, GENCMD, GENCCPM, TCOPY, PIP, TOD |
+| `ccpmdev.img` | No | DR development/BASIC tools, Microsoft BASIC, ASM80, HEXCOM, GENTAB |
 
-All images are 320 KB. Assembly uses the empty, original-boot-track
-`media/base.img`: untwist, populate with cpmtools format `ccpm86-320`, then
-twist back. See [media/README.md](media/README.md) for PCE and QEMU usage.
+`make dist` places the images above and `disks.zip` containing all three at the repository root.
 
-## Repository layout
-
-| Directory | Contents |
-| --- | --- |
-| `kernel/con/` | BDOS, CIO, MEM, RTM, SUP, SYSDAT, XIOS sources |
-| `kernel/rsp1/`, `kernel/rsp2/` | Resident system process sources |
-| `kernel/sysgen/` | GENCCPM configuration and generated `ccpm.sys` |
-| `commands/` | Rebuildable utilities, including reconstructed SYSDISK |
-| `base/` | Original binaries; SYSDISK byte-comparison reference |
-| `dev/` | Imported Digital Research and Microsoft development binaries |
-| `boot/`, `media/`, `tools/` | Loader sources, reproducible disk recipes, track conversion and guest checks |
-| `doc/` | Reference programming and PL/M manuals |
+320 KB: **untwist → cpmtools `ccpm86-320` → twist**.
+[Media recipes and emulator usage](media/README.md).
 
 ## Tools
 
-Same status-table format as [cpm86-kernel](../cpm86-kernel/README.md).
-A source entry means the tool builds here; it does not imply binary identity
-with an original. The SYSDISK comparison is enforced by `make check`.
+Format: [cpm86-kernel](../cpm86-kernel/README.md). **3.1** = rebuildable sources; SYSDISK: byte-identical.
 
 | Tool | Binary (`base/`) | Source (`commands/`) |
 | --- | --- | --- |
-| `asm86` | — | CCP/M-86 3.1 |
-| `chset` | — | CCP/M-86 3.1 |
+| `asm86` | — | 3.1 |
+| `chset` | — | 3.1 |
 | `config` | Original | — |
-| `date` | — | CCP/M-86 3.1, Y2K patched |
-| `ddt86` | — | CCP/M-86 3.1 |
-| `dir` | — | CCP/M-86 3.1; command and resident process |
+| `date` | — | 3.1, Y2K patched |
+| `ddt86` | — | 3.1 |
+| `dir` | — | 3.1; command/RSP |
 | `dskmaint` | Original | — |
-| `ed` | — | CCP/M-86 3.1 |
-| `era` / `eraq` | — | CCP/M-86 3.1 |
+| `ed` | — | 3.1 |
+| `era` / `eraq` | — | 3.1 |
 | `function` | Original | — |
-| `gencmd` | — | CCP/M-86 3.1 |
-| `genccpm` | — | CCP/M-86 3.1; flag-table serialization fixed |
-| `gentab` | — | CCP/M-86 3.1 |
+| `gencmd` | — | 3.1 |
+| `genccpm` | — | 3.1; flag-table fix |
+| `gentab` | — | 3.1 |
 | `hdmaint` | Original | — |
-| `help` / `help.hlp` | — | CCP/M-86 3.1; indexed help rebuilt from `help.dat` |
-| `initdir` | — | CCP/M-86 3.1 |
+| `help` / `help.hlp` | — | 3.1; indexed from `help.dat` |
+| `initdir` | — | 3.1 |
 | `pcetime` | Original | — |
-| `pip` | — | PIP3 and PIP4; images use PIP4 with the `3.1N` banner |
-| `ren` | — | CCP/M-86 3.1 |
-| `sdir` | — | CCP/M-86 3.1, Y2K patched; DPB module and command-tail fixes |
-| `set` | — | CCP/M-86 3.1 |
+| `pip` | — | PIP3/PIP4; ships PIP4 as 3.1N |
+| `ren` | — | 3.1 |
+| `sdir` | — | 3.1, Y2K/DPB/tail fixes |
+| `set` | — | 3.1 |
 | `setup` | Original | — |
-| `show` | — | CCP/M-86 3.1, Y2K patched |
+| `show` | — | 3.1, Y2K patched |
 | `submit` | — | ASM-86 source |
-| `sysdisk` | Original | Reconstructed ASM-86; byte-identical |
-| `systat` | — | CCP/M-86 3.1 |
+| `sysdisk` | — | ASM-86 reconstruction; byte-identical to `sysdisk.ref` |
+| `systat` | — | 3.1 |
 | `tcopy` | — | ASM-86 source in `boot/` |
-| `tod` | — | CCP/M-86 3.1, Y2K patched |
-| `type` | — | CCP/M-86 3.1 |
-| `vcmode` | — | CCP/M-86 3.1 |
-| `asm80` | — | DR 1976–1978 sources converted to CP/M-86 |
-| `hexcom` | — | DR HEXCOM 3.00-compatible C implementation from [tpzasm](https://github.com/johnsonjh/tpzasm) |
-| `dredix` | — | DR EDIX C sources; BDOS keyboard/display backend, no private XIOS access |
+| `tod` | — | 3.1, Y2K patched |
+| `type` | — | 3.1 |
+| `vcmode` | — | 3.1 |
+| `asm80` | — | DR sources; CP/M-86 conversion |
+| `hexcom` | — | HEXCOM 3.00-compatible C from [tpzasm](https://github.com/johnsonjh/tpzasm) |
+| `dredix` | — | DR EDIX C; BDOS backend |
 
 ### Development binaries
 
-Imported binaries are in `dev/`; their sources are not part of this repository.
-Versions below come from the shipped binaries. Import does not imply a full
-guest compatibility audit.
+`dev/` contains imported binaries; guest compatibility is not fully audited.
 
 | Tool | Product | Version | Vendor |
 | --- | --- | --- | --- |
@@ -94,13 +80,10 @@ guest compatibility audit.
 | `cbas86.cmd` | CBASIC compiler | 1.4 | Digital Research |
 | `crun86.cmd` | CBASIC runtime | 1.4 | Digital Research |
 | `pbasic.cmd` | Personal BASIC | 1.2 | Digital Research |
-| `mbasic86.cmd` | BASIC-86 recreation from [cpm86-msbasic](https://github.com/tsupplis/cpm86-msbasic) | 5.50A | Microsoft lineage |
-| `mbas522.cmd` | Earlier BASIC-86 reference; omitted from the dev disk | 5.22 | Microsoft |
+| `mbasic86.cmd` | [BASIC-86 recreation](https://github.com/tsupplis/cpm86-msbasic) | 5.50A | Microsoft lineage |
+| `mbas522.cmd` | BASIC-86 reference; archive only | 5.22 | Microsoft |
 
 ## Y2K utilities
-
-The existing compatibility audit covers the following releases. Current
-image regression tests boot CCP/M-86 3.1; they do not retest every later OS.
 
 | Utility | CCP/M-86 3.1 | 3.2 family | Concurrent DOS 4.1 | DOS Plus 1.2 |
 | --- | --- | --- | --- | --- |
@@ -109,50 +92,32 @@ image regression tests boot CCP/M-86 3.1; they do not retest every later OS.
 | SHOW | Fixed | Fixed | Compliant | Compliant |
 | TOD | Fixed | Fixed | Compliant | Compliant |
 
-Fixed = replace the distribution's utility. Compliant = its existing utility
-already handles Y2K. The 3.2 family covers the CCP/M-86/Concurrent DOS work.
-The changes correct year display and date input handling; native disk formats
-are unchanged. Concurrent DOS XM 6.21 was previously reported compliant.
+Fixed = replacement needed; Compliant = existing utility works.
+Audit: CCP/M-86/Concurrent DOS 3.2; boot regressions: 3.1.
 
 ## Kernel and RSP patches
 
-| Area | Current changes |
-| --- | --- |
-| Clock | BIOS INT 1Ah RTC read at startup; BDOS time changes written back when supported |
-| Display | Bright-yellow status line; cursor height follows CGA/MDA/EGA/VGA character cells |
-| Enhanced adapters | Skip CGA retrace/snow waits on EGA/VGA |
-| Console selection | Ctrl+Alt+1–4; Ctrl+Alt+Tab cycles; keypad aliases retained |
-| System configuration | Honor GENCCPM system/temporary drives; standalone CP/M BDOS build |
-| System generation | Correct three-byte flag records; disk buffers fit the 64 KB data/RSP area |
-| RSPs | Remove duplicate PIN constant; rebuild all nine resident processes |
-
-Detailed changes, source locations, limitations, and verification are in
-[PATCHES.md](PATCHES.md). Console graphics remain CGA-oriented; this is not
-a general BIOS INT 10h compatibility layer.
+[PATCHES.md](PATCHES.md): RTC startup/persistence, yellow status, adapter-aware
+cursor, EGA/VGA retrace handling, console shortcuts, configured drives,
+GENCCPM flag records, PIN and build corrections. Graphics remain CGA-oriented;
+no general application INT 10h layer is provided.
 
 ## Build and checks
 
-Requires [cpm86-crossdev](https://github.com/tsupplis/cpm86-crossdev),
-`make`, cpmtools, Python 3, Git, tar and zip. PCE is the interactive emulator;
-QEMU is needed only for automated guest checks.
+Build: [cpm86-crossdev](https://github.com/tsupplis/cpm86-crossdev), make,
+cpmtools, Python 3, Git, tar, zip. Emulators: PCE (interactive), QEMU (checks).
 
 | Command | Result |
 | --- | --- |
-| `make` | Build commands, kernel/RSPs, boot sources, and three distribution images |
-| `make -C commands/sysdisk check` | Rebuild SYSDISK and compare every byte with `base/sysdisk.cmd` |
-| `make check` | SYSDISK identity and media-content checks |
-| `make check-qemu` | Boot checks, RTC, status color, console switching, SDIR, SYSDISK, DREDIX |
-| `make test` | Launch PCE with the system disk and scratch disk |
-| `make dist` | `dist.zip`, `y2k-dist.zip`, and `dist/ccpm86-source.tar.gz` |
-| `make source-dist` | Source archive, reference inputs and dev binaries; no ignored build products |
-| `make clean` | Remove generated outputs; preserve original inputs |
+| `make` | Commands, kernel/RSPs, boot sources, three images |
+| `make -C commands/sysdisk check` | Byte-identical SYSDISK reconstruction |
+| `make check` | SYSDISK identity, every packaged file, boot tracks, sizes |
+| `make check-qemu` | Boot, RTC, status, switching, SDIR, SYSDISK, DREDIX |
+| `make test` | Launch PCE |
+| `make dist` | `y2k-dist.zip`, `disks.zip` and the three disk images at the repository root |
+| `make source-dist` | Sources and reference/vendor inputs; no ignored outputs |
 
-The source archive includes current tracked files and new, non-ignored
-sources. Y2K ZIP contains SDIR, DATE, SHOW and TOD. Binary ZIP separates
-source-built commands, original inputs, development binaries and media.
-
-Source pedigree: [Unofficial CP/M Web Site](http://www.cpm.z80.de).
-License correspondence is retained in [LICENSE.md](LICENSE.md).
+[Source pedigree](http://www.cpm.z80.de) · [License correspondence](LICENSE.md).
 
 ---
 

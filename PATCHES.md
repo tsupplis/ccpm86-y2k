@@ -44,7 +44,7 @@ The functional kernel/RSP changes can be compared with commit `033212a`.
 | PIP | `commands/pip/pip4.plm` | Package PIP4 fixes with the `CONCURRENT CP/M-86 PIP VERSION 3.1N` banner. The required BDOS version remains 3.1; this is not the original PIP3 binary. |
 | HELP | `commands/help/help.dat`, `Makefile` | Rebuild indexed HELP.HLP; document PIP 3.1N, explicit-name archive/confirmation options, and HEX validation. |
 | DREDIX | `commands/dredix/vd.c`, `vk.c`, `ed.c` | Replace private XIOS calls/direct screen writes with BDOS keyboard input and a local 80x24 character/attribute buffer rendered through console escapes. Preserve scroll/highlight behavior and restore console mode on exit. See its README for overlapping modified-function-key codes and missing help/tutorial data. |
-| SYSDISK | `commands/sysdisk/sysdisk.a86`, `Makefile` | Reconstruct the original utility as readable ASM-86, retaining its instruction encodings, data offsets, stack and CMD layout. `make check` requires byte identity with `base/sysdisk.cmd`. The original accepts OS versions 1410h and 1431h; that guard is deliberately unchanged. |
+| SYSDISK | `commands/sysdisk/sysdisk.a86`, `Makefile` | Reconstruct the original utility as readable ASM-86, retaining its instruction encodings, data offsets, stack and CMD layout. `make check` requires byte identity with `commands/sysdisk/sysdisk.ref`. The original accepts OS versions 1410h and 1431h; that guard is deliberately unchanged. |
 
 ## Memory and BIOS limits
 
