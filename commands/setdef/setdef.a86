@@ -1,0 +1,117 @@
+title 'SETDEF - per-console command drive search'
+; Local CCP/M-86 extension. Drive search only; system fallback is fixed.
+; BDOS 165: ten-byte versioned packet, see kernel/con/command.sup.
+bdos equ 0e0h
+cseg
+org 0
+start:
+    pushf ! pop bx ! cli
+    mov ax,ds ! mov ss,ax ! mov sp,offset stack_top
+    push bx ! popf
+    cld
+    mov si,081h
+    xor ax,ax ! mov al,command_length
+    mov di,si ! add di,ax
+    call spaces
+    cmp si,di ! jb parse_path
+    jmp call_api
+parse_path:
+    mov operation,1
+    xor bp,bp
+next_entry:
+    cmp bp,4 ! jb room
+    jmp syntax_error
+room:
+    cmp si,di ! jb token
+    jmp syntax_error
+token:
+    lodsb
+    cmp al,'*' ! je current
+    and al,05fh
+    cmp al,'A' ! jb syntax_error
+    cmp al,'P' ! ja syntax_error
+    sub al,'A'
+    cmp si,di ! jae syntax_error
+    cmp byte ptr [si],':' ! jne syntax_error
+    inc si
+    jmps store
+current:
+    mov al,0ffh
+store:
+    mov entries[bp],al
+    inc bp
+    call spaces
+    cmp si,di ! jae parsed
+    cmp byte ptr [si],',' ! jne syntax_error
+    inc si ! call spaces
+    jmps next_entry
+parsed:
+    mov ax,bp ! mov entry_count,al
+    jmps call_api
+syntax_error:
+    mov dx,offset usage ! jmp print_exit
+call_api:
+    mov cl,165 ! mov dx,offset packet ! int bdos
+    cmp bx,0 ! jne not_supported
+    cmp entry_count,1 ! jb not_supported
+    cmp entry_count,4 ! jbe display
+not_supported:
+    mov dx,offset unavailable ! jmp print_exit
+display:
+    mov dx,offset path_message ! call print
+    xor bp,bp
+print_entry:
+    mov al,entries[bp]
+    cmp al,0ffh ! jne letter
+    mov dl,'*' ! call put
+    jmps printed
+letter:
+    add al,'A' ! mov dl,al ! call put
+    mov dl,':' ! call put
+printed:
+    inc bp
+    xor ax,ax ! mov al,entry_count
+    cmp bp,ax ! jae system_message
+    mov dl,',' ! call put
+    jmps print_entry
+system_message:
+    mov dx,offset system_text ! call print
+    mov dl,system_drive ! add dl,'A' ! call put
+    mov dx,offset final_text
+print_exit:
+    call print
+exit:
+    mov cl,0 ! int bdos ! jmps exit
+spaces:
+    cmp si,di ! jae spaces_done
+    cmp byte ptr [si],' ' ! je space
+    cmp byte ptr [si],9 ! jne spaces_done
+space:
+    inc si ! jmps spaces
+spaces_done:
+    ret
+print:
+    mov cl,9 ! int bdos ! ret
+put:
+    mov cl,2 ! int bdos ! ret
+
+dseg
+org 080h
+command_length rb 1
+org 100h
+packet db 'SD',1
+operation db 0
+entry_count db 0
+entries db 0,0,0,0
+system_drive db 0
+path_message db 'Command search: $'
+system_text db 13,10,'System fallback: $'
+final_text db ': (always last)',13,10,'$'
+usage db 'Usage: SETDEF [drive-list]',13,10
+      db 'Example: SETDEF *,A:,C: (up to four entries)',13,10
+      db 'SETDEF displays settings; SETDEF * restores the default.',13,10
+      db 'The system fallback is always last.',13,10,'$'
+unavailable db 'SETDEF requires a kernel with command search support.',13,10,'$'
+rb 128
+stack_top equ offset $
+end

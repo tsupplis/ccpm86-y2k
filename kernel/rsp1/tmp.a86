@@ -683,7 +683,7 @@ drive_unavailable db 'Drive unavailable: $'
 help_too_long db 'Help request too long (maximum 125 characters including ?)$'
 quickhelp_text db cr,lf,'Common commands:',cr,lf
     db '  DIR  SDIR  TYPE  PIP  ERA  REN  ED  SUBMIT',cr,lf
-    db '  SHOW  SET  SYSTAT  DATE  TOD  VCMODE',cr,lf
+    db '  SHOW  SET  SETDEF  SYSTAT  DATE  TOD  VCMODE',cr,lf
     db 'Shell commands: CLS  SYSDISK  USER  PRINTER',cr,lf
     db '? topic opens HELP, for example ? PIP or ? COMMANDS.',cr,lf
     db 'Some utilities are on the tools or maintenance disk.',cr,lf,'$'

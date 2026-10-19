@@ -1,41 +1,27 @@
-
-;*****************************************************
-;*
-;*	PATCH AREA  --  128 bytes long
-;*
-;*****************************************************
-
+; Supervisor private SETDEF storage, using the historic 128-byte patch reserve.
+; No code branches into this area. All console records start at default *.
 patch:
-	nop ! nop ! nop ! nop ! nop ! nop  ;00-0f
-	nop ! nop ! nop ! nop ! nop ! nop
-	nop ! nop ! nop ! nop
-
-	nop ! nop ! nop ! nop ! nop ! nop  ;10-1f
-	nop ! nop ! nop ! nop ! nop ! nop
-	nop ! nop ! nop ! nop
-
-	nop ! nop ! nop ! nop ! nop ! nop  ;20-2f
-	nop ! nop ! nop ! nop ! nop ! nop
-	nop ! nop ! nop ! nop
-
-	nop ! nop ! nop ! nop ! nop ! nop  ;30-3f
-	nop ! nop ! nop ! nop ! nop ! nop
-	nop ! nop ! nop ! nop
-
-	nop ! nop ! nop ! nop ! nop ! nop  ;40-4f
-	nop ! nop ! nop ! nop ! nop ! nop
-	nop ! nop ! nop ! nop
-
-	nop ! nop ! nop ! nop ! nop ! nop  ;50-5f
-	nop ! nop ! nop ! nop ! nop ! nop
-	nop ! nop ! nop ! nop
-
-	nop ! nop ! nop ! nop ! nop ! nop  ;60-6f
-	nop ! nop ! nop ! nop ! nop ! nop
-	nop ! nop ! nop ! nop
-
-	nop ! nop ! nop ! nop ! nop ! nop  ;70-7f
-	nop ! nop ! nop ! nop ! nop ! nop
-	nop ! nop ! nop ! nop
-
-
+sd_paths db 0,0,0,0,0            ; console 0: count + four entries
+    db 0,0,0,0,0                ; console 1
+    db 0,0,0,0,0                ; console 2
+    db 0,0,0,0,0                ; console 3
+    db 0,0,0,0,0                ; console 4
+    db 0,0,0,0,0                ; console 5
+    db 0,0,0,0,0                ; console 6
+    db 0,0,0,0,0                ; console 7
+    db 0,0,0,0,0                ; console 8
+    db 0,0,0,0,0                ; console 9
+    db 0,0,0,0,0                ; console 10
+    db 0,0,0,0,0                ; console 11
+    db 0,0,0,0,0                ; console 12
+    db 0,0,0,0,0                ; console 13
+    db 0,0,0,0,0                ; console 14
+    db 0,0,0,0,0                ; console 15
+cp_count db 0
+cp_entries db 0,0,0,0
+cp_index db 0
+cp_seen dw 0
+cp_fcb db 0,0,0,0,0,0,0,0,0,0,0
+    db 0,0,0,0,0,0,0,0,0,0,0
+    db 0,0,0,0,0,0,0,0,0,0,0
+    db 0,0,0,0,0,0,0               ; retain the full 128-byte reserve

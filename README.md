@@ -65,17 +65,46 @@ names/extensions/password syntax, memory/process limits and malformed or
 unreadable CMD files. Unknown errors retain their numeric code. Explicit
 drive checks preserve the current drive when the requested drive is unavailable.
 
-Command lookup retains CCP/M's resident-command, current-drive and system-drive
-rules. This build does not implement CP/M Plus SETDEF search paths or extension
-ordering; use SUBMIT explicitly for .SUB command files.
+`SETDEF` configures command drive searching independently for each console:
+
+```text
+SETDEF             Display the current settings
+SETDEF *           Restore the default: current drive
+SETDEF *,A:,C:     Search current drive, A:, then C:
+SETDEF M:,*        Prefer utilities on the memory disk
+```
+
+The list accepts one to four comma-separated entries (`*` or `A:` through `P:`).
+`*` resolves to the current drive each time a command is executed. Spaces and
+tabs around entries are allowed. Invalid input leaves the settings unchanged.
+Resident commands retain priority, and an explicit command drive bypasses the
+list. Unavailable listed drives are skipped; duplicate drives are searched once.
+Loading a command from another drive preserves the caller's working drive/user.
+
+After the list, the system drive remains a fixed fallback with the existing SYS
+file visibility rules; SETDEF cannot remove or reorder that fallback. A drive
+named in the list (or selected by `*`) is searched normally, even if it is also
+the system drive. It is not searched again as a fallback. `SYSDISK` still selects
+the system drive globally; SETDEF settings are local to each console.
+
+The shared CLI applies the path to TMP, SUBMIT commands and program chaining.
+Settings last until reboot or another SETDEF on that console. To apply them at
+startup, invoke SETDEF from the console's `STARTUP.nnn`, directly or through a
+SUBMIT script. If SETDEF itself is outside the path, specify its drive, for
+example `A:SETDEF *`. Copy frequently used CMD files to M: before using
+`SETDEF M:,*`; SETDEF does not create, format or populate the memory disk.
+
+This is drive searching only: CMD remains the executable type, and SUB files
+still require SUBMIT. CP/M Plus ORDER, TEMPORARY and DISPLAY options are not
+implemented.
 
 ## Distributions
 
 | Image | Bootable | Contents |
 | --- | --- | --- |
-| `ccpm86.img` | Yes | Kernel, stock commands, ED, HELP, SYSTAT, configuration/maintenance utilities, reconstructed SYSDISK |
+| `ccpm86.img` | Yes | Kernel, stock commands, ED, HELP, SYSTAT, configuration utilities, reconstructed SYSDISK, SETDEF |
 | `ccpmtools.img` | Yes | DREDIX, ASM86, DDT86, GENCMD, GENCCPM, WINDOW/WMENU with sample SUB files, PIP, TOD |
-| `ccpmmaint.img` | Yes | HDMAINT, INITDIR, PIP, TOD |
+| `ccpmmaint.img` | Yes | DSKMAINT, HDMAINT, INITDIR, PIP, TOD |
 | `ccpmdev.img` | No | DR development/BASIC tools, Microsoft BASIC, ASM80, HEXCOM, GENTAB |
 
 `make dist` places the images above and `disks.zip` containing all four at the repository root.
@@ -83,7 +112,7 @@ ordering; use SUBMIT explicitly for .SUB command files.
 320 KB: **untwist → cpmtools `ccpm86-320` → twist**.
 [Media recipes and emulator usage](media/README.md).
 The full HELP is on the main disk; WINDOW and WMENU are on the tools disk.
-HDMAINT and INITDIR are on the bootable maintenance disk.
+DSKMAINT, HDMAINT and INITDIR are on the bootable maintenance disk.
 Window layouts: `CARDDECK.SUB`, `CLEAR.SUB`, `GLASS.SUB` and `WORDPROC.SUB`.
 The [source-built boot track](boot/README.md) reproduces all 4,096 bytes of the original.
 
@@ -117,6 +146,7 @@ Format: [cpm86-kernel](../cpm86-kernel/README.md). **3.1** = rebuildable sources
 | `set` | Set file and drive attributes | — | 3.1 |
 | `setup` | Customize IBM PC/XT XIOS settings | Original | — |
 | `show` | Display disk space and drive information | — | 3.1, Y2K patched |
+| `setdef` | Display/change the per-console command drive list; fixed system fallback | — | Source-built `SETDEF.CMD`; local kernel extension |
 | `submit` | Run batch command files | — | 3.1 |
 | `sysdisk` | Display or change the system drive; TMP built-in and standalone tool | — | TMP built-in + standalone `SYSDISK.CMD`; byte-identical CMD reconstruction |
 | `systat` | Inspect processes and system resources | — | 3.1 |
@@ -179,7 +209,7 @@ The boot build requires native `h862bin` from `cpm86-cmdtools` on PATH.
 | `make` | Commands, kernel/RSPs, boot sources, four images |
 | `make -C commands/sysdisk check` | Byte-identical SYSDISK reconstruction |
 | `make check` | SYSDISK identity, source-built boot identity, every packaged file, sizes |
-| `make check-qemu` | Boot, RTC, status, switching, HELP, SDIR, SYSDISK, DREDIX, windows |
+| `make check-qemu` | Boot, RTC, status, switching, HELP, SDIR, SYSDISK, SETDEF, DREDIX, windows |
 | `make test` | Launch PCE |
 | `make dist` | `y2k-dist.zip`, `disks.zip` and the four disk images at the repository root |
 | `make source-dist` | Sources and reference/vendor inputs; no ignored outputs |

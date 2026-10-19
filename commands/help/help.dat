@@ -233,6 +233,10 @@
     HELP.CMD and HELP.HLP; bare ? is built into the shell. A ? topic line
     may contain at most 125 characters including the question mark.
 
+    SETDEF displays or changes the command drive search list for this
+    console. The default is the current drive, followed by the fixed
+    system fallback. See HELP SETDEF for drive-list syntax and examples.
+
     Concurrent CP/M command line syntax:
 
     A> <command> {command tail} <RETURN>
@@ -532,6 +536,9 @@
     A>DIR B:UTILITY.CMD [S]
 
 ///1DSKMAINT
+    DSKMAINT.CMD is on the bootable maintenance disk (ccpmmaint.img),
+    alongside HDMAINT and INITDIR.
+
     Syntax:
 
     DSKMAINT
@@ -1620,6 +1627,48 @@
     A>SUBMIT B:START
     A>SUBMIT MAX.SUB data1 data2 data3
 
+///1SETDEF
+    Syntax:
+
+    SETDEF
+    SETDEF drive-list
+
+    Display or change the command drive search list for this console.
+    With no arguments, SETDEF displays the current settings. The default
+    is *. SETDEF * restores that default.
+
+    A list contains one to four comma-separated entries: * for the current
+    drive, or A: through P:. Spaces/tabs around entries are allowed.
+    Invalid input leaves the previous settings unchanged.
+
+    Examples:
+
+    SETDEF *,A:,C:   Search current drive, then A:, then C:.
+    SETDEF M:,*      Prefer commands copied to the memory disk.
+    A:SETDEF *       Restore the default using SETDEF on A:.
+
+    Resident commands have priority. An explicit drive bypasses the list.
+    Missing drives are skipped and duplicate drives are searched once.
+    Loading from another drive preserves your working drive and user.
+
+    The system drive is always the final fallback, using the existing SYS
+    file rules. SETDEF cannot remove or reorder this fallback. If the
+    system drive is also in the normal list, it is searched there normally
+    and is not searched a second time. SYSDISK changes the system drive
+    globally; SETDEF settings belong only to this console.
+
+    The list applies to commands from TMP, SUBMIT and program chaining.
+    Each console starts with *. Settings last until reboot or a new
+    SETDEF. Put SETDEF in STARTUP.nnn, or in a startup SUBMIT script, to
+    configure a console automatically.
+
+    M: must already exist and contain the utilities you want to run.
+    SETDEF does not allocate, format or copy files to the memory disk.
+
+    This version supports drive searching only. CMD is still the program
+    type; use SUBMIT for SUB files. ORDER, TEMPORARY and DISPLAY options
+    are not supported.
+
 ///1SYSDISK
     Syntax:
 
@@ -1641,9 +1690,9 @@
     Concurrent CP/M  assigns  one  drive as the system drive whenever
     you start up Concurrent CP/M.  Concurrent CP/M  looks for program
     files (.CMD filetype) on the system drive when it cannot find the
-    file on  the  default drive.  The system drive is the drive whose
-    letter appears in the system prompt when you  start up Concurrent
-    CP/M.
+    file using the SETDEF command drive search list. The system drive
+    is initially the drive whose letter appears in the system prompt
+    when you start up Concurrent CP/M.
 
     SYSDISK is especially useful if you do not have a hard disk.  You
     can create a start-up file with a SUBMIT command  that sets up an

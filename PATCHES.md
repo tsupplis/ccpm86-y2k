@@ -6,6 +6,26 @@ The functional kernel/RSP changes can be compared with commit `033212a`.
 
 ## Kernel
 
+`SETDEF.CMD` and the shared CLI now support one to four command search entries
+per console (default `*`). The system drive remains an automatic final fallback;
+normal list entries retain normal file visibility, explicit drives bypass the
+list, and resident commands keep priority. Missing optional drives are skipped;
+other open errors stop the search. Successful loads preserve the caller's working
+drive/user. SUBMIT and chaining use the same path. Extension ordering is unchanged.
+
+The local BDOS 165 extension accepts a ten-byte packet at DS:DX:
+`'S','D',1,operation,count,entry[4],system_drive`, where operation 0 queries and
+1 sets, count is 1..4, and each entry is 0..15 (A..P) or FFh (current drive).
+On success BX/AX and CX are zero; the packet returns the effective list and
+current system drive. On failure BX/AX=FFFFh and CX is the error code. The kernel
+validates the entire update before publishing it atomically. The API supports
+console IDs 0..15; CLI callers outside that range retain default `*` searching.
+Settings and CLI snapshots use 121 bytes of SUP's existing 128-byte patch
+reserve (`patch.cod`), leaving historic
+SYSDAT, PD and UDA layouts unchanged. `supif.sup` dispatches function 165 locally
+without extending SYSENT; unmodified kernels reject the utility's API call.
+
+
 | Change | Sources / entry points | Behavior |
 | --- | --- | --- |
 | Standalone BDOS | `kernel/con/bdos.a86`: `PCMODE=false` | Excludes unavailable DOS-filesystem objects; this build runs CP/M commands. |

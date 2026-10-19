@@ -146,6 +146,11 @@ illfunc:				;illegal function number
 	jmp i_ent
 
 netchk:
+; Local extension 165: per-console command drive search (SETDEF).
+; Dispatch without extending SYSENT, preserving all historic SYSDAT offsets.
+    cmp cl,165 ! jne sd_not165
+    jmp setdef_ent
+sd_not165:
 ;	enter here for network check
 ;	check for function numbers represented in function table,
 ;	ENTTAB_TABLE.  Table space is saved by making the functions

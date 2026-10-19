@@ -273,6 +273,112 @@ def check_shell(type_command, hmp, wait_for):
     print('shell: ? quick help/topic alias, missing commands, syntax, unavailable drives and alias bounds passed')
 
 
+def search_fixtures(temporary, image, second):
+    """Put distinguishable commands on disposable disks to test resolution."""
+    shutil.copyfile(MEDIA / "diskdefs", Path(temporary) / "diskdefs")
+    def run(*args):
+        subprocess.run(args, check=True, cwd=temporary, stdout=subprocess.DEVNULL)
+    for letter in ('A', 'B'):
+        source = Path(temporary) / ('probe' + letter.lower() + '.a86')
+        source.write_text("""cseg
+org 0
+    mov cl,9 ! mov dx,offset message ! int 0e0h
+    mov cl,25 ! int 0e0h
+    mov dl,al ! add dl,'A' ! mov cl,2 ! int 0e0h
+    mov cl,9 ! mov dx,offset ending ! int 0e0h
+    mov cl,0 ! int 0e0h
+ dseg
+org 100h
+message db 'PATH %s DEFAULT $'
+ending db 13,10,'$'
+end
+""" % letter)
+        run('cpm86_asm86', source.name)
+        run('cpm86_gencmd', source.with_suffix('.h86').name)
+    script = Path(temporary) / 'search.sub'
+    script.write_bytes(b'SDPTEST\r\nSDONLY\r\n\x1a')
+    profile = Path(temporary) / 'profile.sub'
+    profile.write_bytes(b'A:SETDEF B:\r\nSDPTEST\r\nA:SETDEF C:,B:\r\n\x1a')
+    disks = []
+    for letter, original in zip(('A', 'B'), (image, second)):
+        logical = Path(temporary) / (letter + '.logical')
+        disk = Path(temporary) / (letter + '.img')
+        run('python3', str(MEDIA.parent / 'tools/cpm86twist.py'),
+            'untwist', str(original), str(logical))
+        probe = str(Path(temporary) / ('probe' + letter.lower() + '.cmd'))
+        for name in ('SDPTEST', 'SYSFALL') + (('SDONLY',) if letter == 'B' else ()):
+            run('cpmcp', '-f', 'ccpm86-320', str(logical), probe, '0:' + name + '.CMD')
+        run('cpmchattr', '-f', 'ccpm86-320', str(logical), 's', '0:SYSFALL.CMD')
+        if letter == 'A':
+            run('cpmcp', '-f', 'ccpm86-320', str(logical), str(script), '0:SEARCH.SUB')
+            run('cpmcp', '-f', 'ccpm86-320', str(logical), str(profile), '0:PROFILE.SUB')
+        run('python3', str(MEDIA.parent / 'tools/cpm86twist.py'),
+            'twist', str(logical), str(disk))
+        disks.append(disk)
+    return disks
+
+
+def check_setdef(type_command, wait_for, shortcut):
+    def prompt(t, drive='A'):
+        lines = [line.rstrip() for line in t.splitlines()[:24] if line.strip()]
+        return bool(lines) and lines[-1] == drive + '>'
+
+    def command(tail, expected, drive='A'):
+        type_command('cls\n')
+        wait_for(lambda t: expected not in t and prompt(t, drive))
+        type_command(tail + '\n')
+        text, _ = wait_for(lambda t: expected in t and prompt(t, drive))
+        assert 'BDOS Err' not in text, text
+        return text
+
+    command('setdef', 'Command search: *')
+    command('setdef b:,a:', 'Command search: B:,A:')
+    command('sdptest', 'PATH B DEFAULT A')
+    command('a:sdptest', 'PATH A DEFAULT A')
+    command('a:setdef a:,b:', 'Command search: A:,B:')
+    command('sdptest', 'PATH A DEFAULT A')
+    command('a:setdef c:,b:', 'Command search: C:,B:')
+    command('sdonly', 'PATH B DEFAULT A')
+    command('sysfall', 'PATH B DEFAULT A')
+    command('a:submit a:search', 'PATH B DEFAULT A')
+    command('a:submit a:profile', 'Command search: C:,B:')
+    command('a:setdef', 'Command search: C:,B:')
+    command('a:setdef b:,b:,*,a:', 'Command search: B:,B:,*,A:')
+    command('sdptest', 'PATH B DEFAULT A')
+    for bad in ('a:,,b:', 'a:,', 'q:', 'sys:', 'a', '*,a:,b:,c:,d:', '[order=(cmd,sub)]'):
+        command('a:setdef ' + bad, 'Usage: SETDEF')
+        command('a:setdef', 'Command search: B:,B:,*,A:')
+    command('a:setdef \t b: , a: \t', 'Command search: B:,A:')
+    shortcut('ctrl-alt-2', 1)
+    command('setdef', 'Command search: *')
+    command('sdptest', 'PATH A DEFAULT A')
+    command('setdef a:', 'Command search: A:')
+    shortcut('ctrl-alt-1', 0)
+    command('a:setdef', 'Command search: B:,A:')
+    command('a:setdef c:', 'Command search: C:')
+    command('sysfall', 'PATH A DEFAULT A')
+    command('sysdisk b:', 'System disk is B:')
+    command('sysfall', 'PATH B DEFAULT A')
+    command('sdonly', 'Command not found. Use ? for help')
+    command('sysdisk a:', 'System disk is A:')
+    command('a:setdef *', 'Command search: *')
+    type_command('help setdef [nopage]\n')
+    wait_for(lambda t: 'HELP>' in t and 'SETDEF does not allocate' in t)
+    type_command('\n')
+    wait_for(prompt)
+    type_command('b:\n')
+    wait_for(lambda t: prompt(t, 'B'))
+    command('sdptest', 'PATH B DEFAULT B', 'B')
+    command('a:setdef', 'Command search: *', 'B')
+    type_command('a:\n')
+    wait_for(prompt)
+    shortcut('ctrl-alt-2', 1)
+    command('setdef *', 'Command search: *')
+    shortcut('ctrl-alt-1', 0)
+    print('SETDEF: defaults, ordering, explicit drive, absent drive, duplicates, '
+          'syntax atomicity, console isolation, working drive, SUBMIT/chain and fixed SYS fallback passed', flush=True)
+
+
 def check(image, second):
     qemu = shutil.which('qemu-system-i386')
     if not qemu:
@@ -285,7 +391,9 @@ def check(image, second):
                     '-qmp', 'stdio', '-net', 'none', '-boot', 'a',
                     '-no-fd-bootchk', '-no-reboot', '-snapshot',
                     '-rtc', 'base=2026-10-19T12:34:56,clock=vm']
-            for index, disk in enumerate((image, second)):
+            disks = (search_fixtures(temporary, image, second)
+                     if image.name == 'ccpm86.img' else (image, second))
+            for index, disk in enumerate(disks):
                 args += ['-drive', f'file={disk},format=raw,if=floppy,index={index}']
             process = subprocess.Popen(args, stdin=subprocess.PIPE,
                                        stdout=subprocess.PIPE, stderr=log, bufsize=0)
@@ -332,6 +440,7 @@ def check(image, second):
             def type_command(text):
                 for char in text:
                     keys = {'\n': 'ret', ' ': 'spc', '.': 'dot', ':': 'shift-semicolon',
+                            ',': 'comma', '(': 'shift-9', ')': 'shift-0', '=': 'equal',
                             '*': 'shift-8', ';': 'semicolon', '?': 'shift-slash', '\t': 'tab', '[': 'bracket_left', ']': 'bracket_right'}
                     hmp('sendkey ' + keys.get(char, char) + ' 50')
                     time.sleep(.08)
@@ -359,6 +468,7 @@ def check(image, second):
                     check_recall(type_command, hmp, wait_for, shortcut)
                     check_editor(type_command, hmp, wait_for, shortcut)
                     check_shell(type_command, hmp, wait_for)
+                    check_setdef(type_command, wait_for, shortcut)
                 type_command('dir\n')
                 wait_for(lambda t: 'CCPM' in t and 'SYS' in t and 'PIP' in t)
                 if image.name == 'ccpm86.img':
