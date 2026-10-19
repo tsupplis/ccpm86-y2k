@@ -1,0 +1,134 @@
+title 'SYSDISK - reconstructed Concurrent CP/M-86 system disk utility'
+; Reconstructed from base/sysdisk.cmd and the accompanying disassembly.
+; Keep instruction encodings, offsets, reserved bytes, and CMD layout intact.
+; BDOS 154 returns the system-data pointer.  The system disk is byte 4Bh.
+
+bdos equ 0e0h
+os_version equ 163
+system_data equ 154
+system_disk_offset equ 04bh
+
+cseg
+org 0
+start:
+    pushf
+    pop bx
+    cli
+    mov ax,ds
+    mov ss,ax
+    mov sp,offset stack_top
+    push bx
+    popf
+    mov cl,os_version
+    int bdos
+    cmp ax,01410h
+    je get_system_data
+    cmp ax,01431h
+    je version_31
+    mov dx,offset requires_31
+    jmp print_exit
+version_31:
+    inc version_index
+    inc version_index
+get_system_data:
+    mov cl,system_data
+    int bdos
+    mov system_segment,es
+    mov system_offset,ax
+    cmp command_length,0
+    je display_disk
+    cmp base_drive,0
+    jne check_open_files
+    mov dx,offset invalid_drive
+    jmp print_exit
+check_open_files:
+    call open_file_count
+    cmp ax,0
+    je select_new_disk
+    mov dx,offset files_open
+    jmp print_exit
+select_new_disk:
+    dec base_drive
+    call select_disk
+    or al,al
+    je set_system_disk
+    mov dx,offset nonexistent_drive
+    jmp print_exit
+set_system_disk:
+    mov al,base_drive
+    call write_system_disk
+display_disk:
+    call read_system_disk
+    add al,'A'
+    mov display_drive,al
+    mov dx,offset disk_message
+print_exit:
+    mov cl,9
+    int bdos
+terminate:
+    mov cl,0
+    int bdos
+    jmps terminate
+
+select_disk:
+    mov dl,0ffh
+    mov cl,45
+    int bdos
+    mov dl,base_drive
+    mov cl,14
+    int bdos
+    ret
+
+read_system_disk:
+    push ds
+    lds si,system_pointer
+    add si,system_disk_offset
+    cld
+    lodsb
+    pop ds
+    ret
+
+write_system_disk:
+    push es
+    les di,system_pointer
+    add di,system_disk_offset
+    cld
+    stosb
+    pop es
+    ret
+
+open_file_count:
+    mov bx,offset open_count_offsets
+    add bx,version_index
+    mov bx,[bx]
+    push ds
+    lds si,system_pointer
+    add si,bx
+    lodsw
+    pop ds
+    ret
+
+dseg
+org 05ch
+base_drive rb 1
+org 080h
+command_length rb 1
+org 100h
+system_offset dw 0
+system_segment dw 0
+system_pointer equ dword ptr system_offset
+requires_31 db 'Requires Concurrent CP/M-86 3.1$'
+nonexistent_drive db 'Specified device does not exist$'
+files_open db 'Unable to set new system disk because of open files$'
+invalid_drive db 'Invalid drive code, use the following syntax',13,10
+              db 'SYSDISK A:$'
+disk_message db 'System disk is '
+display_drive db 'A:$'
+version_index dw 0
+; Version 1.0 and 3.1 offsets of the system-wide open-file counter.
+open_count_offsets dw 0c90h,0088h
+    rb 100h
+stack_top equ offset $
+    rb 6
+    db 0
+end

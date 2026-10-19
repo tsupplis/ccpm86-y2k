@@ -3,7 +3,7 @@ SUBDIRS=tod asm86 ddt86 submit chset initdir pip era sdir ed \
     genccpm asm80 hexcom dredix sysdisk
 
 all clean:
-	for d in $(SUBDIRS); do \
+	set -e; for d in $(SUBDIRS); do \
 		$(MAKE) -C $$d $@; \
 	done
 
