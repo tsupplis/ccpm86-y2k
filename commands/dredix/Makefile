@@ -1,6 +1,5 @@
 DRCC=drccpm_cc
 DRLINK=drccpm_link
-DRASM86=pcdev_rasm86
 CMDINFO=cmdinfo
 
 TOOLS=dredix.cmd
@@ -15,7 +14,7 @@ dredix.cmd: ed.obj common.obj ekey.obj ebuf.obj ecmdglb.obj ecmdio.obj epat.obj 
  vd.obj vk.obj dredix.inp Makefile
 	$(DRLINK) '$(basename $@)[input]'
 	$(CMDINFO) $@
-    
+
 $(patsubst %.c,%.obj,$(filter-out iosubs.c,$(wildcard *.c))): $(wildcard *.h)
 
 dredix.inp: Makefile
@@ -25,9 +24,6 @@ dredix.inp: Makefile
 
 %.obj: %.c
 	$(DRCC) $<
-
-%.obj: %.a86
-	$(DRASM86) $<
 
 clean:
 	$(RM) -f *.obj *.lst *.sym *.cmd dredix.inp

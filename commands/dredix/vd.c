@@ -16,6 +16,7 @@ static BYTE cells[1920], attrs[1920], dirty[24];
 static WORD currow = 1, curcol = 1, saverow = 1, savecol = 1;
 static WORD attrib, saved_mode, saved_delim;
 static BOOLEAN active;
+extern WORD __cpmrv; /* full AX result; __BDOS itself returns only AL */
 
 static VOID
 bdos_conout(s)
@@ -418,7 +419,8 @@ VDgo()
 VOID
 VDinit()
 {
-    saved_mode = __BDOS(109, 0xffff);
+    __BDOS(109, 0xffff);
+    saved_mode = __cpmrv;
     saved_delim = __BDOS(110, 0xffff);
     __BDOS(109, saved_mode | 4); /* raw output: preserve graphics and ESC */
     __BDOS(110, 0);

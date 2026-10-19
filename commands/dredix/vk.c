@@ -27,7 +27,7 @@ VKgetkey()
         for (p = letters; *p; p++)
             if (*p == (c & 127)) scan = scans[p - letters];
     }
-    if (c == 8 || c == 127) return(4); /* existing KBDEL action */
+    if (c == 8 || c == 127) return(8); /* literal backspace; Ctrl-D deletes a block */
     if (scan) { pending = scan; return(0); }
     return(c);
 }
