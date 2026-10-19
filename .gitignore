@@ -43,4 +43,5 @@ local/**
 
 # Original binary inputs used to build the floppy images.
 !/base/*.cmd
+!/dev/*.cmd
 !/media/base.img
