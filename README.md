@@ -1,6 +1,6 @@
 # Concurrent CP/M-86 3.1 Kernel and Tools
 
-**Disk Images are not available as part of the releases, ready to use !**
+**Disk Images are now available as part of the project releases, ready to use !**
 
 This project preserves Digital Research's Concurrent CP/M-86 3.1 as a usable,
 rebuildable system for running and exploring classic 16-bit software. Runnable
