@@ -7,9 +7,11 @@ GENCMD=cpm86_gencmd
 
 TOOLS=help.cmd
 
+DATA=help.hlp
+
 SNIPPETS=
 
-all: $(TOOLS) $(SNIPPETS)
+all: $(TOOLS) $(DATA) $(SNIPPETS)
 
 help.hlp: help.cmd help.dat
 	emu2 help.cmd '[C]'
@@ -19,15 +21,14 @@ help.hlp: help.cmd help.dat
 #   BBB = start of dats segment / 16 (e.g. 1000)
 #   MMM = (start of memory segment - start of dats segment) / 16
 PARA = sub(/H$$/,"",s); sub(/.$$/,"",s); sub(/^0+/,"",s); print tolower(s); exit
-GENCMD_BASE = $(shell awk '/DATS +DATA/{s=$$1; $(PARA)}' help.mp2)
-GENCMD_MEM  = $(shell awk '/MEMORY +MEMORY/{s=$$1; $(PARA)}' help.mp2)
-GENCMD_MIN  = $(shell printf '%x' $$((0x$(GENCMD_MEM)-0x$(GENCMD_BASE))))
+HELP_BASE = $(shell awk '/DATS +DATA/{s=$$1; $(PARA)}' help.mp2)
+HELP_MEM  = $(shell awk '/MEMORY +MEMORY/{s=$$1; $(PARA)}' help.mp2)
+HELP_MIN  = $(shell printf '%x' $$((0x$(HELP_MEM)-0x$(HELP_BASE))))
 
 help.cmd: help.h86
-	@test -n "$(GENCMD_BASE)" -a -n "$(GENCMD_MEM)" || \
+	@test -n "$(HELP_BASE)" -a -n "$(HELP_MEM)" || \
 	  { echo "help: cannot derive DATS/MEMORY from help.mp2"; exit 1; }
-	# $(GENCMD) $< 'data[b1000]'
-	$(GENCMD) $< 'data[b$(GENCMD_BASE) m$(GENCMD_MIN) xfff]'
+	$(GENCMD) $< 'data[b$(HELP_BASE) m$(HELP_MIN) xfff]'
 	cmdinfo $@
 
 help.loc: help.obj scd.obj
@@ -46,5 +47,6 @@ help.loc: help.obj scd.obj
 	$(INTEL_PLM86) $^ debug 'optimize(3)' xref
 
 clean:
-	rm -f help.hlp *.sys *.loc *.cmd *.obj *.h86 *.sym *.lin *.lst *.prn ccpmtest.img
+	rm -f *.sys *.loc *.cmd *.obj *.h86 *.sym *.lin *.lst *.prn ccpmtest.img
 	rm -f *.loc *.mp? *.lnk
+	rm -f help.hlp
