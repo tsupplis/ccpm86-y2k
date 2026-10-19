@@ -7,7 +7,14 @@ rebuildable system for running and exploring classic 16-bit software. Runnable
 disks and development tools accompany the sources and patch notes, making the
 system useful today and accessible to anyone interested in its history.
 
-![Concurrent CP/M-86 3.1 running in PCE](images/ccpm86.png)
+<p align="center">
+<img src="images/ccpm86.png" alt="Concurrent CP/M-86 3.1 running in PCE" width="48%">
+<img src="images/windows.png" alt="Overlapping console windows" width="48%">
+<br><sub>Concurrent CP/M-86 3.1 &nbsp;·&nbsp; Console windows</sub><br>
+<img src="images/setup.png" alt="XIOS configuration menu" width="48%">
+<img src="images/basic.png" alt="Microsoft BASIC 5.50A" width="48%">
+<br><sub>System setup &nbsp;·&nbsp; Microsoft BASIC 5.50A</sub>
+</p>
 
 | Goal | Distribution |
 | --- | --- |
