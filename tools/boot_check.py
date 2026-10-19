@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Boot both media images in an isolated QEMU VM and exercise the console."""
+"""Boot the three system images in an isolated QEMU VM and exercise the console."""
 import json
 from pathlib import Path
 import re
@@ -130,6 +130,14 @@ def check(image, second):
                     shortcut('ctrl-alt-1', 0)
                     print(f'{image.name}: TMP built-in CLS and SYSDISK query, set and invalid syntax passed')
 
+                    for topic, expected in (('sysdisk examples', 'System disk is M:'),
+                                            ('wmenu', 'Ctrl-Alt-2')):
+                        type_command('help ' + topic + ' [nopage]\n')
+                        wait_for(lambda t: 'HELP>' in t and expected in t)
+                        type_command('\n')
+                        wait_for(lambda t: re.search(r'^A>\s*$', t, re.M))
+                    print(f'{image.name}: restored HELP topics, including text beyond 64 KB, passed')
+
                     type_command('b:dredix\n')
                     type_command('hello\nworld')
                     wait_for(lambda t: t.startswith('hello')
@@ -157,6 +165,13 @@ def check(image, second):
                     # This disk has no SYSDISK.CMD: exercise the TMP built-in.
                     type_command('sysdisk\n')
                     wait_for(lambda t: 'System disk is A:' in t and re.search(r'^A>\s*$', t, re.M))
+                    type_command('window view\n')
+                    wait_for(lambda t: 'FGColor' in t and 'BGColor' in t
+                             and re.search(r'^A>\s*$', t, re.M))
+                    type_command('wmenu\n')
+                    wait_for(lambda t: 'Window Manager installed.' in t
+                             and re.search(r'^A>\s*$', t, re.M))
+                    print(f'{image.name}: WINDOW VIEW and WMENU installation passed')
                 print(f'{image.name}: PASS (two drives, A> prompt, RTC, yellow status, DIR)')
             finally:
                 process.terminate()
@@ -179,3 +194,4 @@ if __name__ == '__main__':
         'GENCCPM generated an invalid RTM flag table'
     check(MEDIA / 'ccpm86.img', MEDIA / 'ccpmtools.img')
     check(MEDIA / 'ccpmtools.img', MEDIA / 'ccpm86.img')
+    check(MEDIA / 'ccpmmaint.img', MEDIA / 'ccpm86.img')

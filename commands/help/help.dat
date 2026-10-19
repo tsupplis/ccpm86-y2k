@@ -1,6 +1,6 @@
 
 
-    ///1ABORT
+///1ABORT
     Syntax:
 
     ABORT programname
@@ -19,10 +19,10 @@
     ///2EXAMPLES
     Examples:
 
-    In  the  following  example, the  ABORT command stops the program  
-    TYPE which is displaying the contents of the file DOCUMENT.TXT on 
-    the screen.  Assume that the TYPE command was issued from virtual 
-    console 1, and is aborted from virtual console 3.  The drive and 
+    In  the  following  example, the  ABORT command stops the program
+    TYPE which is displaying the contents of the file DOCUMENT.TXT on
+    the screen.  Assume that the TYPE command was issued from virtual
+    console 1, and is aborted from virtual console 3.  The drive and
     user number do not affect the ABORT command.
 
     A>TYPE DOCUMENT.TXT
@@ -32,11 +32,10 @@
 
     <switch virtual console screen>
 
-    A>ABORT type 1 
+    A>ABORT type 1
     A>
 
-
-    ///1asm86
+///1asm86
     Syntax:
 
     ASM86 filespec {$options}
@@ -77,8 +76,7 @@
     F   format of hex file- .H86
     d = (D=Digital Research, I=Intel)
 
-
-    ///1BUFFERED
+///1BUFFERED
     You can switch the current (foreground) virtual console into  the
     background  by selecting a different virtual console for display.
     If the switched-out virtual console  is  in  buffered  mode,  any
@@ -87,12 +85,12 @@
     foreground,  any  output  stored  in the file is displayed on the
     monitor.
 
-    The other  virtual  console mode is dynamic mode.  When a console 
+    The other  virtual  console mode is dynamic mode.  When a console
     is switched out and in dynamic mode,  output that scrolls off the
     screen is  not saved.  Use the VCMODE command  to switch consoles
     from one mode to the other.
 
-    ///1CHSET
+///1CHSET
     Syntax:
 
     CHSET {d:}filename{.CMD}
@@ -102,45 +100,45 @@
     Explanation:
 
     CHSET is a utility that allows you to make changes in the command
-    header  of a command file with a  .CMD filetype.  CHSET has three 
-    fields that you can display or change, corresponding to the three 
-    fields that CHSET modifies in a command header.  The three fields 
+    header  of a command file with a  .CMD filetype.  CHSET has three
+    fields that you can display or change, corresponding to the three
+    fields that CHSET modifies in a command header.  The three fields
     and their possible settings are:
- 
+
     8087 - The  8087  field  has three possible settings, ON, OFF, or
-    OPT  (optional).   Specify  ON  for programs that require an 8087 
-    processor  in  order  to run.  Choose OPT when you have a program 
-    that  can use an 8087 if it is present in your system, or emulate 
-    an  8087 if it is not present.  Specify OFF if you want to cancel 
+    OPT  (optional).   Specify  ON  for programs that require an 8087
+    processor  in  order  to run.  Choose OPT when you have a program
+    that  can use an 8087 if it is present in your system, or emulate
+    an  8087 if it is not present.  Specify OFF if you want to cancel
     a previous ON or OPT selection.
 
-    SHARED - The SHARED field has two settings, ON or OFF.  Select ON 
-    when  you  want  to modify a program's command header so that the 
-    program  can  use  Concurrent  CP/M's  shared  code capabilities.  
+    SHARED - The SHARED field has two settings, ON or OFF.  Select ON
+    when  you  want  to modify a program's command header so that the
+    program  can  use  Concurrent  CP/M's  shared  code capabilities.
     Specify OFF if you want to cancel a previous ON selection.
 
-    SUSPEND - The SUSPEND field has two options, ON or OFF.  When you 
-    select  ON,  CHSET  modifies  a  program's command header so that 
-    Concurrent  CP/M  suspends  that   program's  operation  when  it 
-    occupies a  switched-out virtual console.  OFF cancels a previous 
+    SUSPEND - The SUSPEND field has two options, ON or OFF.  When you
+    select  ON,  CHSET  modifies  a  program's command header so that
+    Concurrent  CP/M  suspends  that   program's  operation  when  it
+    occupies a  switched-out virtual console.  OFF cancels a previous
     ON selection.
 
     Changing Field Settings
 
     You  can  change any or all of CHSET's fields in a single command
-    line.  To  change  a setting for a field or fields, enter a CHSET 
-    command  with  a filespec and the fields you want to change.  For 
+    line.  To  change  a setting for a field or fields, enter a CHSET
+    command  with  a filespec and the fields you want to change.  For
     example, if you type
 
     B>chset calc.cmd [8087=opt,shared=on,suspend=on]
 
-    CHSET  modifies  the command header of a program contained in the 
-    file CALC.CMD.  
+    CHSET  modifies  the command header of a program contained in the
+    file CALC.CMD.
 
     Displaying Field Settings
 
-    When  you  enter  a  CHSET  command  with a filespec and no field 
-    settings,  CHSET  displays the settings for the specified file or 
+    When  you  enter  a  CHSET  command  with a filespec and no field
+    settings,  CHSET  displays the settings for the specified file or
     files.  For example, if you type
 
     B>chset erase.cmd
@@ -150,16 +148,16 @@
     B:ERASE   .CMD settings are [8087=OFF,SHARED=OFF,SUSPEND=OFF]
 
     Modifying  a command header is not a trivial matter.  While CHSET
-    cannot  harm  your  .CMD files, inappropriate use of it can cause 
-    your programs to behave in unpredictable ways.  
+    cannot  harm  your  .CMD files, inappropriate use of it can cause
+    your programs to behave in unpredictable ways.
 
     CHSET [HELP]
 
     If you type "help" in square brackets following the CHSET command
-    keyword  in  a command line, CHSET responds with a display giving 
-    you  a  brief  explanation  of  CHSET  and  a list of examples of 
-    correct  command  line syntax.  You can also type CHSET without a 
-    command tail to summon CHSET's HELP display.  
+    keyword  in  a command line, CHSET responds with a display giving
+    you  a  brief  explanation  of  CHSET  and  a list of examples of
+    correct  command  line syntax.  You can also type CHSET without a
+    command tail to summon CHSET's HELP display.
 
     ///2EXAMPLES
     Examples:
@@ -170,19 +168,19 @@
     TAXAID so that it can use Concurrent CP/M's facilities for shared
     code and can either use an 8087 if it is present in the system or
     emulate an 8087 if it is not present.  The command also turns off
-    the  SUSPEND  field for TAXAID, so that TAXAID can run when it is 
-    in  a  switched-out  virtual  console.  The inclusion of the .CMD 
+    the  SUSPEND  field for TAXAID, so that TAXAID can run when it is
+    in  a  switched-out  virtual  console.  The inclusion of the .CMD
     filetype is optional.
 
     A>chset *
 
     The above command displays the current settings for every command
-    file  in the current directory.  CHSET does not accept a filespec 
+    file  in the current directory.  CHSET does not accept a filespec
     of *.* because it accepts only a blank filetype or filetype .CMD.
 
     B>chset ezesort [8087=on]
 
-    The  above  command  modifies  the  command  header for a program 
+    The  above  command  modifies  the  command  header for a program
     called EZESORT so that it can use an installed 8087 processor.
 
     A>chset rectify.cmd
@@ -190,7 +188,7 @@
     The  above  command causes CHSET to respond with a display of the
     current settings of the fields in RECTIFY.CMD's command header.
 
-  ///1cntrlchars
+///1cntrlchars
 
   Control Character                      Function
 
@@ -207,8 +205,8 @@
   CTRL-J    Line feed.  Same effect as RETURN.
 
   CTRL-O    Suppresses console output.  Program continues running in
-            the  background.   Press  RETURN to return to the system 
-            prompt.     
+            the  background.   Press  RETURN to return to the system
+            prompt.
 
   CTRL-M    same as RETURN.
 
@@ -228,18 +226,18 @@
   CTRL-Z    string separator for PIP and ED; terminates console input
             when console is used as a source device with PIP.
 
-    ///1COMMANDS
+///1COMMANDS
 
     Concurrent CP/M command line syntax:
 
     A> <command> {command tail} <RETURN>
 
     Concurrent CP/M  accepts the command lines you type following the
-    system prompt.  The command keyword identifies the system command 
-    or program to be executed.  The optional command tail can consist  
-    of  a  filespec or various command parameters, depending upon the 
-    specific command.  To  complete  the command, press the RETURN or 
-    ENTER key.  File  specifications in command lines are composed of 
+    system prompt.  The command keyword identifies the system command
+    or program to be executed.  The optional command tail can consist
+    of  a  filespec or various command parameters, depending upon the
+    specific command.  To  complete  the command, press the RETURN or
+    ENTER key.  File  specifications in command lines are composed of
     the following parts:
 
     {d:}filename{.typ}{;password}
@@ -249,7 +247,93 @@
     .typ            is an optional file type
     ;password       is an optional 1- to 8-character password
 
-  ///1conventions
+///1CONFIG
+    Syntax:
+
+    CONFIG
+
+    Purpose:
+
+
+    Concurrent CP/M  supports  three  parallel I/O  printers  (0, 1
+     2  )  and two  serial I/O  printers (3, 4).  The CONFIG command
+    lets  you  specify  the  parameters of   the   serial   printers
+    interactively or in a command line.
+
+    Interactive Mode:
+
+    When you enter:
+
+    A>config
+
+    the CONFIG menu appears.  If there is  only one serial  printer
+    connected, only the  Printer  3 column appears; if you have two
+    serial printers  a  column  for Printer 4  apppears.  This menu
+    shows the four sets  of  parameters  for  printers 3 and 4, odd
+    numbered keys for printer 3 and even-numbered keys for printer 4.
+
+    The values shown when you invoke CONFIG are the current values;
+    change  them by pressing the appropriate keys, with each stroke
+    incrementing the appropriate value.  The F9 and F10 keys return
+    you to command level.
+
+    BAUD RATE is the speed at which the computer sends data  to its
+    printer.  Refer  to  your printer's  technical  manual  for the
+    correct baud rate to program.
+
+    WORD LENGTH  indicates  the number of data  bits  in  a  single
+    transmitted  character.  This  value is  almost always  7 or 8.
+    Again, consult  the printer's documentation  to  determine  the
+    correct value.
+
+    PARITY monitors characters  to see  if they are transmitted and
+    received correctly.  Often both  the  printer  and computer can
+    enable or disable parity checking.  Refer to the printer manual
+    for specific details relevant to your printer.
+
+    STOP BITS  indicate  the end of a  transmitted  character.  See
+    your printer's manual for the proper value; 1 is commonly used.
+
+    Command Line Mode:
+
+    To define all serial port parameters  in a single command line,
+    use this syntax:
+
+    CONFIG PORT# BAUDRATE WORDLENGTH PARITY STOPBITS
+
+    In this  format, PORT# is either P3, indicating printer 3,  or
+    P4, indicating printer 4.
+
+    BAUDRATE  is  10, 150, 300, 600, 1200, 2400,  4800,  or  9600,
+    indicating the transmisstion speed in baud (bits-per-second).
+
+    WORDLENGTH is 5, 6, 7, or 8, specifying the number of data bits
+    for a transmitted character.
+
+    STOPBITS is either 1 or 2, adding that number of stop bits to the
+    end of a transmitted character.
+
+    ///2EXAMPLE
+
+    A typical CONFIG command line looks like this:
+
+    A>config p3 9600 7 even 1
+
+    This command line sets serial printer P3 to 9600 baud, with seven
+    data bits, even parity and 1 stop bit.
+
+    If you make an mistake in a CONFIG command line, the command line
+    is returned with a question mark under the error, and  a list  of
+    valid parameters follows.
+
+    If you have tried to configure a serial port on a  system without
+    such ports, CONFIG returns this error message:
+
+    No Serial communication options installed
+
+    Then control returns to system command level.
+
+///1conventions
 
                COMMAND CONVENTIONS
 
@@ -273,7 +357,7 @@
   ?    wildcard: replaces any single character
        in the same position of a filename and/or filetype.
 
-    ///1DATE
+///1DATE
     Syntax:
 
     DATE
@@ -294,7 +378,7 @@
 
     ///2EXAMPLES
     Examples:
-  
+
     A>DATE
 
     Displays the current date and time.
@@ -311,7 +395,7 @@
 
     Prompts you for date and time entries.
 
-    ///1DDT86
+///1DDT86
     Syntax:
 
     DDT86 {filespec}
@@ -394,7 +478,24 @@
     W           word 16-bit
     wc          word constant
 
-    ///1DIR
+    ///3PARAMETERS
+    DDT-86 Command Parameters
+
+    Parameter   Replace With
+
+    bc          byte constant
+    b1          breakpoint one
+    b2          breakpoint two
+    d           destination for data
+    f           final address
+    n           number of instructions
+                to execute
+    r           register or flag name
+    s           starting address
+    W           word 16-bit
+    wc          word constant
+
+///1DIR
     Syntax:
 
     DIR
@@ -410,7 +511,7 @@
     Displays the names of non-system (DIR) files in the directory  of
     an  on-line  diskette.     Use DIR [S] to  display  the  names of
     SYStem files (files that have the SYS attribute set). Use DIR [Gn]
-    to display non-system files in User n.    
+    to display non-system files in User n.
 
     ///2EXAMPLES
     Examples:
@@ -423,9 +524,36 @@
     A>DIR PROG???.H86
     A>DIR PROGRAM.*
     A>DIR [S]
-    A>DIR B:UTILITY.CMD [S] 
+    A>DIR B:UTILITY.CMD [S]
 
-    ///1DYNAMIC
+///1DSKMAINT
+    Syntax:
+
+    DSKMAINT
+
+    Explanation:
+
+    DSKMAINT is a  multi-function  menu-driven command  that performs
+    these diskette maintenance operations: formatting new or reusable
+    diskettes,  copying  one  diskette's  contents  to  another,  and
+    verifying the integrity of the data on diskettes.
+
+    Single and Double-Sided Diskettes:
+
+    DSKMAINT can only  copy  between  two diskettes of the same type:
+    between two  single-sided  diskettes  or between two double-sided
+    diskettes.  Look at the  box of  diskettes  or at the label on an
+    individual diskette to determine if it is single or double-sided.
+
+    To make a double-sided copy  of a single-sided diskette, format a
+    double-sided diskette, then use PIP to copy files between the two
+    diskettes.
+
+    Before you invoke  DSKMAINT, be sure your current virtual console
+    is in Dynamic mode.  You can  set the console to  Dynamic mode by
+    using the VCMODE command.
+
+///1DYNAMIC
     You can switch the current (foreground) virtual console into  the
     background  by selecting a different virtual console for display.
     If the switched-out virtual console is in  dynamic mode, you will
@@ -439,7 +567,7 @@
     buffered mode if you anticipate  a  program  outputting more than
     one screen of data, and you do not wish to miss it.
 
-    ///1ED
+///1ED
     Syntax:
 
     ED input-filespec {d:|output-filespec}
@@ -447,10 +575,10 @@
     Explanation:
 
     ED is the Concurrent CP/M  character file editor.  You can rename
-    or redirect the  new  version  of  the  file  by  specifying  the 
+    or redirect the  new  version  of  the  file  by  specifying  the
     destination drive or destination filespec.
 
-    Section 10  of the  Concurrent  CP/M  User's  Reference  Guide is 
+    Section 10  of the  Concurrent  CP/M  User's  Reference  Guide is
     devoted to ED.
 
     ///2COMMANDS
@@ -514,7 +642,7 @@
     :B5T
     :Rmyfile.txt
 
-    ///1ERA
+///1ERA
     Syntax:
 
     ERA filespec
@@ -534,7 +662,7 @@
     A>ERA D:*.BAK
     A>ERA B:*.*
 
-    ///1ERAQ
+///1ERAQ
     Syntax:
 
     ERAQ filespec
@@ -565,10 +693,10 @@
 
     2B>ERAQ myfile.dat [XFCB]
 
-    The command line above erases only the password information for the 
-    file myfile.dat.  First use SET to turn off password protection. 
+    The command line above erases only the password information for the
+    file myfile.dat.  First use SET to turn off password protection.
 
-    ///1FILESPEC
+///1FILESPEC
     Concurrent CP/M  identifies   every  file   by  its  unique  file
     specification.  The  term  "filespec" is an abbreviation for file
     specification. A filespec can have four parts:
@@ -585,7 +713,7 @@
                alphabetic or numeric characters preceded by a period.
 
     ;password  represents the optional password,  which can be 1 to 8
-               alphabetic  or  numeric  characters,   preceded  by  a 
+               alphabetic  or  numeric  characters,   preceded  by  a
                semicolon.
 
     Valid combinations of the elements of a  file  specification  are
@@ -600,14 +728,133 @@
       filename.typ;password
       d:filename.typ;password
 
-    Certain Concurrent CP/M commands select and process several files   
-    if  "wildcard" characters appear  in  the  filename  or filetype. 
-    The two wildcard characters are  ?, which matches a single letter  
-    in the same  position, and *, which matches any character at that 
-    position  and  any  other characters remaining in the filename or 
+    Certain Concurrent CP/M commands select and process several files
+    if  "wildcard" characters appear  in  the  filename  or filetype.
+    The two wildcard characters are  ?, which matches a single letter
+    in the same  position, and *, which matches any character at that
+    position  and  any  other characters remaining in the filename or
     filetype.
 
-    ///1gencmd
+    ///2CONVENTIONS
+
+               COMMAND CONVENTIONS
+
+  The following special symbols define command syntax.
+
+  {}   surrounds an optional item.
+  |    separates alternative items in a command line.
+  <cr> indicates a carriage return.
+  ^    indicates the Control Key.
+  n    substitute a number for n.
+  s    substitute a string (group) of characters for s.
+  o    substitute an option or option list for o.
+  []   type square brackets to enclose an option list.
+  ()   type parens to enclose a range of options within an option list.
+  RW   Read-Write attribute - opposite of RO
+  RO   Read-Only attribute - opposite of RW
+  SYS  System attribute - opposite of DIR
+  DIR  Directory attribute - opposite of SYS
+   ... preceding element can be repeated as many times as desired.
+  *    wildcard: replaces all or part of a filename and/or filetype.
+  ?    wildcard: replaces any single character
+       in the same position of a filename and/or filetype.
+
+///1FUNCTION
+    Syntax:
+
+    FUNCTION [filename.]
+    FUNCTION [filename.typ]
+
+    Purpose:
+
+    FUNCTION specifies the operation of the 50 programmable  function
+    keys (PFKs).  FUNCTION  operates  in  two modes, specified by the
+    command tail entered with  FUNCTION.  If you  supply  no  command
+    tail  FUNCTION  displays  menus  to  select from. If you  specify
+    a filespec, FUNCTION takes its input from this file.
+
+    FUNCTION programs  function  keys on a per-virtual console basis.
+    PFK assignments you make in one  virtual console affect only that
+    virtual console.
+
+    Concurrent CP/M  boots  with  commands  programmed  into  the ten
+    F1-F10  function  keys  at  the  left  of  the   keyboard.  These
+    commands are:
+
+    F1:  DIR\20A:\0D
+    F2:  DIR\20B:\0D
+    F3:  SDIR\20A:\0D
+    F4:  SDIR\20B:\0D
+    F5:  SHOW\20A:\0D
+    F6:  SHOW\20B:\0D
+    F7:  DSKMAINT\0D
+    F8:  PIP\0D
+    F9:  FUNCTION\0D
+    F10: CONFIG\0D
+
+    The other 40 keys, SHIFT F1-F10, ALT F1-F10, CTRL F1-F10, and the
+    numeric  keypad are not pre-programmed.  FUNCTION will  allow you
+    to program up to twenty characters in the first ten function keys
+    (F1-F10) and up to four characters in all of the others.
+
+    The \20 in the commands above indicates a space.  It is generated
+    automatically when you enter a space into a command.
+
+    The commands terminated with \0D  include  carriage  returns.
+    The  commands  without  \0D  can  take  further specifications or
+    parameters you supply.  Terminate them with a carriage return and
+    Concurrent CP/M carries out the command.
+
+    Using The FUNCTION Menu:
+
+    When  you  first  call  FUNCTION the menu appears. The string  of
+    Concurrent  CP/M  commands  and  symbols following "F-number:" is
+    the programmed function.  Press  any  function key  to  go to the
+    menu containing it and change the programmed value.  If you  make
+    a mistake, just backspace over it to erase it.  You can terminate
+    the string with \00 or CTRL-@ and return to the main menu.
+
+    If you  want  to  alter  or inspect the other  PFKs,  press  ESC.
+    Pressing ESC moves you  from  menu  to  menu of PFKs.  Entering a
+    carriage return returns you to the system command level.
+
+    Non-Printing Characters:
+
+    You  can  specify  absolute  hexadecimal values so  all  possible
+    control  characters and 8-bit character codes can be used.  Refer
+    to  the  Concurrent  CP/M  User's  Guide  for  a  description  of
+    programming hexadecimal codes into the PFKs.
+
+    Saving Function Key Definitions:
+
+    You can use the SETUP program to save  the function keys you have
+    entered, so that every  time  you  boot Concurrent CP/M they will
+    come up in your configuration.
+
+    Using FUNCTION With a Command File:
+
+    If you enter a  filespec  with  FUNCTION,  Concurrent  CP/M opens
+    this  file  and  programs  the  function  keys with these command
+    strings.  These files must  contain  a  separate  line  for  each
+    function  key.  Examine the DATA.PFK file to learn how such files
+    are constructed; use a text editor like ED  to  create  your  own
+    customized version.  Refer to the FUNCTION command description in
+    the  Concurrent  CP/M  User's  Guide  for  further details.
+
+    Once you have  completed  writing  your  command file and checked
+    it  for  errors,  you  can return to the system command level and
+    call this command file to program the specified  keys.   If  your
+    file is named PFK.PFK, for example, give the command:
+
+    A>FUNCTION PFK.PFK
+
+    FUNCTION reads the specified file, programs the keys accordingly,
+    and returns to system command level.
+
+    See Section 9 of the Concurrent CP/M users guide for further
+    information about FUNCTION.
+
+///1gencmd
     Syntax:
 
     GENCMD filespec {options}
@@ -644,8 +891,56 @@
 
     All values represented by n are hexadecimal paragraph addresses.
 
+///1HDMAINT
+    Syntax:
 
-    ///1HELP
+    HDMAINT
+
+    The  HDMAINT  hard-disk  maintenance  utility  is  a  menu-driven
+    program  that prepares your IBM-compatible hard disk for use with
+    Concurrent CP/M.   HDMAINT  works by offering you alternatives in
+    its menus.   You respond to HDMAINT by pressing the function keys
+    that correspond to your choices.
+
+    HDMAINT can perform the following functions:
+
+    o Creates or  changes  a Concurrent CP/M  partition  on  your hard
+      disk and prepares a volume within  that partition for Concurrent
+      CP/M's use.
+
+    o Deletes any existing Concurrent CP/M volume from your hard
+      disk.
+
+    o Makes any partition on the hard disk bootable or not bootable.
+
+    o Toggles the state of a verify switch on or off.  When the
+      switch is on, Concurrent CP/M confirms that everything it
+      writes to the hard disk is correctly written by reading the
+      data back and comparing it to data sent to the disk.
+
+    o Increases the number of possible directory entries within a
+      Concurrent CP/M volume that has fewer than the maximum number
+      of directory entries allowed.
+
+    o Permits you to scan an existing Concurrent CP/M volume for
+      surface defects that developed after the partition was created.
+
+    Before you invoke  HDMAINT, be sure  your current virtual console
+    is in  dynamic mode.  Set it to  dynamic mode with VCMODE.  It is
+    not possible to run HDMAINT when  any  other  programs  are being
+    executed.   Before  invoking  HDMAINT,  close  any open files and
+    terminate any running programs.
+
+    HDMAINT presents only meaningful options.  Options that cannot be
+    executed by HDMAINT at a given time never appear on the screen.
+
+    When  you  use  HDMAINT for  the  first time,  accept the default
+    values HDMAINT proposes whenever it asks you for a decision. This
+    allows  you  to  proceed  quickly  through the partition-creation
+    process. You can use HDMAINT later to change your Concurrent CP/M
+    partition when you have a better idea of your needs.
+
+///1HELP
 
   Syntax:
 
@@ -672,7 +967,8 @@
    -  [LIST] removes extra lines between headings; use with CTRL-P to print.
    -  Press any key to exit a display and return to the HELP> prompt.
 
-  Examples:
+    ///2EXAMPLES
+    Examples:
 
        A>HELP
        A>HELP DATE
@@ -685,7 +981,7 @@
        HELP>.
        HELP><cr>
 
-    ///1INITDIR
+///1INITDIR
     Syntax:
 
     INITDIR d:
@@ -693,12 +989,12 @@
     Explanation:
 
     INITDIR  initializes   a   directory  to   allow  time  and  date
-    stamping on a diskette or hard disk.  Attempting to  enable  time  
-    and date stamping on a directory that has not been reformatted by  
-    INITDIR  will  result in an error message.  INITDIR only works on 
+    stamping on a diskette or hard disk.  Attempting to  enable  time
+    and date stamping on a directory that has not been reformatted by
+    INITDIR  will  result in an error message.  INITDIR only works on
     disks that have already been formatted according to your computer
     manufacturer's instructions.
-    
+
     ///2EXAMPLE
     Example:
 
@@ -720,7 +1016,7 @@
 
     Do you want the existing time and date stamps cleared (Y/N)?
 
-    ///1PIP (copy)
+///1PIP (copy)
 
   Syntax:
 
@@ -823,72 +1119,72 @@
   All  options  except  C,G,K,O,R,V  and  W  force  an  ASCII  file
   transfer, character by character, terminated by a ^Z.
 
-    ///1PRINT
+///1PRINT
     Syntax:
-   
+
     PRINT filename{[options]}{,filename{[options],...}
 
     Explanation:
 
-    The  PRINT  utility  allows  you to send the files you enter on a 
+    The  PRINT  utility  allows  you to send the files you enter on a
     PRINT command line to the printer.
 
     You must enter at least one filespec on a PRINT command line. You
     can enter as many filespecs as will fit on Concurrent CP/M's 128-
-    character  command  line.   PRINT  allows  you  to  use  wildcard 
-    filespecs.   On a PRINT command line, separate filespecs with one 
+    character  command  line.   PRINT  allows  you  to  use  wildcard
+    filespecs.   On a PRINT command line, separate filespecs with one
     space or a comma.
 
     PRINT Options
 
-    o S (SYSTEM) - The S option  allows you to  print a file that has 
+    o S (SYSTEM) - The S option  allows you to  print a file that has
       the SYS attribute.
 
     o Tn (TAB) - n is  a  number  of character spaces.   The T option
-      allows you to expand or compress tab characters. PRINT replaces 
-      each  tab in a file  with  enough  spaces  to position the next 
-      character in a column that is divisible by n.   PRINT's default 
+      allows you to expand or compress tab characters. PRINT replaces
+      each  tab in a file  with  enough  spaces  to position the next
+      character in a column that is divisible by n.   PRINT's default
       setting for tab expansion is eight spaces.
 
-    o Gn (GET FROM) - n is a user number.  The G option allows you to 
+    o Gn (GET FROM) - n is a user number.  The G option allows you to
       print a file that is not in the current user number.
 
     Enter options in square brackets following the filespec for which
-    you want to exercise the option.  
+    you want to exercise the option.
 
     ///2EXAMPLES
     Examples:
 
-    To print more than one copy of a file, repeat the file's filespec 
+    To print more than one copy of a file, repeat the file's filespec
     on the PRINT command line for each additional copy that you want.
-    
+
     4B>print murphy.txt[g3],murphy.txt[g3],murphy.txt[g3]
 
-    This example prints three copies of the file MURPHY.TXT in user 3 
+    This example prints three copies of the file MURPHY.TXT in user 3
     of drive B.
 
     2B>print *.txt,example.ltr[g0],a:backup.sub[g0s]
 
-    In the above example,  PRINT  prints all the files in the current 
-    directory with a filetype of TXT, the file EXAMPLE.LTR in user 0, 
-    and the SUBMIT file  BACKUP.SUB,  which has the SYS attribute and 
+    In the above example,  PRINT  prints all the files in the current
+    directory with a filetype of TXT, the file EXAMPLE.LTR in user 0,
+    and the SUBMIT file  BACKUP.SUB,  which has the SYS attribute and
     is stored in user 0 of drive A.
 
     10A>print abacus.del[g3],*.vrf[t10] angst.sub[sg0] milton.dun
 
-    The above  command causes  PRINT to print the file  ABACUS.DEL in 
-    user 3,  and all files  with a  filetype  of  VRF in  the current 
-    directory.   PRINT  expands the tabs in these files to 10 spaces.  
-    PRINT then continues with  ANGST.SUB,  a SUBMIT file with the SYS 
-    attribute in user 0, and finishes with the file MILTON.DUN.  Note 
+    The above  command causes  PRINT to print the file  ABACUS.DEL in
+    user 3,  and all files  with a  filetype  of  VRF in  the current
+    directory.   PRINT  expands the tabs in these files to 10 spaces.
+    PRINT then continues with  ANGST.SUB,  a SUBMIT file with the SYS
+    attribute in user 0, and finishes with the file MILTON.DUN.  Note
     that commas or spaces are acceptable in separating files.
 
     B>print *.*
 
-    The above command causes PRINT to print all of the files with the 
+    The above command causes PRINT to print all of the files with the
     DIR attribute in user 0 of drive B.
 
-    ///1PRINTER
+///1PRINTER
     Syntax:
 
     PRINTER {n}
@@ -914,7 +1210,7 @@
     A>PRINTER 3          ; sets the current printer number
     Printer Number = 3
 
-    ///1REN
+///1REN
     Syntax:
 
     REN {d:}newname{.typ}=oldname{.typ}
@@ -943,7 +1239,7 @@
     In the last example, the new filename already  exists.  The  user
     overrides the error by entering a Y at the prompt.
 
-    ///1SDIR
+///1SDIR
     Syntax:
 
     SDIR {d:}{filespec}{,filespec}{[option]|[option=modifier]}
@@ -1034,7 +1330,7 @@
           SET filespec [PROTECT=DELETE]
           SET filespec [PROTECT=NONE]
 
-  
+
           Password Protection Modes
 
   Mode                        Protection
@@ -1177,7 +1473,82 @@
 
        Sets drive B to Read-Only.
 
-    ///1SHOW
+    ///2EXAMPLES
+    Examples:
+
+    A>SET [HELP]
+    A>SET [NAME=mylabel.dsk]
+    A>SET *.CMD [SYS,RO,PASSWORD=secret,PROTECTION=READ]
+    A>SET *.HEX [RW,PROTECTION=NONE,DIR]
+    A>SET *.TEX [PASSWORD=secret,PROTECTION=WRITE]
+    A>SET ONE.TEX,TWO.TEX [PROTECTION=NONE],*.PRN [SYS]
+    A>SET [DEFAULT=secret]
+    A>SET [CREATE=ON]
+    A>SET [ACCESS=ON]
+    A>SET [UPDATE=ON]
+    A>SET B:[RO]
+    A>SET B:[RW]
+
+    ///2OPTIONS
+    Options:
+
+    [ACCESS=ON|OFF]       Turn access time stamps on/off.
+    [CREATE=ON|OFF]       Turn creation time stamps on/off.
+    [DEFAULT=password]    Specify a default password.
+    [DIR]                 Set file DIRectory attribute.
+    [HELP]                Display a list of examples.
+    [MAKE=ON|OFF]         Turn automatic creation of XFCBs on/off.
+    [NAME=lablname.typ]   Specify directory label name.
+    [PASSWORD=password]   Specify file or directory label password.
+    [PROTECTION=READ|WRITE|EDIT|NONE]   Set level of password protection.
+    [RO]                  Set file or drive to Read-Only.
+    [RW]                  Set file or drive to Read/Write.
+    [SYS]                 Set file SYStem attribute.
+    [UPDATE=ON|OFF]       Turn update time stamps on/off.
+
+///1SETUP
+    Syntax:
+
+    SETUP
+
+    SETUP is a menu-driven  utility program that allows you to tailor
+    your  system  configuration  to meet your needs.   SETUP works by
+    presenting  you  with  menus.   You  respond to SETUP by pressing
+    function  keys  appropriate  to  your  choices.  SETUP offers the
+    following options:
+
+    o Save XIOS Parameters - Allows  you  to  save  the  serial  port
+      configurations you make with CONFIG.   Also  allows you to save
+      the  current  function  key  assignments made with the FUNCTION
+      command.
+
+    o MDISK - This  option  allows the user to create a virtual drive
+      in memory.
+
+    o Diskette Head Step Time - Allows you  to  change  the head step
+      time in the diskette controller.
+
+    o Verify after Diskette Write - When enabled,  this option causes
+      Concurrent CP/M  to  verify  each  write operation to diskette,
+      with automatic retries for verification errors.
+
+    o Storage Disk - Allows you to  choose  where the  selections you
+      make with SETUP are stored.   If you boot  Concurrent CP/M from
+      diskette, select "Diskette"; if you boot from hard disk, select
+      "Hard Disk".
+
+    When you type SETUP and press Enter, SETUP responds with its main
+    menu,offering you all of the above options. Press the appropriate
+    function key to receive an option menu. Each option menu explains
+    the option  and  offers  you the choice of enabling the option or
+    returning to the main menu.
+
+    From the main menu, you have the choice of leaving without making
+    changes,  or enabling the changes made in the option menus.   The
+    changes made in SETUP do not take  effect until the next time you
+    power up your Personal Computer or perform a system reset.
+
+///1SHOW
     Syntax:
 
     SHOW {d:}{option}
@@ -1223,7 +1594,7 @@
     SHOW d:       ; SHOW with the optional drive specifier displays
                   ; information for the specified drive only.
 
-    ///1SUBMIT
+///1SUBMIT
     Syntax:
 
     SUBMIT filespec (optional parameters)
@@ -1231,8 +1602,8 @@
     Explanation:
 
     SUBMIT  processes  a  command  file  with  a  filetype   of  .SUB
-    consisting  of  Concurrent  CP/M  commands  given one command per 
-    line.   Any  optional  parameters  (such  as a drive or filespec)  
+    consisting  of  Concurrent  CP/M  commands  given one command per
+    line.   Any  optional  parameters  (such  as a drive or filespec)
     following  the  filespec  in the command line are substituted for
     their corresponding formal parameters ($1,$2,$3...) in the SUBMIT
     file.
@@ -1244,7 +1615,56 @@
     A>SUBMIT B:START
     A>SUBMIT MAX.SUB data1 data2 data3
 
-    ///1systat
+///1SYSDISK
+    Syntax:
+
+    SYSDISK
+    SYSDISK d:
+
+    Explanation:
+
+    SYSDISK is available as a TMP built-in and as SYSDISK.CMD. The bare
+    command uses the built-in; SYSDISK.CMD selects the standalone tool.
+    A change is refused while files are open anywhere in the system.
+
+    The SYSDISK command  tells you which  drive is the current system
+    drive  and  lets  you  specify  a  new system drive.  Valid drive
+    specifications are A: through P:, provided the drive is configured.
+    The distributed floppy setup provides A: and B:; other drives such as
+    M: require a system configuration that enables them.
+
+    Concurrent CP/M  assigns  one  drive as the system drive whenever
+    you start up Concurrent CP/M.  Concurrent CP/M  looks for program
+    files (.CMD filetype) on the system drive when it cannot find the
+    file on  the  default drive.  The system drive is the drive whose
+    letter appears in the system prompt when you  start up Concurrent
+    CP/M.
+
+    SYSDISK is especially useful if you do not have a hard disk.  You
+    can create a start-up file with a SUBMIT command  that sets up an
+    MDISK (when configured), sets your system drive to drive M, and transfers  all your
+    command files to drive M.  This  frees  up  your  default  system
+    drive for other work.
+
+    ///2EXAMPLES
+    Examples:
+
+    Here the SYSDISK command is used to tell you which is the current
+    system drive:
+
+    A>SYSDISK
+
+    System disk is A:
+
+
+    In the following example, SYSDISK is used to  assign  the  system
+    drive to MDISK, drive M.
+
+    A>SYSDISK M:
+
+    System disk is M:
+
+///1systat
     Syntax:
 
     SYSTAT
@@ -1263,7 +1683,7 @@
     ///2examples
     Examples:
 
-          A>SYSTAT 
+          A>SYSTAT
 
     This command invokes  the  menu-driven  feature  of  SYSTAT.  The
     utility responds by displaying the following menu:
@@ -1317,12 +1737,12 @@
     [E]     Returns you to the system prompt level from the menu.
 
     [option C n]
-            Following  an  option  with a space  and a  C activates a          
+            Following  an  option  with a space  and a  C activates a
             continuous display, until you press a key.  Following the
-            C with a space and a one  or two-digit  number causes the 
+            C with a space and a one  or two-digit  number causes the
             display to update every n seconds.
 
-    ///1TYPE
+///1TYPE
     Syntax:
 
     TYPE filespec
@@ -1343,7 +1763,7 @@
     C>TYPE program.bas
     D>TYPE program.a86
 
-    ///1USER
+///1USER
     Syntax:
 
     USER {number 0 - 15}
@@ -1365,7 +1785,7 @@
     A>USER 15
     A>USER 7
 
-    ///1VCMODE
+///1VCMODE
     Syntax:
 
     VCMODE {option}
@@ -1395,5 +1815,223 @@
              output from a running program goes into a buffer file on
              disk.  Thus screen output is preserved.
 
+///1WINDOW
+    Syntax:
 
-
+    WINDOW VIEW
+    WINDOW TOP number=n
+    WINDOW FULL number=n
+    WINDOW WRITE number=n type={w|c|s},file=filename
+    WINDOW CHANGE number=n field name=field value
+
+    Explanation:
+
+    WINDOW is a  utility that allows you to make changes to your CP/M
+    Windows by entering values in a WINDOW command line.  WINDOW is a
+    command-line version of WMENU,  a menu-driven utility.   WINDOW's
+    principle use is that you can include WINDOW command lines  in  a
+    SUBMIT file.   In fact, by using either WINDOW or WMENU, you  can
+    generate an "instant" SUBMIT file containing WINDOW commands that
+    set up your windows the way you want them.
+
+    The Concurrent CP/M window manager does not have to be present in
+    your computer's memory for you to use WINDOW.
+
+    WINDOW  is divided into five subcommands, VIEW, TOP, FULL, WRITE,
+    and CHANGE.
+
+    WINDOW VIEW  allows  you  to  view a  table of the current values
+    associated with your CP/M Windows.
+
+    The  WINDOW TOP  command has the same effect as pressing Ctrl-Alt-1
+    through Ctrl-Alt-4 to select virtual consoles 0 through 3.
+    Ctrl-Alt-Tab selects the next console in round-robin order.
+
+    The WINDOW FULL command has the same effect as  pressing Ctrl-keypad-Del
+    to switch your window between full-screen and its former size and
+    position.
+
+    WINDOW WRITE  allows you to write any of three different kinds of
+    files:
+
+    o the text contained in a window (type=window).
+
+    o the text contained in the entire virtual console that lies
+      beneath that window (type=console).
+
+    o a SUBMIT file that produces the window setup that exists
+      at the time you execute the WINDOW WRITE command (type=setup)
+
+    WINDOW CHANGE is the command to make changes to your windows. You
+    can change the  size, location, colors, and  other  properties of
+    your windows.
+
+    With all of the WINDOW subcommands except VIEW you must specify a
+    virtual console number in a WINDOW command line.
+
+    ///2EXAMPLES
+    Examples:
+
+    The  following  examples  offer a  notion of the way  you can use
+    WINDOW.
+
+    B>window view
+
+    The command in the  above  example  causes  WINDOW  to  produce a
+    display  of  the  values  currently  associated  with  your  CP/M
+    Windows.   Included  in  the WINDOW VIEW display are the windows'
+    size, expressed in rows and columns, their locations, in terms of
+    the row  and  column  coordinates  of the upper right corner of a
+    window, background and foreground colors, and other values.
+
+    A>window top n=2
+
+    This  command  switches  in virtual console 2, just as if you had
+    pressed Ctrl-Alt-3.
+
+    A>window full n=1
+
+    This command makes the  window to  virtual console 1 jump to full
+    screen  size  with  its  location  coinciding  with  the physical
+    console.   If  the  window is already  full-screen,  this command
+    causes the window to return to the size and location it had prior
+    to the invocation of this command.
+
+    B>window write n=0 type=console,file=memo.txt
+
+    This  command  causes  WINDOW  to write the characters in virtual
+    console 0 to the file MEMO.TXT.  WINDOW writes all the characters
+    in the  virtual  console to a file,  regardless  of  the size and
+    position of the window to virtual console 0.
+
+    B>window write n=0 type=window,file=glimpse.txt
+
+    The  above command  causes WINDOW  to write the characters in the
+    window to  virtual  console 0  to the  file GLIMPSE.TXT.   WINDOW
+    writes all of the characters in the window,  even if a portion of
+    the window is off the screen.
+
+    A>window write n=2 type=setup,file=ALIGN.SUB
+
+    The above command causes WINDOW to write a SUBMIT file containing
+    WINDOW  commands that produce the window setup that exists at the
+    time you execute this command.
+
+    B>window change n=2 prow=12,pcol=40,nrows=10,ncols=12
+
+    This  command  changes  the  size  and  location of the window to
+    virtual console 2.  Prow and pcol are short for placement row and
+    placement column.   These two numbers are the coordinates for the
+    placement point,  a point in the  upper  right corner of a window
+    that is always visible in a switched-in window.   Nrows and ncols
+    are short for number of rows and number of columns. These figures
+    indicate the size of a window.
+
+    C>window change n=3 fgc=cyan,bgc=magenta
+
+    This command changes the  foreground  color  (fgc) and background
+    color (bgc) in the window to virtual console 3.  Foreground color
+    is the color of the characters in a window.   Background color is
+    the color of the window that contains those characters.  You must
+    have a  color card and a  color monitor  as part of your Personal
+    Computer system in order to receive color video output. Available
+    colors  are  black,  white,  red, green, blue, cyan, magenta, and
+    yellow.
+
+    B>window change n=0 tracking=row
+
+    This command causes  Concurrent CP/M  to always keep the row that
+    the cursor  is on in view  when you are  scrolling or  sizing the
+    window to virtual console 0.  This is the default setting for all
+    four windows.  Alternatively,  you can specify "tracking=no",  so
+    that  Concurrent CP/M  will not keep track of the cursor's row as
+    you scroll or size a window.
+
+    A>window change n=1 display=color
+
+    This  command causes  Concurrent CP/M  to  display  the window to
+    virtual  console 1 on a color monitor.   If you have both a color
+    and a monochrome monitor connected to your Personal Computer, you
+    can  display  a  window on either  monitor.   If you had only one
+    monitor connected to your computer,  the above command would have
+    no effect.
+
+///1WMENU
+    Syntax:
+
+    WMENU
+
+    Explanation:
+
+    WMENU is a utility that loads the  Concurrent CP/M window manager
+    into your Personal Computer's memory.  Once the window manager is
+    in  memory,  WMENU  lets  you  manipulate  your  CP/M Windows  by
+    pressing the  arrow keys on your  numeric keypad in response to a
+    status-line (twenty-fifth line) menu.
+
+    Type WMENU and press Enter.   WMENU returns the message,  "Window
+    Manager installed." You will notice that the letters "Win" appear
+    on the  Concurrent CP/M status line.   With the window manager in
+    memory,  you can press Ctrl-keypad-Plus (+) to obtain WMENU's main menu.
+    This menu offers you a choice from Place, Size, Scroll, Tracking,
+    Display, Color, Write,  and Abort.  You can press Escape (Esc) to
+    leave the main menu.
+
+    When you press the  arrow  keys on your  numeric  keypad  (or the
+    space bar)  you  can move the menu pointer,  a reverse-video box,
+    from  item to item in the  main menu.   When you press Enter, you
+    receive the submenu for the item that appears in the menu pointer.
+    In the submenus, you make changes to your windows by pressing the
+    arrow keys. The changes take effect instantaneously, as you press
+    the arrow keys.   Press Esc  to return  to the  main menu  from a
+    submenu.
+
+
+    MAIN MENU OPTIONS
+
+    Place allows you to move the window around on the screen.
+
+    Size allows you to change the size of each window.
+
+    Scroll  allows  you  to  change what portion of a virtual console
+    you see through a window.
+
+    Tracking lets  you  select  between row tracking and no tracking.
+    With row tracking selected,  Concurrent CP/M always keeps the row
+    that the  cursor is on in view  when you scroll or size a window.
+    With no tracking,  Concurrent CP/M  does  not  keep  track of the
+    cursor's row when you scroll or size a window.
+
+    The Display option  lets  you  choose  where  a  window  will  be
+    displayed, on a color or on a monochrome monitor. Selections made
+    in this  option  take  effect only if you have both a color and a
+    monochrome monitor connected to your Personal Computer.
+
+    Color lets you  change  the  foreground and background color of a
+    window displayed on a color monitor.
+
+    One of WMENU's more useful  options  is  WRITE.   After selecting
+    WRITE from the main menu, you can, with a single Enter keystroke,
+    create any of three different files:
+
+    1. A  SUBMIT  file  containing  WINDOW  commands that set up your
+       windows  exactly  as  they  are  set up at the moment when you
+       press Enter.
+
+    2. A file containing the characters in a window.
+
+    3. A file  containing  the  characters  in a virtual console that
+       lies beneath a window.
+
+    The Abort  option  allows you to  remove  the window manager from
+    your computer's memory.   After  pressing  Enter  from  the Abort
+    submenu, you must reinvoke WMENU to load the window manager.
+
+    Remember that you can press Ctrl-keypad-Plus to obtain WMENU's main menu
+    even when you are in an application program.  Also you can switch
+    virtual  consoles  when  you are in the  main  menu or while in a
+    submenu.  This means that you could, for example, change the size
+    of the window to virtual console 0, press Ctrl-Alt-2, and immediately
+    change the size of the window to virtual console 1.
+
+

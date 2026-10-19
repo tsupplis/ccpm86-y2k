@@ -1,0 +1,8 @@
+;the following commands set up my windows
+WINDOW CH n=0 prow=2,pcol=4,nrows=7,ncols=30,fg=black,bg=white
+WINDOW CH n=1 prow=9,pcol=2,nrows=24,ncols=65
+WINDOW CH n=2 prow=2,pcol=45,nrows=7,ncols=35,fg=black,bg=white
+WINDOW CH n=3 prow=15,pcol=62,nrows=7,ncols=80,fg=black,bg=white
+;the following command switches in vc/window 1
+WINDOW TOP n=1
+

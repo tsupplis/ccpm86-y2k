@@ -1,0 +1,5 @@
+window ch n=0 pr=18,pc=2,nr=6,nc=25,vr=19,vc=1,tr=No,fg=White,bg=Black
+window ch n=1 pr=2,pc=2,nr=14,nc=78,vr=11,vc=1,tr=Row,fg=White,bg=Black
+window ch n=2 pr=18,pc=29,nr=6,nc=27,vr=1,vc=1,tr=Row,fg=Black,bg=White
+window ch n=3 pr=18,pc=58,nr=6,nc=22,vr=1,vc=1,tr=No,fg=White,bg=Black
+

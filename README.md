@@ -20,13 +20,17 @@ system useful today and accessible to anyone interested in its history.
 | Image | Bootable | Contents |
 | --- | --- | --- |
 | `ccpm86.img` | Yes | Kernel, stock commands, ED, HELP, SYSTAT, configuration/maintenance utilities, reconstructed SYSDISK |
-| `ccpmtools.img` | Yes | DREDIX, INITDIR, ASM86, DDT86, GENCMD, GENCCPM, PIP, TOD |
+| `ccpmtools.img` | Yes | DREDIX, ASM86, DDT86, GENCMD, GENCCPM, WINDOW/WMENU with sample SUB files, PIP, TOD |
+| `ccpmmaint.img` | Yes | HDMAINT, INITDIR, PIP, TOD |
 | `ccpmdev.img` | No | DR development/BASIC tools, Microsoft BASIC, ASM80, HEXCOM, GENTAB |
 
-`make dist` places the images above and `disks.zip` containing all three at the repository root.
+`make dist` places the images above and `disks.zip` containing all four at the repository root.
 
 320 KB: **untwist → cpmtools `ccpm86-320` → twist**.
 [Media recipes and emulator usage](media/README.md).
+The full HELP is on the main disk; WINDOW and WMENU are on the tools disk.
+HDMAINT and INITDIR are on the bootable maintenance disk.
+Window layouts: `CARDDECK.SUB`, `CLEAR.SUB`, `GLASS.SUB` and `WORDPROC.SUB`.
 The [source-built boot track](boot/README.md) reproduces all 4,096 bytes of the original.
 
 ## Tools
@@ -64,6 +68,8 @@ Format: [cpm86-kernel](../cpm86-kernel/README.md). **3.1** = rebuildable sources
 | `systat` | Inspect processes and system resources | — | 3.1 |
 | `tod` | Display or set date and time | — | 3.1, Y2K patched |
 | `type` | Display a text file | — | 3.1 |
+| `window` | Control console windows from commands | Original | — |
+| `wmenu` | Interactive console-window manager | Original | — |
 | `vcmode` | Set virtual-console background modes | — | 3.1 |
 | `asm80` | 8080 assembler | — | CP/M 2.2 8080 ASM; XLT86-translated and fixed |
 | `hexcom` | Convert Intel HEX to COM binaries | — | HEXCOM 3.00-compatible C from [tpzasm](https://github.com/johnsonjh/tpzasm) |
@@ -113,12 +119,12 @@ The boot build requires native `h862bin` from `cpm86-cmdtools` on PATH.
 
 | Command | Result |
 | --- | --- |
-| `make` | Commands, kernel/RSPs, boot sources, three images |
+| `make` | Commands, kernel/RSPs, boot sources, four images |
 | `make -C commands/sysdisk check` | Byte-identical SYSDISK reconstruction |
 | `make check` | SYSDISK identity, source-built boot identity, every packaged file, sizes |
-| `make check-qemu` | Boot, RTC, status, switching, SDIR, SYSDISK, DREDIX |
+| `make check-qemu` | Boot, RTC, status, switching, HELP, SDIR, SYSDISK, DREDIX, windows |
 | `make test` | Launch PCE |
-| `make dist` | `y2k-dist.zip`, `disks.zip` and the three disk images at the repository root |
+| `make dist` | `y2k-dist.zip`, `disks.zip` and the four disk images at the repository root |
 | `make source-dist` | Sources and reference/vendor inputs; no ignored outputs |
 
 [Source pedigree](http://www.cpm.z80.de) · [License correspondence](LICENSE.md).

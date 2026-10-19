@@ -5,7 +5,8 @@ CPMCP = cpmcp -f $(FORMAT)
 
 .PHONY: all prepare test check check-media check-qemu clean
 .DELETE_ON_ERROR:
-all: ccpm86.img ccpmtools.img ccpmdev.img
+IMAGES = ccpm86.img ccpmtools.img ccpmdev.img ccpmmaint.img
+all: $(IMAGES)
 
 SYSTEM_COMMANDS = ../commands/chset/chset.cmd ../commands/date/date.cmd \
     ../commands/era/era.cmd ../commands/era/eraq.cmd \
@@ -16,13 +17,21 @@ SYSTEM_COMMANDS = ../commands/chset/chset.cmd ../commands/date/date.cmd \
     ../commands/tod/tod.cmd ../commands/type/type.cmd \
     ../commands/vcmode/vcmode.cmd ../commands/sysdisk/sysdisk.cmd
 
-# SYSDISK now comes from its byte-identical source reconstruction.
-BASE_SYSTEM_COMMANDS = $(wildcard ../base/*.cmd)
+# SYSDISK is source-built; other base files are selected explicitly.
+BASE_SYSTEM_COMMANDS = ../base/config.cmd ../base/dskmaint.cmd \
+    ../base/function.cmd ../base/pcetime.cmd ../base/setup.cmd
+
+WINDOW_COMMANDS = ../base/window.cmd ../base/wmenu.cmd
+WINDOW_SAMPLES = ../base/carddeck.sub ../base/clear.sub \
+    ../base/glass.sub ../base/wordproc.sub
 
 TOOLS_COMMANDS = ../commands/asm86/asm86.cmd ../commands/ddt86/ddt86.cmd \
     ../commands/gencmd/gencmd.cmd ../commands/genccpm/genccpm.cmd \
     ../commands/tod/tod.cmd ../commands/dredix/dredix.cmd \
-    ../commands/initdir/initdir.cmd
+    $(WINDOW_COMMANDS) $(WINDOW_SAMPLES)
+
+MAINT_COMMANDS = ../base/hdmaint.cmd ../commands/initdir/initdir.cmd \
+    ../commands/tod/tod.cmd
 
 # Data-only developer disk; omit the older MBASIC 5.22 reference binary.
 DEV_COMMANDS = ../dev/rasm86.cmd ../dev/link86.cmd ../dev/lib86.cmd \
@@ -79,17 +88,27 @@ ccpmdev.img: ccpm86base.img $(DEV_COMMANDS) Makefile prepare
 	mv $@.tmp $@
 	$(RM) $@.logical.tmp
 
+ccpmmaint.img: ccpm86base.img startup.0 $(MAINT_COMMANDS) Makefile prepare
+	$(TWIST) untwist ccpm86base.img $@.logical.tmp
+	$(CPMCP) $@.logical.tmp ../kernel/sysgen/ccpm.sys startup.0 $(MAINT_COMMANDS) 0:
+	$(CPMCP) $@.logical.tmp ../commands/pip/pip4.cmd 0:PIP.CMD
+	cpmls -F -f $(FORMAT) $@.logical.tmp '0:*.*'
+	$(TWIST) twist $@.logical.tmp $@.tmp
+	mv $@.tmp $@
+	$(RM) $@.logical.tmp
+
 ccpmtest.img: ccpm86base.img
 	cp $< $@
 
 # Check every packaged file, allowing only CP/M record padding after its bytes.
 check-media: all
-	@set -e; for image in ccpm86.img ccpmtools.img ccpmdev.img; do \
+	@set -e; for image in $(IMAGES); do \
 	    $(TWIST) untwist $$image $$image.verify.tmp; \
 	    case $$image in \
 	      ccpm86.img) sources='../kernel/sysgen/ccpm.sys startup.0 $(SYSTEM_COMMANDS) $(BASE_SYSTEM_COMMANDS)' ;; \
 	      ccpmtools.img) sources='../kernel/sysgen/ccpm.sys startup.0 $(TOOLS_COMMANDS)' ;; \
 	      ccpmdev.img) sources='$(DEV_COMMANDS)' ;; \
+	      ccpmmaint.img) sources='../kernel/sysgen/ccpm.sys startup.0 $(MAINT_COMMANDS)' ;; \
 	    esac; \
 	    for source in $$sources; do \
 	      file=$$(basename $$source); \
@@ -117,4 +136,4 @@ test: ccpm86.img ccpmtools.img
 	./ccpm86
 
 clean:
-	$(RM) ccpm.sys ccpm86base.img ccpm86.img ccpmtools.img ccpmdev.img ccpmtest.img *.img.*.tmp *.img.tmp
+	$(RM) ccpm.sys ccpm86base.img $(IMAGES) ccpmtest.img *.img.*.tmp *.img.tmp

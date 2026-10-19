@@ -63,7 +63,7 @@ The functional kernel/RSP changes can be compared with commit `033212a`.
 | --- | --- |
 | `make -C commands/sysdisk check` | Every byte of the reconstructed CMD, including its 128-byte header and padding. |
 | `make check` | Reconstructed SYSDISK, image geometry, source-built boot track versus original reference, embedded kernel and expected payloads. |
-| `make check-qemu` | Both bootable disks, RTC startup, yellow status, direct/round-robin/keypad switching, SDIR empty/wildcard/options, SYSDISK query/set/syntax, and DREDIX editing/navigation/exit with console switching. |
+| `make check-qemu` | All three bootable disks, RTC startup, yellow status, direct/round-robin/keypad switching, SDIR empty/wildcard/options, SYSDISK query/set/syntax, restored HELP topics beyond 64 KB, DREDIX editing/navigation/exit with console switching, WINDOW VIEW and WMENU installation. |
 
 Cross-OS Y2K compatibility, physical machines, and all imported development
 binaries are not exhaustively covered by the automated 3.1 guest checks.
@@ -90,3 +90,18 @@ recipe also removes stale CLS/SYSDISK RSP copies before GENCCPM scans the folder
 
 The status line displays `Terminal` when owned by TMP; application names still
 appear while applications own the console.
+
+## Original HELP recovery and window utilities
+
+Restore CONFIG, DSKMAINT, FUNCTION, HDMAINT, SETUP, SYSDISK, WINDOW and WMENU
+from `base/help.hlp` into `commands/help/help.dat`. Restore indexed DDT86
+parameters, HELP examples, SET examples/options and FILESPEC conventions,
+keeping the existing PIP4, Y2K and expanded source-tool help. Correct the
+function-key defaults and console-switch shortcuts, and document both SYSDISK
+implementations and configured-drive restrictions.
+
+Package the original WINDOW.CMD and WMENU.CMD on the tools disk, with
+CARDDECK.SUB, CLEAR.SUB, GLASS.SUB and WORDPROC.SUB layout samples. Put HDMAINT
+and INITDIR on a fourth, bootable maintenance disk, keeping both existing
+system disks bootable and the complete rebuilt HELP on the main 320 KB disk.
+Select base binaries explicitly instead of adding every new reference binary.

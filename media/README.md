@@ -1,13 +1,14 @@
 # Reproducible 320 KB media
 
 Run `make` here, or `make -C media` from the repository root.
-Root `make dist` copies the three distribution images to the root alongside
+Root `make dist` copies the four distribution images to the root alongside
 `y2k-dist.zip` and `disks.zip`.
 
 | Image | Bootable | Contents |
 | --- | --- | --- |
-| `ccpm86.img` | Yes | Kernel, stock commands, ED, HELP, SYSTAT, original configuration/maintenance utilities, source-rebuilt SYSDISK |
-| `ccpmtools.img` | Yes | Kernel, DREDIX, INITDIR, ASM86, DDT86, GENCMD, GENCCPM, PIP, TOD |
+| `ccpm86.img` | Yes | Kernel, stock commands, ED, HELP, SYSTAT, original configuration/maintenance utilities except HDMAINT, source-rebuilt SYSDISK |
+| `ccpmtools.img` | Yes | Kernel, DREDIX, ASM86, DDT86, GENCMD, GENCCPM, WINDOW/WMENU with sample SUB files, PIP, TOD |
+| `ccpmmaint.img` | Yes | Kernel, HDMAINT, INITDIR, PIP, TOD |
 | `ccpmdev.img` | No | RASM86, LINK86, LIB86, XREF86, SID86, CBAS86, CRUN86, Personal BASIC, Microsoft BASIC 5.50A, ASM80, HEXCOM, GENTAB |
 
 Each image is 327,680 bytes. `PIP.CMD` is PIP4 with the `3.1N` banner.
@@ -40,11 +41,33 @@ Never use cpmtools directly on a physical 320 KB image: head 1 has reversed cyli
 | --- | --- |
 | `make test` / `make check` | Launch PCE |
 | `./ccpm86 vga` | Launch the PCE VGA configuration |
-| `make check-media` | Verify all three distributions and their payloads |
-| `make check-qemu` | Boot both system disks; exercise consoles, SDIR, SYSDISK and DREDIX |
+| `make check-media` | Verify all four distributions and their payloads |
+| `make check-qemu` | Boot all three system disks; exercise consoles, HELP, SDIR, SYSDISK, DREDIX and windows |
+
+For WINDOW and WMENU, mount `ccpmtools.img` in B: and run `B:WINDOW VIEW`
+or `B:WMENU`. HDMAINT and INITDIR are on the separate bootable maintenance
+disk, leaving room for the full HELP on A: and the window tools on B:.
+
+Window layout samples are packaged alongside WINDOW.CMD:
+
+| Sample | Purpose |
+| --- | --- |
+| `CARDDECK.SUB` | Arrange four overlapping windows |
+| `CLEAR.SUB` | Restore all four consoles to full-screen windows |
+| `GLASS.SUB` | Arrange mixed-size windows and select console 1 |
+| `WORDPROC.SUB` | Set up a large editing window and three small windows |
+
+Select B: before running a sample so its WINDOW commands find WINDOW.CMD.
+SUBMIT remains on the main disk:
+
+```text
+A>B:
+B>A:SUBMIT CARDDECK
+B>A:SUBMIT CLEAR
+```
 
 For DREDIX, mount `ccpmtools.img` in B: and run `B:DREDIX`.
-Mount `ccpmdev.img` as a data disk after booting either system disk.
+Mount `ccpmdev.img` as a data disk after booting any system disk.
 `STARTUP.0` runs `A:TOD`; kernel RTC support supplies startup date/time.
 Drive defaults, allocation settings and buffers are in
 `../kernel/sysgen/genccpm.in`; patch details are in `../PATCHES.md`.

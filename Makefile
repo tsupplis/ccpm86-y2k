@@ -1,7 +1,7 @@
 DISTDIR=dist
 Y2KDISTZIP=y2k-dist.zip
 DISKSZIP=disks.zip
-DIST_DISKS=ccpm86.img ccpmtools.img ccpmdev.img
+DIST_DISKS=ccpm86.img ccpmtools.img ccpmdev.img ccpmmaint.img
 SOURCEDIST=$(DISTDIR)/ccpm86-source.tar.gz
 
 .PHONY: all commands kernel boot media check check-qemu test dist source-dist clean
