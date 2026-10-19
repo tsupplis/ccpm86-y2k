@@ -24,7 +24,7 @@ system more consumable (CP/M-Plus style) and accessible to anyone interested in 
 | Y2K components | SDIR, DATE, SHOW, TOD for CCP/M-86 3.2 through Concurrent DOS 4.1; 3.1 fixes included |
 
 The current version already incorporate:
-- CP/M Plus and direction keys command line recall and editing,
+- CP/M Plus mapped and direction keys command line recall and editing,
 - CP/M Plus setdef style configurability
 - support for CGA, EGA modes even on VGA card,
 - Y2K compliance,
