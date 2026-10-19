@@ -15,10 +15,11 @@ SYSTEM_COMMANDS = ../commands/chset/chset.cmd ../commands/date/date.cmd \
     ../commands/sdir/sdir.cmd ../commands/set/set.cmd ../commands/show/show.cmd \
     ../commands/submit/submit.cmd ../commands/systat/systat.cmd \
     ../commands/tod/tod.cmd ../commands/type/type.cmd \
-    ../commands/vcmode/vcmode.cmd ../commands/sysdisk/sysdisk.cmd
+    ../commands/vcmode/vcmode.cmd ../commands/sysdisk/sysdisk.cmd \
+    ../commands/setdef/setdef.cmd
 
 # SYSDISK is source-built; other base files are selected explicitly.
-BASE_SYSTEM_COMMANDS = ../base/config.cmd ../base/dskmaint.cmd \
+BASE_SYSTEM_COMMANDS = ../base/config.cmd \
     ../base/function.cmd ../base/pcetime.cmd ../base/setup.cmd
 
 WINDOW_COMMANDS = ../base/window.cmd ../base/wmenu.cmd
@@ -30,7 +31,7 @@ TOOLS_COMMANDS = ../commands/asm86/asm86.cmd ../commands/ddt86/ddt86.cmd \
     ../commands/tod/tod.cmd ../commands/dredix/dredix.cmd \
     $(WINDOW_COMMANDS) $(WINDOW_SAMPLES)
 
-MAINT_COMMANDS = ../base/hdmaint.cmd ../commands/initdir/initdir.cmd \
+MAINT_COMMANDS = ../base/dskmaint.cmd ../base/hdmaint.cmd ../commands/initdir/initdir.cmd \
     ../commands/tod/tod.cmd
 
 # Data-only developer disk; omit the older MBASIC 5.22 reference binary.
@@ -40,7 +41,7 @@ DEV_COMMANDS = ../dev/rasm86.cmd ../dev/link86.cmd ../dev/lib86.cmd \
     ../commands/hexcom/hexcom.cmd ../commands/ddt86/gentab.cmd
 
 COMMAND_DIRS = chset date era help initdir pip ren sdir set show submit systat tod \
-    type vcmode asm86 asm80 ddt86 gencmd genccpm hexcom dredix ed sysdisk
+    type vcmode asm86 asm80 ddt86 gencmd genccpm hexcom dredix ed sysdisk setdef
 
 # Recurse so building directly in media/ picks up changes to included sources.
 prepare:

@@ -6,9 +6,9 @@ Root `make dist` copies the four distribution images to the root alongside
 
 | Image | Bootable | Contents |
 | --- | --- | --- |
-| `ccpm86.img` | Yes | Kernel, stock commands, ED, HELP, SYSTAT, original configuration/maintenance utilities except HDMAINT, source-rebuilt SYSDISK |
+| `ccpm86.img` | Yes | Kernel, stock commands, ED, HELP, SYSTAT, original configuration utilities, source-rebuilt SYSDISK, SETDEF |
 | `ccpmtools.img` | Yes | Kernel, DREDIX, ASM86, DDT86, GENCMD, GENCCPM, WINDOW/WMENU with sample SUB files, PIP, TOD |
-| `ccpmmaint.img` | Yes | Kernel, HDMAINT, INITDIR, PIP, TOD |
+| `ccpmmaint.img` | Yes | Kernel, DSKMAINT, HDMAINT, INITDIR, PIP, TOD |
 | `ccpmdev.img` | No | RASM86, LINK86, LIB86, XREF86, SID86, CBAS86, CRUN86, Personal BASIC, Microsoft BASIC 5.50A, ASM80, HEXCOM, GENTAB |
 
 Each image is 327,680 bytes. `PIP.CMD` is PIP4 with the `3.1N` banner.
@@ -42,10 +42,10 @@ Never use cpmtools directly on a physical 320 KB image: head 1 has reversed cyli
 | `make test` / `make check` | Launch PCE |
 | `./ccpm86 vga` | Launch the PCE VGA configuration |
 | `make check-media` | Verify all four distributions and their payloads |
-| `make check-qemu` | Boot all three system disks; exercise consoles, HELP, SDIR, SYSDISK, DREDIX and windows |
+| `make check-qemu` | Boot all three system disks; exercise consoles, HELP, SDIR, SYSDISK, SETDEF, DREDIX and windows |
 
 For WINDOW and WMENU, mount `ccpmtools.img` in B: and run `B:WINDOW VIEW`
-or `B:WMENU`. HDMAINT and INITDIR are on the separate bootable maintenance
+or `B:WMENU`. DSKMAINT, HDMAINT and INITDIR are on the separate bootable maintenance
 disk, leaving room for the full HELP on A: and the window tools on B:.
 
 Window layout samples are packaged alongside WINDOW.CMD:
