@@ -81,6 +81,19 @@ def check(image, second):
                 text, data = wait_for(lambda t: re.search(r'^A>\s*$', t, re.M)
                                      and '10/19/26' in t and 'Console=0' in t)
                 assert 0x0e in data[3841:4000:2], 'status line is not bright yellow'
+                def shortcut(keys, console):
+                    reply = hmp('sendkey ' + keys + ' 50')
+                    assert not reply, reply
+                    time.sleep(.12)  # release modifiers before the next chord
+                    wait_for(lambda t: 'Console=' + str(console) + ' ' in t)
+
+                for digit, console in ((4, 3), (2, 1), (3, 2), (1, 0)):
+                    shortcut('ctrl-alt-' + str(digit), console)
+                for console in (1, 2, 3, 0):
+                    shortcut('ctrl-alt-tab', console)
+                shortcut('ctrl-kp_1', 1)
+                shortcut('ctrl-kp_0', 0)
+                print(f'{image.name}: direct, round-robin and keypad console switching passed')
                 type_command('dir\n')
                 wait_for(lambda t: 'CCPM' in t and 'SYS' in t and 'PIP' in t)
                 if image.name == 'ccpm86.img':
@@ -101,6 +114,10 @@ def check(image, second):
                         time.sleep(.15)
                     type_command('e')
                     text, _ = wait_for(lambda t: t.startswith('ello'))
+                    shortcut('ctrl-alt-tab', 1)
+                    shortcut('ctrl-alt-1', 0)
+                    assert screen()[0].startswith('ello'), 'console switching changed editor text'
+
                     hmp('sendkey alt-x')
                     text, _ = wait_for(lambda t: 'OK to lose changes' in t)
                     assert text.startswith('ello'), 'quit prompt corrupted editor text'

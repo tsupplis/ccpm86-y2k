@@ -741,6 +741,31 @@ action_loop_next:
 	  jmp key_scan_done		;ignore release condition on
 					;non$action type key
 key_make:
+; Compact-keyboard console shortcuts.  Emit the same switch events as
+; Ctrl-keypad, so PIN still controls ownership and switch restrictions.
+    mov ah,down_bits
+    and ah,ctrl_bit or alt_bit
+    cmp ah,ctrl_bit or alt_bit
+    jne key_translate
+    cmp al,15                   ; Ctrl-Alt-Tab: next foreground console
+    je key_next_console
+    cmp al,2                    ; top-row 1 through 4, scan codes 2..5
+    jb key_translate
+    cmp al,5
+    ja key_translate
+    sub al,2                    ; consoles 0 through 3
+    jmps key_console_event
+key_next_console:
+    mov al,top_screen
+    inc al
+    cmp al,num_vir_cons
+    jb key_console_event
+    xor al,al                   ; wrap from console 3 to console 0
+key_console_event:
+    or al,070h                  ; existing console-switch event encoding
+    mov key_type,0ffh
+    jmp save_key_code
+key_translate:
 	mov bx,offset key_table		;translation table for single keys
 	test down_bits,ctrl_bit		;was control key already down ?
 	jz test_for_keypad		;no $ try numlock

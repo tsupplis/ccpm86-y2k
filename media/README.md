@@ -72,3 +72,10 @@ cpmls -f ccpm86-320 /tmp/ccpm-logical.img
 After making changes with cpmtools, run `twist` on the logical copy to
 produce a physical image. Running `make` again discards manual edits to
 its generated outputs.
+
+## Console shortcuts
+
+Ctrl+Alt+1 through Ctrl+Alt+4 select consoles 0 through 3 using the top-row
+number keys. Ctrl+Alt+Tab cycles 0, 1, 2, 3, then back to 0. The original
+Ctrl+numeric-keypad shortcuts remain available. These shortcuts use the
+normal console-switch mechanism and honor its switching restrictions.
