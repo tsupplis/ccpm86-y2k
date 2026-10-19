@@ -1850,9 +1850,9 @@ $endif
         if multcom then
             do;
 $if cpm3
-            call printx(.('CP/M 3 PIP VERSION 3.3$'));
+            call printx(.('CP/M 3 PIP VER 3.3$'));
 $else
-            call printx(.('CONCURRENT CP/M-86 PIP VERSION 3.1N$'));
+            call printx(.('CONCURRENT CP/M-86 PIP VER 3.1N$'));
 $endif
             call crlf;
             end;
