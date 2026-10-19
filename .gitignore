@@ -40,3 +40,7 @@ local/**
 /commands/help/help.hlp
 /kernel/sysgen/ccpm.old
 **/__pycache__/
+
+# Original binary inputs used to build the floppy images.
+!/base/*.cmd
+!/media/base.img
