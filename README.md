@@ -1,5 +1,7 @@
 # Concurrent CP/M-86 3.1 Kernel and Tools
 
+**Disk Images are not available as part of the releases, ready to use !**
+
 This project preserves Digital Research's Concurrent CP/M-86 3.1 as a usable,
 rebuildable system for running and exploring classic 16-bit software. Runnable
 disks and development tools accompany the sources and patch notes, making the
@@ -31,41 +33,41 @@ The [source-built boot track](boot/README.md) reproduces all 4,096 bytes of the 
 
 Format: [cpm86-kernel](../cpm86-kernel/README.md). **3.1** = rebuildable sources; SYSDISK: byte-identical CMD plus TMP built-in.
 
-| Tool | Binary (`base/`) | Source (`commands/`) |
-| --- | --- | --- |
-| `asm86` | — | 3.1 |
-| `cls` | — | TMP built-in; VT52 ESC-E |
-| `chset` | — | 3.1 |
-| `config` | Original | — |
-| `date` | — | 3.1, Y2K patched |
-| `ddt86` | — | 3.1 |
-| `dir` | — | 3.1; command/RSP |
-| `dskmaint` | Original | — |
-| `ed` | — | 3.1 |
-| `era` / `eraq` | — | 3.1 |
-| `function` | Original | — |
-| `gencmd` | — | 3.1 |
-| `genccpm` | — | 3.1; flag-table fix |
-| `gentab` | — | 3.1 |
-| `hdmaint` | Original | — |
-| `help` / `help.hlp` | — | 3.1; indexed from `help.dat` |
-| `initdir` | — | 3.1 |
-| `pcetime` | Original | — |
-| `pip` | — | PIP3/PIP4; ships PIP4 as 3.1N |
-| `ren` | — | 3.1 |
-| `sdir` | — | 3.1, Y2K/DPB/tail fixes |
-| `set` | — | 3.1 |
-| `setup` | Original | — |
-| `show` | — | 3.1, Y2K patched |
-| `submit` | — | ASM-86 source |
-| `sysdisk` | — | TMP built-in; CMD reconstruction byte-identical to `sysdisk.ref` |
-| `systat` | — | 3.1 |
-| `tod` | — | 3.1, Y2K patched |
-| `type` | — | 3.1 |
-| `vcmode` | — | 3.1 |
-| `asm80` | — | DR sources; CP/M-86 conversion |
-| `hexcom` | — | HEXCOM 3.00-compatible C from [tpzasm](https://github.com/johnsonjh/tpzasm) |
-| `dredix` | — | DR EDIX C; BDOS backend |
+| Tool | Purpose | Binary (`base/`) | Source (`commands/`) |
+| --- | --- | --- | --- |
+| `asm86` | 8086 assembler | — | 3.1 |
+| `cls` | Clear the terminal screen | — | TMP built-in; VT52 ESC-E |
+| `chset` | Inspect or change CMD header flags | — | 3.1 |
+| `config` | Configure serial ports | Original | — |
+| `date` | Display or set the date | — | 3.1, Y2K patched |
+| `ddt86` | Interactive machine-code debugger | — | 3.1 |
+| `dir` | List directory contents | — | 3.1; command/RSP |
+| `dskmaint` | Format, verify and copy diskettes | Original | — |
+| `ed` | Line-oriented text editor | — | 3.1 |
+| `era` / `eraq` | Erase files, optionally with confirmation | — | 3.1 |
+| `function` | Program function keys | Original | — |
+| `gencmd` | Convert H86 output into CMD executables | — | 3.1 |
+| `genccpm` | Generate and configure the system image | — | 3.1; flag-table fix |
+| `gentab` | Generate disassembler opcode tables | — | 3.1 |
+| `hdmaint` | Hard-disk maintenance | Original | — |
+| `help` / `help.hlp` | Browse indexed command help | — | 3.1; indexed from `help.dat` |
+| `initdir` | Enable directory date/time stamps | — | 3.1 |
+| `pcetime` | Synchronize time with the PCE host | Original | — |
+| `pip` | Copy and transfer files | — | 4.1; shipping PIP4 as 3.1N |
+| `ren` | Rename files | — | 3.1 |
+| `sdir` | Detailed, sorted directory listing | — | 3.1, Y2K/DPB/tail fixes |
+| `set` | Set file and drive attributes | — | 3.1 |
+| `setup` | Customize IBM PC/XT XIOS settings | Original | — |
+| `show` | Display disk space and drive information | — | 3.1, Y2K patched |
+| `submit` | Run batch command files | — | 3.1 |
+| `sysdisk` | Display or change the system drive; TMP built-in and standalone tool | — | TMP built-in + standalone `SYSDISK.CMD`; byte-identical CMD reconstruction |
+| `systat` | Inspect processes and system resources | — | 3.1 |
+| `tod` | Display or set date and time | — | 3.1, Y2K patched |
+| `type` | Display a text file | — | 3.1 |
+| `vcmode` | Set virtual-console background modes | — | 3.1 |
+| `asm80` | 8080 assembler | — | CP/M 8080 ASM; XLT86-translated and fixed |
+| `hexcom` | Convert Intel HEX to COM binaries | — | HEXCOM 3.00-compatible C from [tpzasm](https://github.com/johnsonjh/tpzasm) |
+| `dredix` | Full-screen text editor | — | 4.1; DREDIX C Backported from Concurrent DOS 4.1 |
 
 ### Development binaries
 

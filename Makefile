@@ -44,13 +44,13 @@ source-dist:
 	COPYFILE_DISABLE=1 tar -czf $(SOURCEDIST) -T $(DISTDIR)/source-files.txt
 
 # Release artifacts live at the repository root.
-dist: check
+dist: check LICENSE.md
 	cp $(addprefix media/,$(DIST_DISKS)) .
 	$(RM) $(DISKSZIP)
-	COPYFILE_DISABLE=1 zip -X -j $(DISKSZIP) $(DIST_DISKS)
+	COPYFILE_DISABLE=1 zip -X -j $(DISKSZIP) $(DIST_DISKS) LICENSE.md
 	$(RM) dist.zip $(Y2KDISTZIP)
 	COPYFILE_DISABLE=1 zip -X -j $(Y2KDISTZIP) commands/sdir/sdir.cmd \
-	  commands/tod/tod.cmd commands/date/date.cmd commands/show/show.cmd
+	  commands/tod/tod.cmd commands/date/date.cmd commands/show/show.cmd LICENSE.md
 
 clean:
 	@set -e; for d in commands kernel boot media; do $(MAKE) -C $$d clean; done
