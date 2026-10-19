@@ -65,7 +65,7 @@ Format: [cpm86-kernel](../cpm86-kernel/README.md). **3.1** = rebuildable sources
 | `vcmode` | — | 3.1 |
 | `asm80` | — | DR sources; CP/M-86 conversion |
 | `hexcom` | — | HEXCOM 3.00-compatible C from [tpzasm](https://github.com/johnsonjh/tpzasm) |
-| `dredix` | — | DR EDIX C; BDOS backend |
+| `dredix` | — | DREDIX screen oriented editor; BDOS backend |
 
 ### Development binaries
 
