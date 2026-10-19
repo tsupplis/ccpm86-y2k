@@ -1,90 +1,47 @@
+/* Translate CP/M console key codes to the editor's IBM-style key stream. */
 #include "stdio.h"
-
-
-
 #include "common.h"
 
-
-
-#define C_GET 0x99
-#define C_RAWIO 6
-
-#define	IO_KEYBD 32
-#define	ENABLE 1
-#define	DISABLE 2
-
-static WORD vc_number;
-
-
+static WORD pending;
 
 BYTE
 VKgetkey()
-/****************************************************************/
-/*								*/
-/*	Virtual Keyboard GET KEY routine -  get the raw		*/
-/*		keyboard input.					*/
-/*								*/
-/****************************************************************/
 {
-	static BYTE oldc = '\0';
-	UWORD ax;
-	BYTE ah, al;
-
-
-	if (oldc != '\0') {
-		al = oldc;
-		oldc = '\0';
-		return(al);
-	}
-
-	ax = RAWIO();
-
-	ah = (ax >> 8) & 0xFF;
-
-	al = ax & 0xFF;
-
-	if (al == 0)
-		oldc = ah;
-
-	return(al);
+    WORD c, scan;
+    BYTE *p;
+    static BYTE letters[] = "qwertyuiopasdfghjklzxcvbnm";
+    static BYTE scans[] = {16,17,18,19,20,21,22,23,24,25,
+                           30,31,32,33,34,35,36,37,38,
+                           44,45,46,47,48,49,50};
+    if (pending) {
+        c = pending; pending = 0;
+        return(c);
+    }
+    do { c = __BDOS(6, 0xfd) & 255; } while (c == 0);
+    scan = 0;
+    if (c >= 0xbb && c <= 0xc4) scan = c & 127; /* F1..F10 */
+    else if (c >= 0xc7 && c <= 0xd3) scan = c & 127; /* keypad */
+    else if (c >= 0xe1 && c <= 0xfa) {
+        /* Alt letters share codes with modified F keys on this console.
+         * Prefer the editor's Alt command shortcuts (Alt-Q, Alt-W, ...). */
+        for (p = letters; *p; p++)
+            if (*p == (c & 127)) scan = scans[p - letters];
+    }
+    if (c == 8 || c == 127) return(4); /* existing KBDEL action */
+    if (scan) { pending = scan; return(0); }
+    return(c);
 }
-
-
-
-VOID
-VKfin()
-/****************************************************************/
-/*								*/
-/*	Virtual Keyboard FINish routine - restore keyboard	*/
-/*								*/
-/****************************************************************/
-{
-	UWORD ax, bx, cx, dx;
-
-	ax = IO_KEYBD;			/* XIOS function 32		*/
-	bx = 0;
-	cx = DISABLE;			/* disable PC-MODE keyboard	*/
-	dx = vc_number;			/* default			*/
-	IO_CALL(&ax, &bx, &cx, &dx);	/*		DO IT		*/
-}
-
-
 
 VOID
 VKinit()
-/****************************************************************/
-/*								*/
-/*	Virtual Keyboard INITilization routine			*/
-/*								*/
-/****************************************************************/
 {
-	UWORD ax, bx, cx, dx;
+    pending = 0;
+    __BDOS(6, 27); __BDOS(6, '6'); /* disable PFK expansion */
+}
 
-	vc_number = __BDOS(C_GET, 0x0);	/* Get the virtual console #	*/
-
-	ax = IO_KEYBD;			/* direct I/O system #32	*/
-	bx = 0;
-	cx = ENABLE;			/* enable PC-MODE keyboard	*/
-	dx = vc_number;
-	IO_CALL(&ax, &bx, &cx, &dx);	/*		DO IT		*/
+VOID
+VKfin()
+{
+    __BDOS(6, 27); __BDOS(6, '7'); /* restore normal console keys */
+    pending = 0;
 }

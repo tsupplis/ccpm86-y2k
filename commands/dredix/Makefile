@@ -9,10 +9,17 @@ all: $(TOOLS)
 
 dredix.cmd: ed.obj common.obj ekey.obj ebuf.obj ecmdglb.obj ecmdio.obj epat.obj \
  emem.obj ecmdblk.obj ewv.obj ehelp.obj elesson.obj ewdv.obj ecmdsta.obj \
- vd.obj vk.obj wmca.obj wwcall.obj util.obj wmca.obj wwcall.obj
+ vd.obj vk.obj dredix.inp Makefile
 	$(DRLINK) '$(basename $@)[input]'
 	$(CMDINFO) $@
     
+$(patsubst %.c,%.obj,$(filter-out iosubs.c,$(wildcard *.c))): $(wildcard *.h)
+
+dredix.inp: Makefile
+	printf '%s\n' 'dredix=ed,' 'common,' 'ekey,' 'ebuf,' 'ecmdglb,' \
+	  'ecmdio,' 'epat,' 'emem,' 'ecmdblk,' 'ewv,' 'ehelp,' 'elesson,' \
+	  'ewdv,' 'ecmdsta,' 'vd,' 'vk' > $@
+
 %.obj: %.c
 	$(DRCC) $<
 
@@ -20,4 +27,4 @@ dredix.cmd: ed.obj common.obj ekey.obj ebuf.obj ecmdglb.obj ecmdio.obj epat.obj 
 	$(DRASM86) $<
 
 clean:
-	$(RM) -f *.obj *.lst *.sym *.cmd
+	$(RM) -f *.obj *.lst *.sym *.cmd dredix.inp
