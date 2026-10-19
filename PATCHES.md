@@ -216,3 +216,18 @@ control and native navigation keys, Up's two meanings, tabs, wrapped rows,
 Return from the middle, console isolation and cursor state across switches.
 The existing DREDIX checks exercise raw application navigation after the
 line editor exits.
+
+## Shell help shortcut and command diagnostics
+
+TMP implements bare `?` as a compact command list and expands `? topic` to
+`HELP topic` before parsing. Only a standalone question-mark token is an
+alias. Expansion is bounded to the existing 128-character command buffer;
+requests longer than 125 characters are rejected. No extra per-console data
+is added, and normal HELP command lookup remains unchanged.
+
+TMP now reports distinct command-name, extension, password-syntax, memory,
+process, queue, CMD format/read and loader errors. Unknown CLI errors show
+their decimal code. Explicit command drives and drive changes are validated
+with BDOS error-return mode, restoring the original drive and error mode
+before continuing or reporting an unavailable device. Kernel lookup policy
+and application error handling are unchanged.

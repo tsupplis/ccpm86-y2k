@@ -96,6 +96,10 @@ e_bad_open	   equ  30  ; bad ret. from BDOS open
 e_nullcmd	   equ	31  ; null command sent
 e_ill_lst	   equ	37  ; illegal list device
 e_ill_passwd	   equ	38  ; illegal password
+e_no_umd           equ  18  ; no memory descriptors
+e_nondp            equ  17  ; no 8087
+e_no_cseg          equ  33  ; CMD has no code group
+e_fixuprec         equ  41  ; invalid CMD relocation
 e_abort            equ  40  ; aborted in CLI
 
 
@@ -229,7 +233,9 @@ startup:
 
 		; make sure not a null command
 	    lea bx,clicb_cmd
-	    cmp read_blen,0 ! je gonextcmd
+	    cmp read_blen,0 ! jne have_command
+                    jmp gonextcmd
+have_command:
 deblank:
 	    cmp byte ptr [bx],' ' ! je zapblank
 	    cmp byte ptr [bx],tab ! jne noblanks
@@ -266,7 +272,10 @@ chg_dsk:				; change default disk
 			cmp dl,15 ! ja baddrive
 
 				; select default disk
-			    call setdisk ! jmp gonextcmd
+                push dx ! call check_drive ! pop dx
+                or al,al ! jz drive_change_ok
+                jmp bad_device
+drive_change_ok: call setdisk ! jmp gonextcmd
 
 baddrive:   mov dx,offset errstr ! call printstring
 	    mov dx,offset drverr ! call printstring ! call crlf
@@ -276,6 +285,43 @@ gonextcmd:  jmp nextcommand
 ;=======
 clicall:	; SEND CLI COMMAND
 ;=======
+    ; Bare ? is always available, even when HELP.CMD is absent.
+    ; ? followed by whitespace expands to HELP, retaining the topic tail.
+    cmp clicb_cmd,'?' ! jne help_normal
+    cmp read_blen,1 ! jne help_delimiter
+    jmp quick_help
+help_delimiter:
+    mov al,clicb_cmd+1
+    cmp al,' ' ! je help_tail
+    cmp al,tab ! jne help_normal
+help_tail:
+    xor cx,cx ! mov cl,read_blen ! dec cx
+    mov si,offset clicb_cmd+1
+help_spaces:
+    lodsb
+    cmp al,' ' ! je help_next
+    cmp al,tab ! jne help_expand
+help_next:
+    loop help_spaces
+    jmp quick_help
+help_expand:
+    cmp read_blen,125 ! jbe help_room
+    mov dx,offset help_too_long
+    call printstring ! call crlf ! jmp nextcommand
+help_room:
+    ; Move from the end, including the terminator, without an extra buffer.
+    xor cx,cx ! mov cl,read_blen
+    mov si,offset clicb_cmd ! add si,cx
+    mov byte ptr [si],0
+    mov di,si ! add di,3
+    inc cx
+    push ds ! pop es
+    std ! rep movsb ! cld
+    mov word ptr clicb_cmd,'EH'
+    mov word ptr clicb_cmd+2,'PL'
+    add read_blen,3
+help_normal:
+
 			; put null at end of input
 		    mov bx,offset clicb_cmd
 		    mov al,read_blen ! mov ah,0
@@ -440,7 +486,38 @@ sysdisk_device:
 sysdisk_error:
     call printstring ! call crlf ! jmp nextcommand
 
+quick_help:
+    mov dx,offset quickhelp_text ! call printstring ! jmp nextcommand
+
+check_drive: ; DL=0-based drive; AX=selection status. Preserve drive/error mode.
+    push dx
+    push word ptr uda+10h
+    call getdisk
+    pop cx ! pop dx
+    push cx ! push bx ! push dx
+    mov cl,45 ! mov dl,0ffh ! call ccpm
+    pop dx ! call setdisk
+    pop dx ! pop cx
+    push ax ! push cx
+    call setdisk
+    pop dx ! mov cl,45 ! call ccpm
+    pop ax
+    ret
+
+bad_device: ; DL=unavailable drive; no stale command-buffer contents printed.
+    push dx
+    mov dx,offset drive_unavailable ! call printstring
+    pop dx ! add dl,'A' ! call prchar
+    mov dl,':' ! call prchar
+    call crlf ! jmp nextcommand
+
 not_builtin:
+    cmp fcb,0 ! je command_drive_ok
+    mov dl,fcb ! dec dl
+    push dx ! call check_drive ! pop dx
+    or al,al ! jz command_drive_ok
+    jmp bad_device
+command_drive_ok:
 			; initialize Cli Control Block
 
                     mov clicb_net,0
@@ -458,6 +535,7 @@ clierror:
 ; Cli call unsuccesful, analyze and display err msg
 ;	input: CX = ERROR CODE
 
+	push cx
 	mov si,(offset clierrtab)-4
 nexterr:
 	add si,4
@@ -465,7 +543,15 @@ nexterr:
 	cmp cx,cs:[si] ! jne nexterr
 unknownerr:
 	mov dx,cs:2[si]
-	; jmps showerr
+    pop ax
+    cmp dx,offset catcherr ! jne showerr
+    push ax
+    call crlf
+    mov dx,offset errstr ! call printstring
+    mov dx,offset catcherr ! call printstring
+    pop ax ! call pr_errornum
+    call crlf
+    jmp errcommand
 
 
 showerr:	; Print Error String
@@ -478,9 +564,18 @@ showerr:	; Print Error String
 perr:	push dx ! call crlf
 	mov dx,offset errstr ! call printstring
 	pop dx ! call printstring ! call crlf
+errcommand:
 	mov dx,offset cmdstr ! call printstring
 	mov dx,offset savebuf ! call print_ds_string ! call crlf
 	jmp nextcommand	
+
+pr_errornum: ; AX=unsigned error number, decimal (prnum only handles 0..15).
+    xor dx,dx ! mov bx,10 ! div bx
+    push dx
+    or ax,ax ! jz error_digit
+    call pr_errornum
+error_digit:
+    pop dx ! add dl,'0' ! jmp prchar
 
 parsefilename:	; SI = fcb   DI = string
 		mov cx,f_parse
@@ -543,13 +638,18 @@ clierrtab	dw	e_nullcmd,	0	;null command
 		dw	e_no_memory,	memerr	;No memory
 		dw	e_no_pd,	pderr	;No unused PD
 		dw	e_badfname,	fnameerr;Ill. command
-		dw	e_illdisk,	fnameerr;Ill. disk
-		dw	e_ill_passwd,	fnameerr;Ill. password
-		dw	e_badftype,	fnameerr;Ill. type
+		dw	e_illdisk,	drverr;Ill. disk
+		dw	e_ill_passwd,	passwderr;Ill. password
+		dw	e_badftype,	ftypeerr;Ill. type
 		dw	e_bad_load,	loaderr	;
-		dw	e_bad_read,	loaderr	;
+		dw	e_bad_read,	readerr	;
 		dw	e_bad_open,	openerr	;
 		dw	e_q_full,	qfullerr;
+		dw	e_no_umd,	mdfullerr
+        dw e_nondp,ndperr
+        dw e_no_cseg,csegerr
+        dw e_fixuprec,fixuperr
+        dw e_ill_lst,listerr
 		dw	e_abort,	aborterr;
 
 			; a few extra entries for future errors
@@ -561,16 +661,32 @@ clierrtab	dw	e_nullcmd,	0	;null command
 
 prompt		db	'>$'
 crlfstr		db	13,10,'$'
-errstr		db	'CP/M Error: $'
-memerr		db	'Not Enough Memory$'
-pderr		db	'PD Table Full$'
-fnameerr	db	'Bad File Spec$'
-catcherr	rb	0			;Unknown Errs give
-loaderr		db	'Load Error$'		;  Load Error Msg
-openerr		db	'Can''t Find Command$'
-qfullerr	db	'RSP Command Que Full$'
-aborterr	db	'CLI Abort$'
-drverr		db	'Invalid Drive$'
+errstr db 'Command error: $'
+memerr db 'Not enough memory to load command$'
+pderr db 'Too many active processes$'
+fnameerr db 'Invalid command name (maximum 8 characters)$'
+ftypeerr db 'Invalid command extension (maximum 3 characters)$'
+passwderr db 'Invalid password syntax (maximum 8 characters)$'
+loaderr db 'Invalid or empty CMD file$'
+readerr db 'Disk error while reading CMD file$'
+openerr db 'Command not found. Use ? for help$'
+qfullerr db 'Resident command queue is full; try again shortly$'
+aborterr db 'Command cancelled$'
+drverr db 'Invalid drive (use A: through P:)$'
+mdfullerr db 'Memory allocation table is full$'
+ndperr db 'Command requires an 8087 coprocessor$'
+csegerr db 'Invalid CMD file: missing code group$'
+fixuperr db 'Invalid CMD relocation data$'
+listerr db 'Invalid printer/list device$'
+catcherr db 'Unknown command error, code $'
+drive_unavailable db 'Drive unavailable: $'
+help_too_long db 'Help request too long (maximum 125 characters including ?)$'
+quickhelp_text db cr,lf,'Common commands:',cr,lf
+    db '  DIR  SDIR  TYPE  PIP  ERA  REN  ED  SUBMIT',cr,lf
+    db '  SHOW  SET  SYSTAT  DATE  TOD  VCMODE',cr,lf
+    db 'Shell commands: CLS  SYSDISK  USER  PRINTER',cr,lf
+    db '? topic opens HELP, for example ? PIP or ? COMMANDS.',cr,lf
+    db 'Some utilities are on the tools or maintenance disk.',cr,lf,'$'
 
 cmdstr		db	'Command = $'
 usererrmsg	db	13,10,'Invalid User Number,'

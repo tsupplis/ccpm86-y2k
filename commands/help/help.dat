@@ -228,6 +228,11 @@
 
 ///1COMMANDS
 
+    Type ? at the shell prompt for a compact list of common commands.
+    Type ? PIP (with a space) to run HELP for PIP. Topic lookup requires
+    HELP.CMD and HELP.HLP; bare ? is built into the shell. A ? topic line
+    may contain at most 125 characters including the question mark.
+
     Concurrent CP/M command line syntax:
 
     A> <command> {command tail} <RETURN>

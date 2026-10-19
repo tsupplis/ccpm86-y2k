@@ -31,6 +31,44 @@ The current version already incorporate:
 
 Those little changes make the OS far more friendly than the original.
 
+## Command line conveniences
+
+Buffered console input supports insertion and deletion within a line:
+
+| Key | Action |
+| --- | --- |
+| Left / Ctrl-A | Move one character left |
+| Right / Ctrl-F | Move one character right |
+| Home / End | Go to the beginning / end |
+| Up / Ctrl-W | Recall the last nonempty line when empty; otherwise go to the end |
+| Backspace / Rubout | Delete left of the cursor |
+| Delete / Ctrl-G | Delete at the cursor |
+| Ctrl-K / Ctrl-X | Delete to the right / left of the cursor |
+| Ctrl-B | Go to the beginning, or to the end when already at the beginning |
+| Ctrl-U / Ctrl-R | Cancel the line / retype it on a new line |
+
+Return accepts the whole line, even when the cursor is in the middle.
+Each console keeps one saved line, including input accepted by applications
+using BDOS Function 10; there is no history list. Tabs, displayed control
+characters and wrapped rows are handled by the editor. Navigation mappings
+apply during buffered line input; raw applications retain their existing keys.
+See [PATCHES.md](PATCHES.md) for the precise control-character behavior.
+
+At the shell prompt, `?` lists common commands and `? PIP` opens the existing
+HELP topic for PIP. Whitespace is required between `?` and the topic; HELP
+must be installed for topic lookup. `?` alone is built into TMP and works
+without HELP.CMD. Topic requests may contain at most 125 characters including
+the `?`, leaving room for expansion to `HELP` in the 128-character buffer.
+
+Command errors distinguish missing commands, unavailable drives, invalid
+names/extensions/password syntax, memory/process limits and malformed or
+unreadable CMD files. Unknown errors retain their numeric code. Explicit
+drive checks preserve the current drive when the requested drive is unavailable.
+
+Command lookup retains CCP/M's resident-command, current-drive and system-drive
+rules. This build does not implement CP/M Plus SETDEF search paths or extension
+ordering; use SUBMIT explicitly for .SUB command files.
+
 ## Distributions
 
 | Image | Bootable | Contents |

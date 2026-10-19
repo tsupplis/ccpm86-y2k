@@ -234,6 +234,45 @@ def check_editor(type_command, hmp, wait_for, shortcut):
     print('line editor: insertion/deletion, controls, arrows/Home/End, Up=^W, tabs, control widths, retype, wrapping and console switching passed')
 
 
+
+def check_shell(type_command, hmp, wait_for):
+    """Check TMP help aliases and diagnostics through actual console input."""
+    def prompt(text):
+        lines = [line.rstrip() for line in text.splitlines()[:24] if line.strip()]
+        return bool(lines) and lines[-1] == 'A>'
+
+    type_command('?\n')
+    wait_for(lambda t: 'Common commands:' in t and '? topic opens HELP' in t and prompt(t))
+    type_command('? pip [nopage]\n')
+    wait_for(lambda t: 'HELP>' in t and 'PIP' in t)
+    type_command('\n')
+    wait_for(prompt)
+    type_command('? pip [nopage]'.ljust(125) + '\n')
+    wait_for(lambda t: 'HELP>' in t and 'PIP' in t)
+    type_command('\n')
+    wait_for(prompt)
+    for tail, expected in (
+            ('zzqx987', 'Command not found. Use ? for help'),
+            ('toolongname', 'Invalid command name'),
+            ('dir.toolong', 'Invalid command extension'),
+            ('z:dir', 'Invalid drive (use A: through P:)'),
+            ('c:dir', 'Drive unavailable: C:'),
+            ('c:', 'Drive unavailable: C:'),
+            ('? ' + 'a' * 124, 'Help request too long')):
+        type_command('cls\n')
+        wait_for(lambda t: 'Command error:' not in t and prompt(t))
+        type_command(tail + '\n')
+        wait_for(lambda t: expected in t and prompt(t))
+    type_command('b:\n')
+    wait_for(lambda t: any(line.rstrip() == 'B>' for line in t.splitlines()[:24]))
+    type_command('a:\n')
+    wait_for(prompt)
+    # A failed drive change must not redirect the next command to that drive.
+    type_command('dir\n')
+    wait_for(lambda t: 'CCPM' in t and 'SYS' in t and prompt(t))
+    print('shell: ? quick help/topic alias, missing commands, syntax, unavailable drives and alias bounds passed')
+
+
 def check(image, second):
     qemu = shutil.which('qemu-system-i386')
     if not qemu:
@@ -293,7 +332,7 @@ def check(image, second):
             def type_command(text):
                 for char in text:
                     keys = {'\n': 'ret', ' ': 'spc', '.': 'dot', ':': 'shift-semicolon',
-                            '*': 'shift-8', ';': 'semicolon', '\t': 'tab', '[': 'bracket_left', ']': 'bracket_right'}
+                            '*': 'shift-8', ';': 'semicolon', '?': 'shift-slash', '\t': 'tab', '[': 'bracket_left', ']': 'bracket_right'}
                     hmp('sendkey ' + keys.get(char, char) + ' 50')
                     time.sleep(.08)
 
@@ -319,6 +358,7 @@ def check(image, second):
                 if image.name == 'ccpm86.img':
                     check_recall(type_command, hmp, wait_for, shortcut)
                     check_editor(type_command, hmp, wait_for, shortcut)
+                    check_shell(type_command, hmp, wait_for)
                 type_command('dir\n')
                 wait_for(lambda t: 'CCPM' in t and 'SYS' in t and 'PIP' in t)
                 if image.name == 'ccpm86.img':
@@ -386,6 +426,12 @@ def check(image, second):
                     wait_for(lambda t: 'CCPM' in t and 'SYS' in t and 'SYSDISK' in t)
                     print(f'{image.name}: DREDIX editing, navigation, delete/backspace and exit passed')
 
+                if image.name in ('ccpmtools.img', 'ccpmmaint.img'):
+                    type_command('? \t\n')
+                    wait_for(lambda t: 'Common commands:' in t
+                             and '? topic opens HELP' in t
+                             and re.search(r'^A>\s*$', t, re.M))
+                    print(f'{image.name}: built-in quick help without HELP.CMD passed')
                 if image.name == 'ccpmtools.img':
                     # This disk has no SYSDISK.CMD: exercise the TMP built-in.
                     type_command('sysdisk\n')
