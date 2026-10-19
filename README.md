@@ -16,11 +16,20 @@ system useful today and accessible to anyone interested in its history.
 <br><sub>System setup &nbsp;·&nbsp; Microsoft BASIC 5.50A</sub>
 </p>
 
+
 | Goal | Distribution |
 | --- | --- |
 | Full source distribution | Kernel, nine RSPs, most commands; gaps below |
 | Additional tools | ASM80, HEXCOM, DREDIX, DR development chain, Microsoft BASIC 5.50A |
 | Y2K components | SDIR, DATE, SHOW, TOD for CCP/M-86 3.2 through Concurrent DOS 4.1; 3.1 fixes included |
+
+The current version already incorporate:
+- command line editing,
+- support for CGA, EGA modes even on VGA
+- Y2K compliance,
+- New terminal commands (cls, sysdisk)
+
+Those little changes make the OS far more friendly than the original.
 
 ## Distributions
 
