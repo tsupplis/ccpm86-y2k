@@ -1,5 +1,5 @@
 title 'SYSDISK - reconstructed Concurrent CP/M-86 system disk utility'
-; Reconstructed from base/sysdisk.cmd and the accompanying disassembly.
+; Reconstructed by disassembling the original binary (sysdisk.ref).
 ; Keep instruction encodings, offsets, reserved bytes, and CMD layout intact.
 ; BDOS 154 returns the system-data pointer.  The system disk is byte 4Bh.
 

@@ -16,9 +16,9 @@ sysdisk.cmd: sysdisk.h86 Makefile
 	$(GENCMD) $<
 	cmdinfo $@
 
-check: sysdisk.cmd ../../base/sysdisk.cmd
-	cmp sysdisk.cmd ../../base/sysdisk.cmd
-	@echo "SYSDISK: byte-identical to base/sysdisk.cmd"
+check: sysdisk.cmd sysdisk.ref
+	cmp sysdisk.cmd sysdisk.ref
+	@echo "SYSDISK: byte-identical to sysdisk.ref"
 
 %.h86: %.a86
 	$(ASM86) $^
