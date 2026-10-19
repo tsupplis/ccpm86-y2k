@@ -5,7 +5,7 @@
 This project preserves Digital Research's Concurrent CP/M-86 3.1 as a usable,
 rebuildable system for running and exploring classic 16-bit software. Runnable
 disks and development tools accompany the sources and patch notes, making the
-system useful today and accessible to anyone interested in its history.
+system more consumable (CP/M-Plus style) and accessible to anyone interested in its history.
 
 <p align="center">
 <img src="images/ccpm86.png" alt="Concurrent CP/M-86 3.1 running in PCE" width="48%">
