@@ -275,4 +275,5 @@ The boot build requires native `h862bin` from `cpm86-cmdtools` on PATH.
 
 ## License
 
-The whole repository is under CP/M (License)[LICENSE.md] when derived from CP/M or under MIT MIT (License)[License-bis.md] unless specified otherwise in a subdirectory.
+CP/M-derived material is covered by the [CP/M license](LICENSE.md); other material uses the [MIT license](LICENSE-bis.md), unless specified otherwise in a subdirectory.
+
