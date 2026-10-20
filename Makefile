@@ -13,7 +13,6 @@ commands:
 
 kernel: commands
 	$(MAKE) -C kernel all
-	$(MAKE) -C kernel/sysgen all
 
 boot:
 	$(MAKE) -C boot all
@@ -44,13 +43,23 @@ source-dist:
 	  done > $(DISTDIR)/source-files.txt
 	COPYFILE_DISABLE=1 tar -czf $(SOURCEDIST) -T $(DISTDIR)/source-files.txt
 
+# Build first, then evaluate archive dependencies after the recursive builds.
+# Validation is explicit through check/check-qemu, not part of packaging.
+dist: all
+	$(MAKE) $(DISKSZIP) $(Y2KDISTZIP)
+
 # Release artifacts live at the repository root.
-dist: check LICENSE.md
-	cp $(addprefix media/,$(DIST_DISKS)) .
-	$(RM) $(DISKSZIP)
-	COPYFILE_DISABLE=1 zip -X -j $(DISKSZIP) $(DIST_DISKS) LICENSE.md
-	$(RM) dist.zip $(Y2KDISTZIP)
-	COPYFILE_DISABLE=1 zip -X -j $(Y2KDISTZIP) commands/sdir/sdir.cmd \
+$(DIST_DISKS): %: media/%
+	cp $< $@
+
+$(DISKSZIP): $(DIST_DISKS) LICENSE.md Makefile
+	$(RM) $@
+	COPYFILE_DISABLE=1 zip -X -j $@ $(DIST_DISKS) LICENSE.md
+
+$(Y2KDISTZIP): commands/sdir/sdir.cmd commands/tod/tod.cmd \
+    commands/date/date.cmd commands/show/show.cmd LICENSE.md Makefile
+	$(RM) $@
+	COPYFILE_DISABLE=1 zip -X -j $@ commands/sdir/sdir.cmd \
 	  commands/tod/tod.cmd commands/date/date.cmd commands/show/show.cmd LICENSE.md
 
 clean:

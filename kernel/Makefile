@@ -1,11 +1,11 @@
-SUBDIRS=con rsp1 rsp2
+SUBDIRS=con rsp1 rsp2 sysgen
 
 DISTDIR=dist
 DISTZIP=dist.zip
 Y2KDISTZIP=y2k-dist.zip
 
 all clean:
-	for d in $(SUBDIRS); do \
+	set -e; for d in $(SUBDIRS); do \
 		$(MAKE) -C $$d $@; \
 	done
 
