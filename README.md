@@ -34,106 +34,47 @@ Those little changes make the OS far more friendly than the original.
 
 ## Command line conveniences
 
-Buffered console input supports insertion and deletion within a line:
+Buffered console input supports cursor movement, insertion, deletion and
+recall of the last nonempty line on each console:
 
 | Key | Action |
 | --- | --- |
 | Left / Ctrl-A | Move one character left |
 | Right / Ctrl-F | Move one character right |
 | Home / End | Go to the beginning / end |
-| Up / Ctrl-W | Recall the last nonempty line when empty; otherwise go to the end |
+| Up / Ctrl-W | Recall the last line when empty; otherwise go to the end |
 | Backspace / Rubout | Delete left of the cursor |
 | Delete / Ctrl-G | Delete at the cursor |
 | Ctrl-K / Ctrl-X | Delete to the right / left of the cursor |
-| Ctrl-B | Go to the beginning, or to the end when already at the beginning |
+| Ctrl-B | Toggle between beginning and end |
 | Ctrl-U / Ctrl-R | Cancel the line / retype it on a new line |
 
-Return accepts the whole line, even when the cursor is in the middle.
-Each console keeps one saved line, including input accepted by applications
-using BDOS Function 10; there is no history list. Tabs, displayed control
-characters and wrapped rows are handled by the editor. Navigation mappings
-apply during buffered line input; raw applications retain their existing keys.
-See [PATCHES.md](PATCHES.md) for the precise control-character behavior.
+Return accepts the whole line from any cursor position. The editor also
+serves applications using BDOS Function 10; raw-input applications keep
+their own keys. There is one saved line per console, not a history list.
 
-At the shell prompt, `?` lists common commands and `? PIP` opens the existing
-HELP topic for PIP. Whitespace is required between `?` and the topic; HELP
-must be installed for topic lookup. `?` alone is built into TMP and works
-without HELP.CMD. Topic requests may contain at most 125 characters including
-the `?`, leaving room for expansion to `HELP` in the 128-character buffer.
+At the shell prompt, `?` lists common commands and `? PIP` opens `HELP PIP`
+when HELP is installed. Command errors identify missing commands, unavailable
+drives, invalid names, resource limits and malformed executables.
 
-Command errors distinguish missing commands, unavailable drives, invalid
-names/extensions/password syntax, memory/process limits and malformed or
-unreadable CMD files. Unknown errors retain their numeric code. Explicit
-drive checks preserve the current drive when the requested drive is unavailable.
+`SETDEF` controls each console's command search path and file order:
 
-`SETDEF` configures command searching independently for each console:
+| Command | Effect |
+| --- | --- |
+| `SETDEF` | Show current settings |
+| `SETDEF *,A:,C:` | Search the current drive, then A: and C: |
+| `SETDEF [ORDER=(CMD,SUB)]` | Search CMD, then SUB on each drive |
+| `SETDEF * [ORDER=(CMD)]` | Restore current-drive, CMD-only defaults |
 
-```text
-SETDEF             Display the current settings
-SETDEF *           Reset the drive list to current drive
-SETDEF *,A:,C:     Search current drive, A:, then C:
-SETDEF M:,*        Prefer utilities on the memory disk
-SETDEF [ORDER=(CMD,SUB)]  Enable automatic SUB scripts
-SETDEF [ORDER=(CMD)]      Restore CMD-only searching
-```
+Resident commands take priority; an explicit drive bypasses the path.
+The system disk remains the final fallback. `SYSDISK` selects that disk
+globally, while SETDEF settings are local to each console and last until
+changed or rebooted. Add SETDEF to `STARTUP.nnn` for persistent preferences.
 
-The display follows the CP/M Plus layout, with a leading blank line and a blank
-line after the drives. The fixed Sys Disk role is always the last displayed row. For `SETDEF *,A:,C:` with default CMD-only searching:
-
-```text
-Drive Search Path:
-1st Drive            - Default
-2nd Drive            - A:
-3rd Drive            - C:
-4th Drive            - Sys Disk (A:)
-
-Search Order         - CMD
-```
-
-The list accepts one to four comma-separated entries (`*` or `A:` through `P:`).
-`*` resolves to the current drive each time a command is executed. Spaces and
-tabs around entries are allowed. Invalid input leaves the settings unchanged.
-Resident commands retain priority, and an explicit command drive bypasses the
-list. Unavailable listed drives are skipped; duplicate drives are searched once.
-Loading a command from another drive preserves the caller's working drive/user.
-
-After the list, the system drive remains a fixed fallback with the existing SYS
-file visibility rules; SETDEF cannot remove or reorder that fallback. A drive
-named in the list (or selected by `*`) is searched normally, even if it is also
-the system drive. It is not searched again as a fallback. `SYSDISK` still selects
-the system drive globally; SETDEF settings are local to each console.
-
-The shared CLI applies the path to TMP, SUBMIT commands and program chaining.
-Settings last until reboot or another SETDEF on that console. To apply them at
-startup, invoke SETDEF from the console's `STARTUP.nnn`, directly or through a
-SUBMIT script. If SETDEF itself is outside the path, specify its drive, for
-example `A:SETDEF *`. Copy frequently used CMD files to M: before using
-`SETDEF M:,*`; SETDEF does not create, format or populate the memory disk.
-
-The default file order is **CMD only**. The only other allowed order is
-`CMD,SUB`, enabled with `SETDEF [ORDER=(CMD,SUB)]`. Path and order settings are
-independent: changing one preserves the other. Bare SETDEF displays both;
-`SETDEF * [ORDER=(CMD)]` restores both defaults. SUB-only and SUB-first orders
-are rejected, as are TEMPORARY and DISPLAY options.
-
-With CMD,SUB enabled, each listed drive is searched for CMD and then SUB before
-moving to the next drive. The system fallback follows the entire list, using
-its SYS-file rules for both types. Thus an earlier drive's SUB can precede a
-later drive's CMD; a CMD on the same drive always wins. Explicit `.CMD` selects
-only CMD; explicit `.SUB` runs a script even in CMD-only mode. An explicit type
-bypasses resident-command lookup; an explicit drive also bypasses the drive list.
-An existing but invalid CMD produces its load error rather than falling back to
-SUB. Other extensions are rejected.
-
-Automatic SUB execution uses the matching rebuilt `SUBMIT.CMD`, located through
-the same drive list and system fallback, with CMD-only lookup. The script's
-resolved drive/user and original arguments are preserved. `SUBMIT.CMD not found`
-identifies a missing interpreter; the script does not run. Oversized expanded
-tails report `Command tail too long for SUBMIT`; arguments are never truncated.
-The expanded interpreter tail (qualified script name, optional password and
-arguments) may contain at most 126 characters. Automatic lookup uses SETDEF;
-typing `SUBMIT script` retains SUBMIT's explicit current/system script lookup.
-SUBMIT's existing parameter and quoting rules remain unchanged.
+Automatic SUB execution requires the rebuilt `SUBMIT.CMD` on the search
+path. An explicit `.SUB` runs a script even with the default CMD-only order.
+Loading commands from other drives preserves the working drive and user.
+See `HELP SETDEF` and [PATCHES.md](PATCHES.md) for details and limitations.
 
 ## Distributions
 

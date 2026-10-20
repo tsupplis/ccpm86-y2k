@@ -43,10 +43,12 @@ workflow are shared. Existing command options and usage display are retained.
 The CP/M backend uses ROM BIOS and temporarily installs DSKMAINT's diskette
 parameter table. The CCP/M backend, in `ccpmio.a86`, uses the kernel's native
 XIOS format/read/write services. It preserves the process UDA convention,
-locks MXdisk only after confirmation, checks the open-file vector again under
+locks MXdisk only after confirmation, enables quick-return XIOS errors,
+checks the open-file vector again under
 the lock, and tracks partial acquisition for cleanup. It invalidates the
 affected DPH login sequence, returns the token, resets BDOS state and restores
-console/P_KEEP/priority state on success, cancellation and I/O failure.
+console/P_KEEP/priority and UDA error-mode state on success, cancellation
+and I/O failure.
 
 Both paths write the same E5-filled boot track, with the boot code at zero,
 side flag at 1FFh and loader at 900h. The loader's single differing byte is
