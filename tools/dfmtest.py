@@ -53,8 +53,7 @@ def case(tail='A:', sides=2, verify=False, answer='Y', abort=-1,
     track[:len(boot)] = boot
     track[0x1ff] = sides - 1
     track[0x900:0x900 + len(loader)] = loader
-    if not native:
-        track[0x951] = 2
+    track[0x951] = 3 if native else 2
     with tempfile.TemporaryDirectory(prefix='dform-test-') as temp:
         temp = Path(temp)
         (temp / 'track.bin').write_bytes(track)

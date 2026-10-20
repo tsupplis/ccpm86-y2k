@@ -31,8 +31,8 @@ TOOLS_COMMANDS = ../commands/asm86/asm86.cmd ../commands/ddt86/ddt86.cmd \
     ../commands/tod/tod.cmd ../commands/dredix/dredix.cmd \
     $(WINDOW_COMMANDS) $(WINDOW_SAMPLES)
 
-MAINT_COMMANDS = ../base/dskmaint.cmd ../base/hdmaint.cmd ../commands/initdir/initdir.cmd \
-    ../commands/tod/tod.cmd
+MAINT_COMMANDS = ../commands/dskmaint/dskmaint.cmd ../commands/dskmaint/dform.cmd \
+    ../base/hdmaint.cmd ../commands/initdir/initdir.cmd ../commands/tod/tod.cmd
 
 # Data-only developer disk; omit the older MBASIC 5.22 reference binary.
 DEV_COMMANDS = ../dev/rasm86.cmd ../dev/link86.cmd ../dev/lib86.cmd \
@@ -41,13 +41,14 @@ DEV_COMMANDS = ../dev/rasm86.cmd ../dev/link86.cmd ../dev/lib86.cmd \
     ../commands/hexcom/hexcom.cmd ../commands/ddt86/gentab.cmd
 
 COMMAND_DIRS = chset date era help initdir pip ren sdir set show submit systat tod \
-    type vcmode asm86 asm80 ddt86 gencmd genccpm hexcom dredix ed sysdisk setdef
+    type vcmode asm86 asm80 ddt86 gencmd genccpm hexcom dredix ed sysdisk setdef dskmaint
 
 # Recurse so building directly in media/ picks up changes to included sources.
 prepare:
 	@set -e; for d in $(COMMAND_DIRS); do $(MAKE) -C ../commands/$$d all; done
 	$(MAKE) -C ../commands/help help.hlp
 	$(MAKE) -C ../commands/sysdisk check
+	$(MAKE) -C ../commands/dskmaint check
 	$(MAKE) -C ../kernel/con all
 	$(MAKE) -C ../kernel/rsp1 all
 	$(MAKE) -C ../kernel/rsp2 all
