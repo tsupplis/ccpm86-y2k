@@ -27,7 +27,7 @@ system more consumable (CP/M-Plus style) and accessible to anyone interested in 
 The current version already incorporate:
 - CP/M Plus mapped and direction keys command line recall and editing,
 - CP/M Plus setdef style configurability
-- support for CGA, EGA modes even on VGA card,
+- Support for CGA, EGA modes even on VGA card,
 - Y2K compliance,
 - CLIs for floppy copy, format and more
 - New terminal commands (cls, sysdisk)
