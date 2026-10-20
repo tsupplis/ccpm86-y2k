@@ -1,7 +1,10 @@
 ;*****************************************************************************
 ;
-;	LOADER - second stage boot loader written to track 0 by DSKMAINT
+;	LOADER - second stage boot loader written by CCP/M DSKMAINT 1.5
 ;	Copyright (C) 1983, Digital Research
+;
+;	Compared with the CP/M-86 image, only the reset of the missing-extent
+;	allowance differs: three attempts instead of two (image offset 51h).
 ;
 ;	Reconstructed from the bytes DSKMAINT carries; assembles byte-identical
 ;	to them.  Not a CP/M-86 program: BOOTSECT reads it into the top of
@@ -59,7 +62,7 @@ found:	call	loadfirst
 
 again:	call	finddir
 	jnz	nextno
-	mov	gaps,2
+	mov	gaps,3
 	call	loadext
 
 nextno:	call	bumpext

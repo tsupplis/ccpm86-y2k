@@ -1,1139 +1,1384 @@
 ;*****************************************************************************
 ;
-;	DSKMAINT - CP/M-86 diskette maintenance for the IBM PC
-;	Copyright (C) 1983, Digital Research
+;	DSKMAINT - Concurrent CP/M-86 3.1 disk maintenance, version 1.5
+;	Digital Research, 26 January 1984. Byte-exact reconstruction.
 ;
-;	Reconstructed from the shipped binary; assembles byte-identical.
-;
-;	Build:	make
-;	Check:	make check
-;
-;	A menu on the function keys: F1 verify, F3 copy, F5 format single
-;	sided, F7 format double sided, F9 exit.  The screen is driven through
-;	VT52 escape sequences by BDOS, except for clearing the window (BIOS
-;	video), the keyboard (BIOS int 16h) and the diskette itself (BIOS
-;	int 13h).
-;
-;	The disk is handled one track at a time: eight sectors of 512 bytes,
-;	one 1000h byte buffer.  A diskette has 40 tracks, or 80 on two sides:
-;	tracks 0..39 are cylinders 0..39 on head 0 and tracks 40..79 are
-;	cylinders 39..0 on head 1.  The last byte of the boot sector tells
-;	whether the diskette is single or double sided.
-;
-;	Formatting installs its own 8 sector parameter table over the BIOS
-;	diskette vector (int 1Eh) for the duration, then writes the boot sector
-;	and loader kept in the data (bootsect, loader).
+;	CODE/DATA, loader-allocated EXTRA and a 256-byte STACK are separate.
+;	XIOS disk I/O is protected by MXdisk, P_KEEP and console state checks.
+;	Build and check: make check
 ;
 ;*****************************************************************************
-
-; Bounds for tools/a86tool.py: where the data starts and the image ends.
-data_org	equ	0734h
-image_end	equ	1060h
-
-; One group so the CMD has a single CODE descriptor (the 8080 model),
-; but the data keeps its own segment.
-cgroup	group	code,data
-
 	cseg
-	org	100h
-
-start:
+	org	0
+entry:
 	jmps	main
-
-copyright:
-	db	'Copyright (C) 1983, Digital Research'
+	db	'Copyright (C) 1983, Digital Research, Inc.Serial No. 2004-0000-654321'
 
 ;-----------------------------------------------------------------------------
-; Entry.  Discard anything typed ahead, ask BDOS for a work buffer (quit if
-; there is none), draw the screen and remember the diskette parameter vector.
+; Use loader DATA, EXTRA and STACK groups; acquire process/console/disk locks.
 ;-----------------------------------------------------------------------------
 main:
-	mov	ax,cs
-	mov	ds,ax
-	mov	ss,ax
-	mov	sp,1053h
-	call	flushkb
-	call	allocmem
-	jnz	memok
-	mov	si,offset nomemmsg
-	call	puts
-	jmp	terminate
-
-memok:
-	call	drawframe
-	call	cntdrives
-	call	initvec
-
-;-----------------------------------------------------------------------------
-; Main menu.  getchoice returns the function key number (1,3,5,7,9) in bx;
-; one less is the byte offset of its handler in fntable.  Every handler comes
-; back here through the menu, so an item repeats until F10 is pressed in the
-; drive menu.
-;-----------------------------------------------------------------------------
-mainmenu:
-	call	clrwin
-	mov	si,offset mainhdr
-	mov	dh,04h
-	call	putcent
-	mov	si,offset menuitems
-	mov	cx,05h
-	call	drawmenu
-	mov	si,offset selfunc
-	mov	dh,06h
-	call	putrev
-	mov	di,offset mainkeys
-	mov	cx,05h
-	call	getchoice
-	dec	bx
-	mov	menusel,bx
-	jmp	word ptr fntable[bx]
-
-;-----------------------------------------------------------------------------
-; Control-C during disk I/O ends up here: reset the stack and segments, put the
-; BIOS diskette vector back and return to the main menu.
-;-----------------------------------------------------------------------------
-restart:
-	mov	ax,cs
-	mov	ds,ax
-	mov	es,ax
-	mov	sp,1053h
-	call	setoldvec
-	jmps	mainmenu
-
-;-----------------------------------------------------------------------------
-; F1: verify a diskette.  Pick the drive, then read every track with BIOS
-; function 4, which checks the sector CRCs without moving any data.  Runs the
-; same item again when it is done.
-;-----------------------------------------------------------------------------
-doverify:
-	mov	si,offset vfytxt
-	mov	word ptr promptptr,08b5h
-	call	seldrive
-	call	clrwin
-	mov	si,offset vfyingmsg
-	mov	dx,0516h
-	call	drvprompt
-
-; Verify the diskette in drive.  getsides decides 40 or 80 tracks.  Format
-; enters here with si = message once the new boot track is written.
-vfyall:
-	call	getsides
-	call	trkhdr
-	mov	byte ptr biosfunc,04h
-
-vfyloop:
-	call	showtrk
-	call	diskio
-	inc	byte ptr track
-	dec	byte ptr trkcount
-	jnz	vfyloop
-	call	getsides
-	mov	bx,menusel
-	jmp	word ptr fntable[bx]
-
-;-----------------------------------------------------------------------------
-; F3: copy a diskette.  Pick source and destination, then work in chunks of
-; ntrkbuf tracks: read from the source, write to the destination, read the
-; destination back and compare it with what was written.  One drive may serve
-; for both; askinsrc and askindst prompt for the swap.  Without room for even
-; one chunk beyond the track buffer, it gives up.
-;-----------------------------------------------------------------------------
-docopy:
-	test	byte ptr ntrkbuf,0ffh
-	jnz	copypick
-	mov	si,offset copymemmsg
-	jmp	showerr
-
-copypick:
-	mov	si,offset copytxt
-	mov	word ptr promptptr,08cfh
-	call	seldrive
-	mov	srcdrive,bl
-	call	getsides
-	mov	srcsides,al
-	mov	si,offset copytxt
-	mov	word ptr promptptr,08e6h
-	call	seldrive
-	mov	dstdrive,bl
-	call	clrwin
-	mov	al,srcdrive
-	mov	drive,al
-	mov	si,offset copyingmsg
-	mov	dx,0415h
-	call	drvprompt
-	mov	al,dstdrive
-	mov	drive,al
-	mov	si,offset tomsg
-	mov	dx,051fh
-	call	drvprompt
-	call	confirm
-	jc	docopy
-	mov	al,trkcount
-	mov	trktotal,al
-
-; Next chunk: as many tracks as are left, but no more than the buffer holds.
-copynext:
-	mov	al,trktotal
-	sub	al,track
-	jz	copyend
-	cmp	al,ntrkbuf
-	jc	copyrd
-	mov	al,ntrkbuf
-
-copyrd:
-	mov	trkcount,al
-	call	askinsrc
-	mov	al,02h
-	mov	ah,srcdrive
-	mov	si,offset readmsg
-	call	xfer
-	call	askindst
-	mov	al,03h
-	mov	ah,dstdrive
-	mov	si,offset writemsg
-	call	xfer
-	mov	byte ptr biosfunc,02h
-	mov	ax,copyseg
-	mov	curseg,ax
-	mov	si,offset checkmsg
-	call	trkhdr
-
-; Read one track back into trkbuf and compare all 1000h bytes with the copy
-; that was just written.  nextseg points es at the copy and steps on.
-cmploop:
-	call	showtrk
-	call	diskio
-	call	nextseg
-	push	ds
-	mov	ds,word ptr trkbuf
-	sub	si,si
-	sub	di,di
-	mov	cx,1000h
-	cld
-	repe	cmpsb
-	pop	ds
-	jz	cmpnext
-	mov	si,offset mismatmsg
-	jmp	showerr
-
-cmpnext:
-	inc	byte ptr track
-	dec	byte ptr trkcount
-	jnz	cmploop
-	jmp	copynext
-
-; Copy finished: read track 0 of each diskette again (this also resets track)
-; and start the dialog over.
-copyend:
-	call	getsides
-	mov	al,srcdrive
-	mov	drive,al
-	call	getsides
-	jmp	docopy
-
-; Move trkcount tracks between the disk and the copy buffer.  al is the BIOS
-; function (2 read, 3 write), ah the drive, si the heading.  track is kept.
-xfer:
-	push	word ptr track
-	mov	biosfunc,al
-	mov	drive,ah
-	mov	ax,copyseg
-	mov	curseg,ax
-	call	trkhdr
-
-xferloop:
-	call	showtrk
-	call	nextseg
-	call	diskioes
-	inc	byte ptr track
-	dec	byte ptr trkcount
-	jnz	xferloop
-	pop	word ptr track
-	ret
-
-; Point es at the current track buffer, then step curseg to the next one:
-; a track is 1000h bytes, 100h paragraphs.
-nextseg:
-	mov	es,word ptr curseg
-	add	word ptr curseg,0100h
-	ret
-
-;-----------------------------------------------------------------------------
-; F5: format a single sided diskette, 40 tracks.
-;-----------------------------------------------------------------------------
-fmt1:
-	mov	byte ptr sides,00h
-	mov	byte ptr trkcount,28h
-	mov	si,offset fmt1txt
-	jmps	fmtcommon
-
-;-----------------------------------------------------------------------------
-; F7: format a double sided diskette, 80 tracks.
-;-----------------------------------------------------------------------------
-fmt2:
-	mov	byte ptr sides,01h
-	mov	byte ptr trkcount,50h
-	mov	si,offset fmt2txt
-
-; Pick the drive and ask for confirmation.  N goes back to the menu.
-fmtcommon:
-	mov	word ptr promptptr,0902h
-	call	seldrive
-	call	clrwin
-	mov	si,offset fmtingmsg
-	mov	dx,0516h
-	call	drvprompt
-	call	confirm
-	jnc	fmtgo
-	mov	bx,menusel
-	jmp	word ptr fntable[bx]
-
-;-----------------------------------------------------------------------------
-; Format every track (BIOS function 5) with the 8 sector parameter table
-; installed over the diskette vector, then put the vector back.  Track 0 is
-; then written again with the boot sector and the loader, the rest of the
-; buffer left at 0e5h, and the last byte of the boot sector holds the sides
-; flag.  Finish with a verify of the whole diskette.
-;-----------------------------------------------------------------------------
-fmtgo:
-	call	setnewvec
-	mov	si,offset fmtingmsg
-	mov	byte ptr track,00h
-	call	trkhdr
-	mov	byte ptr biosfunc,05h
-
-fmtloop:
-	call	showtrk
-	call	mkidtab
-	call	diskio
-	inc	byte ptr track
-	dec	byte ptr trkcount
-	jnz	fmtloop
-	call	setoldvec
-	mov	es,word ptr trkbuf
-	mov	di,00h
-	mov	al,0e5h
-	mov	cx,1000h
-	cld
-	rep	stosb
-	mov	si,offset writemsg
-	mov	byte ptr track,00h
-	call	trkhdr
-	mov	si,offset bootsect
-	mov	es,word ptr trkbuf
-	sub	di,di
-	mov	al,sides
-	mov	es:.01ffh,al
-	mov	cx,93h
-	rep	movsb
-	mov	si,offset loader
-	mov	di,0900h
-	mov	cx,034eh
-	rep	movsb
-	mov	byte ptr biosfunc,03h
-	call	diskio
-	mov	si,offset vfyingmsg
-	jmp	vfyall
-
-; Build the eight address fields BIOS function 5 expects for the current track
-; at the start of trkbuf: cylinder, head, sector 1..8, size code 2 (512 bytes).
-mkidtab:
-	mov	es,word ptr trkbuf
-	mov	di,00h
-	call	calctrk
-	mov	dl,ch
-	mov	bx,0201h
-	mov	cx,08h
-	cld
-
-idloop:
-	mov	ax,dx
-	stosw
-	mov	ax,bx
-	stosw
-	inc	bx
-	loop	idloop
-	ret
-
-;-----------------------------------------------------------------------------
-; F9: free the buffer, restore the screen and leave through a BDOS reset.
-;-----------------------------------------------------------------------------
-doexit:
-	call	freemem
-	mov	si,offset scrnrest
-	call	puts
-
-; Also the way out when there is no memory.
-terminate:
-	mov	cl,00h
-	mov	dl,00h
-	int	0e0h
-
-; The equipment word of int 11h holds the number of diskette drives less one
-; in bits 6 and 7.
-cntdrives:
-	int	11h
-	mov	cl,06h
-	shr	ax,cl
-	and	ax,03h
-	inc	ax
-	mov	ndrives,ax
-	ret
-
-;-----------------------------------------------------------------------------
-; Paint the frame: three horizontal rules (top, under the title, bottom), two
-; sides, then the six corner glyphs and the title.  bl carries the character,
-; cx the length, dx the position.
-;-----------------------------------------------------------------------------
-drawframe:
-	mov	si,offset scrninit
-	call	puts
-	mov	cx,4eh
-	mov	dx,01h
-	mov	bl,0c4h
-	call	hline
-	mov	dx,0201h
-	mov	bl,0cdh
-	call	hline
-	mov	dx,1701h
-	mov	bl,0c4h
-	call	hline
-	mov	cx,16h
-	mov	dx,0100h
-	mov	bl,0b3h
-	call	vline
-	mov	dx,014fh
-	mov	bl,0b3h
-	call	vline
-	mov	si,offset corners
-	mov	cx,06h
-
-cellloop:
-	mov	al,59h
-	call	escout
-	lodsb
-	add	al,20h
-	call	conout
-	lodsb
-	add	al,20h
-	call	conout
-	lodsb
-	call	conout
-	loop	cellloop
-	mov	si,offset titlestr
-	mov	dx,0100h
-	jmp	putcent
-
-; Draw cx copies of bl going right from position dx.  cx is preserved.
-hline:
-	push	cx
-	call	gotoxy
-
-hlloop:
-	mov	al,bl
-	call	conout
-	loop	hlloop
-	pop	cx
-	ret
-
-; Draw cx copies of bl going down from position dx.  cx is preserved.
-vline:
-	push	cx
-
-vlloop:
-	push	dx
-	call	gotoxy
-	mov	al,bl
-	call	conout
-	pop	dx
-	inc	dh
-	loop	vlloop
-	pop	cx
-	ret
-
-;-----------------------------------------------------------------------------
-; Drive menu.  si is the heading and promptptr the prompt shown under it; the
-; entries are F10 for the main menu and one function key per drive.
-; Returns the drive (0..3) in drive and bl.  F10 does not return: it drops
-; this routine's caller and goes back to the main menu.
-;-----------------------------------------------------------------------------
-seldrive:
-	call	clrwin
-	mov	dh,04h
-	call	putcent
-	mov	cx,ndrives
-	inc	cx
-	push	cx
-	mov	si,offset drvmenu
-	call	drawmenu
-	mov	si,promptptr
-	mov	dh,06h
-	call	putrev
-	mov	di,offset drvkeys
-	pop	cx
-	call	getchoice
-	cmp	bx,0ah
-	jz	selabort
-	shr	bx,1
-	dec	bx
-	mov	drive,bl
-	ret
-
-selabort:
-	pop	ax
-	jmp	mainmenu
-
-; Print the message at si at position dx, then ' the Diskette in Drive X:'.
-; si is preserved.
-drvprompt:
-	push	si
-	call	putat
-	mov	si,offset indrvmsg
-	call	puts
-	mov	al,drive
-	add	al,41h
-	call	conout
-	mov	al,3ah
-	call	conout
-	pop	si
-	ret
-
-; Status line: the message at si and ' track', then fall into showtrk.
-trkhdr:
-	mov	dx,091dh
-	call	putat
-	mov	si,offset trkmsg
-	call	puts
-
-; Print track in decimal.  A single digit is followed by a blank, so that a
-; shorter number leaves nothing of the longer one behind.
-showtrk:
-	mov	dx,092eh
-	call	gotoxy
-	mov	al,track
-	aam
-	or	ax,3030h
-	cmp	ah,30h
-	jnz	trkdigit
-	mov	ah,20h
-	xchg	ah,al
-
-trkdigit:
-	push	ax
-	mov	al,ah
-	call	conout
-	pop	ax
-	jmp	conout
-
-; Draw cx menu entries from si.  An entry is row, column, a two character key
-; label shown in a small box, and the text, which ends at its NUL.
-drawmenu:
-	lodsb
-	mov	dh,al
-	lodsb
-	mov	dl,al
-	call	gotoxy
-	push	si
-	mov	si,offset itemfrm
-	call	puts
-	pop	si
-	lodsb
-	call	conout
-	lodsb
-	call	conout
-	push	si
-	mov	si,offset itemend
-	call	puts
-	pop	si
-	call	puts
-	loop	drawmenu
-	ret
-
-; Prompt for the source or the destination diskette, but only when one drive
-; serves for both: askins returns at once otherwise.  When it does prompt it
-; beeps and falls into askwait.
-askinsrc:
-	mov	si,offset insrcmsg
-	jmps	askins
-
-askindst:
-	mov	si,offset indstmsg
-
-askins:
-	mov	al,srcdrive
-	cmp	al,dstdrive
-	jz	askbeep
-	ret
-
-askbeep:
-	mov	al,07h
-	call	conout
-
-; Show the message at si on row 7, wait for any key, then clear the row.
-askwait:
-	mov	dh,07h
-	call	putrev
-	call	getraw
-	mov	dh,07h
-
-; Blank the 78 columns inside the frame on row dh.
-clrrow:
-	mov	dl,01h
-	call	gotoxy
-	mov	cx,4eh
-
-clrloop:
-	mov	al,20h
-	call	conout
-	loop	clrloop
-	ret
-
-; Print the string at si centred on row dh, in high intensity (ESC r, ESC u).
-putrev:
-	mov	al,72h
-	call	escout
-	call	putcent
-	mov	al,75h
-	jmp	escout
-
-;-----------------------------------------------------------------------------
-; Warn that the diskette in drive will be destroyed and ask Y or N, beeping at
-; any other key.  Returns carry clear for Y, set for N.  si is preserved.
-;-----------------------------------------------------------------------------
-confirm:
-	push	si
-	mov	si,offset destroymsg
-	mov	dx,0708h
-	call	drvprompt
-	mov	si,offset askmsg
-	mov	dx,0915h
-	call	putat
-
-ynkey:
-	call	getraw
-	and	al,0dfh
-	cmp	al,59h
-	jz	yesans
-	cmp	al,4eh
-	jz	noans
-	mov	al,07h
-	call	conout
-	jmps	ynkey
-
-yesans:
-	clc
-	jmps	ynend
-
-noans:
-	stc
-
-ynend:
-	pushf
-	mov	dh,07h
-	call	clrrow
-	mov	dh,09h
-	call	clrrow
-	popf
-	pop	si
-	ret
-
-; Print the string at si centred on row dh.  scasb finds the NUL, which leaves
-; 80 - length in cx, and half of that is the column.
-putcent:
-	push	ds
-	pop	es
-	mov	di,si
-	mov	al,00h
-	mov	cx,51h
-	cld
-	repne	scasb
-	shr	cx,1
-	mov	dl,cl
-
-; Print the string at si at position dx (row in dh, column in dl).
-putat:
-	call	gotoxy
-
-; Print the NUL terminated string at si.  si is left just past the NUL.
-puts:
-	cld
-	lodsb
-
-putsloop:
-	call	conout
-	lodsb
-	test	al,al
-	jnz	putsloop
-	ret
-
-; VT52 ESC Y: row and column are biased by 20h.  Zero based; dx is destroyed.
-gotoxy:
-	mov	al,59h
-	call	escout
-	add	dx,2020h
-	mov	al,dh
-	call	conout
-	mov	al,dl
-	jmp	conout
-
-; Wait for one of the cx function keys listed at di, beeping at anything else.
-; The scan code less 3ah is the key number, which comes back in bx.  Also
-; disarms autofmt, and blanks the prompt row on the way out.
-getchoice:
-	mov	byte ptr autofmt,0ffh
-	push	cx
-	push	di
-	call	getraw
-	push	ds
-	pop	es
-	mov	al,ah
-	sub	al,3ah
-	repne	scasb
-	pop	di
-	pop	cx
-	jz	gotchoice
-	mov	al,07h
-	call	conout
-	jmps	getchoice
-
-gotchoice:
-	mov	bl,al
-	mov	bh,00h
-	mov	dh,06h
-	jmp	clrrow
-
-; Discard anything already typed ahead.
-flushkb:
-	mov	cl,0bh
-	int	0e0h
-	test	al,al
-	jz	flushend
-	mov	cl,01h
-	int	0e0h
-	jmps	flushkb
-
-flushend:
-	ret
-
-;-----------------------------------------------------------------------------
-; Ask BDOS for the largest free block, then take from it one that starts on a
-; 1000h byte boundary, so that no track straddles a 64K DMA boundary.  trkbuf
-; is the first track, copyseg the rest, ntrkbuf how many whole tracks the rest
-; holds.  The memory parameter block is trkbuf, buflen, bufflag.  Returns ZF
-; clear if the memory was allocated.
-;-----------------------------------------------------------------------------
-allocmem:
-	mov	word ptr buflen,0ffffh	; ask for everything
-	mov	cl,35h
-	mov	dx,offset trkbuf
-	int	0e0h
-	inc	al
-	jz	allocret
-	mov	ax,trkbuf
-	add	ax,0ffh
-	mov	al,00h
-	mov	trkbuf,ax
-	inc	ah
-	mov	copyseg,ax
-	mov	ah,buflenhi
-	sub	ah,01h		; one 1000h unit is lost to the alignment
-	jna	allocret
-	mov	word ptr buflen,ax
-	dec	ah		; and one for the track buffer itself
-	mov	ntrkbuf,ah
-	mov	cl,38h
-	mov	dx,offset trkbuf
-	int	0e0h
-	inc	al
-
-allocret:
-	ret
-
-; Give the block back to BDOS.
-freemem:
-	mov	byte ptr bufflag,00h
-	mov	cl,39h
-	mov	dx,offset trkbuf
-	int	0e0h
-	ret
-
-; Save the BIOS diskette parameter pointer (vector 78h, int 1Eh) in oldvec and
-; build newvec, a far pointer to the 8 sector table that follows newvecseg in
-; the data (0757h).
-initvec:
-	mov	word ptr newvec,0757h
-	mov	word ptr newvecseg,ds
-	push	ds
-	pop	es
-	sub	ax,ax
-	mov	ds,ax
-	mov	si,78h
-	mov	di,offset oldvec
-	cld
-	movsw
-	movsw
-	push	es
-	pop	ds
-	ret
-
-; Install a diskette parameter pointer: si is newvec or oldvec.  The controller
-; is reset afterwards so that it picks up the new table.
-setnewvec:
-	mov	si,offset newvec
-	jmps	setvec
-
-setoldvec:
-	mov	si,offset oldvec
-
-setvec:
-	sub	ax,ax
-	mov	es,ax
-	mov	di,78h
-	cld
-	movsw
-	movsw
-	mov	ah,00h
-	int	13h
-	ret
-
-; Read track 0 of drive into the track buffer.  The last byte of the boot
-; sector is 1 on a double sided diskette; anything else counts as single sided.
-; Sets sides and trkcount (80 or 40), returns the flag in al, leaves track at 0.
-getsides:
-	mov	byte ptr track,00h
-	mov	byte ptr biosfunc,02h
-	call	diskio
-	mov	al,es:.01ffh
-	mov	byte ptr trkcount,50h
-	cmp	al,01h
-	jz	gsdone
-	mov	byte ptr trkcount,28h
-	mov	al,00h
-
-gsdone:
-	mov	sides,al
-	ret
-
-;-----------------------------------------------------------------------------
-; Do BIOS function biosfunc on track `track` of drive: eight sectors, from or
-; to es:0.  diskio uses the track buffer, diskioes whatever es already points
-; at.  A waiting key is looked at first: Control-C leaves through restart, any
-; other key is thrown away.  Each track gets five attempts before the error is
-; reported.
-;-----------------------------------------------------------------------------
-diskio:
-	mov	es,word ptr trkbuf
-
-diskioes:
-	mov	byte ptr retries,05h
-	call	kbhit
-	jz	tryio
-	call	getraw
-	cmp	al,03h
-	jnz	tryio
-	jmp	restart
-
-; autofmt equals the function only after a write failed as unformatted: format
-; the track first (function 5, ids from mkidtab), then go on with the write.
-tryio:
-	call	iosetup
-	cmp	ah,autofmt
-	jnz	bios13
-	push	es
-	call	mkidtab
-	call	iosetup
-	mov	ah,05h
-	int	13h
-	call	iosetup
-	pop	es
-
-bios13:
-	int	13h
-	jc	ioerror
-	ret
-
-; Status in ah, function in al.  Status 02 on a write is the BIOS reporting an
-; unformatted track; arm autofmt so that the next attempt formats it.
-ioerror:
-	mov	al,biosfunc
-	cmp	ax,0203h
-	jnz	retryio
-	mov	autofmt,al
-
-; Try again, up to five times in all.  After that the status in ah is looked up
-; in errtab, ten entries of a status byte and a message pointer; fatalmsg
-; stands in for a status that is not listed.
-retryio:
-	dec	byte ptr retries
-	jnz	tryio
-	mov	si,offset errtab
-	mov	cx,0ah
-
-errloop:
-	cld
-	lodsb
-	cmp	al,ah
-	jz	errfound
-	inc	si
-	inc	si
-	loop	errloop
-	mov	si,offset fatalmsg
-	jmps	showerr
-
-errfound:
-	mov	si,[si]
-
-; Report an error: three beeps, the message at si on row 3 in reverse video
-; (ESC p, ESC q), then wait for a key.  Does not return; it ends in restart.
-; The copy errors come here as well.
-showerr:
+	cli
+	mov	ss,word ptr .015h
+	mov	sp,0100h
+	sti
 	mov	ax,ds
 	mov	es,ax
-	mov	cx,03h
+	mov	word ptr output_segment,ax
+	call	check_version
+	call	get_os_data
+	call	set_priority
+	call	keep_process
+	call	lock_console
+	jz	console_error
+	call	lock_disk
+	jz	open_file_error
+	call	check_console
+	call	draw_frame
+main_menu:
+	mov	si,offset main_menu_record
+	call	show_menu
+	shl	bx,1
+	call	word ptr menu_handlers[bx]
+	call	clear_window
+	jmps	main_menu
 
-beeploop:
-	mov	al,07h
-	call	conout
-	loop	beeploop
-	mov	al,70h
-	call	escout
-	mov	dh,03h
-	call	putcent
-	mov	al,71h
-	call	escout
-	mov	si,offset anykeymsg
-	call	askwait
-	jmp	restart
-
-; Registers for int 13h: dl drive, cl first sector 1, bx zero, ah biosfunc, al 8
-; sectors.  Falls into calctrk.
-iosetup:
-	mov	dl,drive
-	mov	cl,01h
-	sub	bx,bx
-	mov	ah,biosfunc
-	mov	al,08h
-
-; Cylinder in ch and head in dh for `track`: tracks 0..39 are head 0 with
-; cylinder = track, tracks 40..79 are head 1 with cylinder = 79 - track.
-calctrk:
-	mov	ch,track
-	mov	dh,00h
-	cmp	ch,28h
-	jc	calcret
-	neg	ch
-	add	ch,4fh
-	mov	dh,01h
-
-calcret:
-	ret
-
-; Clear rows 3..22 inside the frame through BIOS video: scroll function 7 with
-; a line count of zero.
-clrwin:
-	mov	cx,0301h
-	mov	dx,164eh
-	mov	bx,07h
-	mov	ax,0700h
-	int	10h
-	ret
-
-; Send ESC then al.  Ends in conout.
-escout:
-	push	ax
-	mov	al,1bh
-	call	conout
-	pop	ax
-	jmps	conout
-
-; BIOS keyboard status: ZF set if no key is waiting.
-kbhit:
-	mov	ah,01h
-	int	16h
-	ret
-
-; BIOS keyboard read: al is the character, ah the scan code.
-getraw:
-	mov	ah,00h
-	int	16h
-	ret
-
-; Send al to the console through BDOS function 6.  Every register the string
-; and table loops depend on is preserved, and the direction flag is cleared.
-conout:
-	push	bx
-	push	cx
-	push	dx
+;-----------------------------------------------------------------------------
+; Restore display, release disk/console locks, clear P_KEEP and terminate.
+;-----------------------------------------------------------------------------
+exit_program:
+	call	restore_screen
+branch_0087:
+	call	unlock_disk
+	call	unlock_console
+	call	release_process
+	xor	cx,cx
+	xor	dx,dx
+	jmp	bdos
+startup_error:
 	push	si
-	push	di
-	mov	dl,al
-	mov	cl,06h
-	int	0e0h
-	pop	di
+	call	restore_screen
 	pop	si
-	pop	dx
+	call	write_buffer
+	jmps	branch_0087
+console_error:
+	mov	si,offset msg_background
+	jmps	startup_error
+open_file_error:
+	mov	si,offset msg_open_files
+	jmps	startup_error
+
+;-----------------------------------------------------------------------------
+; Require the Concurrent/MPM OS family and CCP/M 3.1 version 1431h.
+;-----------------------------------------------------------------------------
+check_version:
+	mov	cx,0ch
+	int	byte ptr 0e0h
+	and	ah,0fh
+	cmp	ah,04h
+	jz	branch_00bd
+	cmp	ah,06h
+	jnz	branch_00c8
+branch_00bd:
+	mov	cx,0a3h
+	int	byte ptr 0e0h
+	cmp	ax,01431h
+	jnz	branch_00c8
+	ret
+branch_00c8:
+	mov	dx,offset msg_version
+	mov	cx,09h
+	int	byte ptr 0e0h
+	xor	cx,cx
+	xor	dx,dx
+	int	byte ptr 0e0h
+copy_menu:
+	mov	word ptr action_caption,offset record_04d6
+	mov	word ptr drive_prompt,offset record_043d
+	mov	si,offset drive_menu_record
+	call	drive_menu
+	jz	branch_0116
+	call	select_source
+	jz	branch_0117
+	mov	word ptr drive_prompt,offset record_0474
+	mov	si,offset drive_menu_record
+	call	drive_menu
+	jz	branch_0116
+	call	select_target
+	jz	branch_0117
+	call	compare_dpbs
+	jnz	branch_010c
+	mov	si,offset record_05cd
+	jmps	branch_011a
+branch_010c:
+	call	confirm_copy
+	jz	copy_menu
+	call	copy_batches
+	jmps	copy_menu
+branch_0116:
+	ret
+branch_0117:
+	mov	si,offset msg_bad_disk
+branch_011a:
+	mov	word ptr error_caption,si
+	mov	si,offset error_record
+	call	show_menu
+	jmps	copy_menu
+copy_batches:
+	call	size_buffers
+	call	reset_track
+	mov	word ptr io_function,0ah
+	call	prompt_source
+branch_0135:
+	call	save_batch
+	mov	cl,byte ptr source_drive
+	call	read_batch
+	jz	branch_017e
+	cmp	al,03h
+	jz	branch_017c
+	push	ax
+	call	prompt_target
+	call	restore_batch
+	mov	cl,byte ptr target_drive
+	call	write_batch
+	jz	branch_017d
+	cmp	al,03h
+	jnz	branch_015d
+	pop	ax
+	jmp	branch_017c
+branch_015d:
+	call	restore_batch
+	mov	cl,byte ptr target_drive
+	call	check_batch
+	jz	branch_017d
+	inc	word ptr io_track
+	pop	ax
+	cmp	al,02h
+	jz	branch_017c
+	cmp	al,03h
+	jz	branch_017c
+	call	prompt_source
+	jmp	branch_0135
+branch_017c:
+	ret
+branch_017d:
 	pop	cx
-	pop	bx
-	cld
+branch_017e:
+	mov	si,offset msg_bad_disk
+	mov	word ptr error_caption,si
+	mov	si,offset error_record
+	call	show_menu
+	ret
+reset_track:
+	mov	word ptr io_track,00h
+	ret
+format_single:
+	mov	word ptr action_caption,offset record_04fb
+	mov	byte ptr sides,00h
+	mov	word ptr format_tracks,028h
+	jmps	format_menu
+format_double:
+	mov	byte ptr sides,01h
+	mov	word ptr action_caption,offset record_0520
+	mov	word ptr format_tracks,050h
+format_menu:
+	mov	word ptr drive_prompt,offset record_0406
+	mov	si,offset drive_menu_record
+	call	drive_menu
+	jz	branch_01e4
+	xor	bh,bh
+	mov	bl,0375h[bx]
+	mov	byte ptr source_drive,bl
+	add	bl,041h
+	mov	byte ptr confirm_drive_letter,bl
+	mov	byte ptr format_drive_letter,bl
+	call	confirm_format
+	jz	branch_01e4
+	call	format_disk
+	jmps	format_menu
+branch_01e4:
 	ret
 
-l0734:
+;-----------------------------------------------------------------------------
+; XIOS function 15 formats 40/80 tracks; write the boot track, then verify.
+;-----------------------------------------------------------------------------
+format_disk:
+	mov	cx,word ptr format_tracks
+	mov	word ptr io_function,0fh
+	mov	word ptr track_caption,offset formatting_record
+	mov	word ptr io_track,00h
+	mov	al,byte ptr source_drive
+	mov	byte ptr io_drive,al
+branch_0201:
+	push	cx
+	call	check_abort
+	jnz	branch_020d
+	pop	cx
+	inc	al
+	jmp	branch_031e
+branch_020d:
+	call	show_track
+	call	xios_request
+	pop	cx
+	or	al,al
+	jnz	branch_0240
+	inc	word ptr io_track
+	loop	branch_0201
+	mov	word ptr io_track,00h
+	mov	word ptr io_function,0ah
+	call	write_boot_track
+	or	al,al
+	jnz	branch_0240
+	mov	ax,word ptr format_tracks
+	dec	ax
+	mov	word ptr last_track,ax
+	mov	byte ptr io_count,08h
+	jmp	verify_disk
+branch_0240:
+	jmp	branch_017e
 
-; ---- data ----
+;-----------------------------------------------------------------------------
+; E5 fill, shared boot code at 0, side flag at 1FFh and shared loader at 900h.
+;-----------------------------------------------------------------------------
+write_boot_track:
+	push	es
+	mov	ax,word ptr .0fh
+	mov	es,ax
+	mov	word ptr io_segment,ax
+	xor	di,di
+	mov	al,0e5h
+	mov	cx,01000h
+	rep	stosb
+	xor	di,di
+	mov	si,offset bootsect
+	mov	cx,093h
+	rep	movsb
+	mov	al,byte ptr sides
+	mov	es:byte ptr .01ffh,al
+	mov	di,0900h
+	mov	si,offset loader
+	mov	cx,034eh
+	rep	movsb
+	mov	cl,byte ptr source_drive
+	mov	byte ptr io_drive,cl
+	xor	ax,ax
+	mov	word ptr io_track,ax
+	mov	word ptr io_sector,ax
+	mov	word ptr io_offset,ax
+	mov	word ptr io_function,0bh
+	mov	byte ptr io_count,08h
+	mov	si,offset writing_record
+	mov	word ptr track_caption,si
+	call	show_track
+	call	xios_request
+	pop	es
+	ret
+verify_menu:
+	mov	word ptr action_caption,offset record_04b1
+	mov	word ptr drive_prompt,offset record_03cf
+	mov	si,offset drive_menu_record
+	call	drive_menu
+	jz	branch_02dd
+	call	select_source
+	jnz	branch_02ba
+	jmp	branch_031f
+branch_02ba:
+	call	size_buffers
+	call	save_batch
+	mov	word ptr io_track,00h
+	call	clear_window
+	mov	al,byte ptr confirm_drive_letter
+	mov	byte ptr data_087c,al
+	mov	si,offset record_0854
+	mov	bx,02h
+	call	draw_record
+	call	verify_disk
+	jmps	verify_menu
+branch_02dd:
+	ret
+
+;-----------------------------------------------------------------------------
+; Read each track through XIOS so the controller checks its CRCs.
+;-----------------------------------------------------------------------------
+verify_disk:
+	xor	ax,ax
+	mov	word ptr saved_track,ax
+	mov	word ptr io_track,ax
+	mov	ax,0ah
+	mov	word ptr io_function,ax
+	mov	cl,byte ptr source_drive
+	mov	byte ptr io_drive,cl
+	call	select_known_disk
+	jz	branch_031f
+	mov	si,offset checking_record
+	mov	word ptr track_caption,si
+branch_0300:
+	call	check_abort
+	jz	branch_031e
+	call	show_track
+	call	xios_request
+	or	al,al
+	jnz	branch_031f
+	mov	ax,word ptr io_track
+	inc	ax
+	cmp	ax,word ptr last_track
+	ja	branch_031e
+	mov	word ptr io_track,ax
+	jmps	branch_0300
+branch_031e:
+	ret
+branch_031f:
+	jmp	branch_017e
+check_batch:
+	mov	ax,0ah
+	mov	si,offset checking_record
+	jmps	transfer_batch
+read_batch:
+	mov	ax,0ah
+	mov	si,offset reading_record
+	jmps	transfer_batch
+write_batch:
+	mov	ax,0bh
+	mov	si,offset writing_record
+transfer_batch:
+	mov	word ptr buffer_index,00h
+	mov	word ptr io_function,ax
+	mov	word ptr track_caption,si
+	mov	byte ptr io_drive,cl
+	call	select_known_disk
+	jz	branch_0369
+branch_034e:
+	call	show_track
+	call	xios_request
+	or	al,al
+	jnz	branch_0369
+	call	check_abort
+	jnz	branch_0363
+	inc	al
+	mov	al,03h
+	jmps	branch_0368
+branch_0363:
+	call	advance_buffer
+	jz	branch_034e
+branch_0368:
+	ret
+branch_0369:
+	mov	si,offset error_record
+	xor	al,al
+	ret
+
+;-----------------------------------------------------------------------------
+; Stack IOPB: drive/count, track, sector, DMA segment, DMA offset. DS=SYSDAT, ES=UDA.
+;-----------------------------------------------------------------------------
+xios_request:
+	push	es
+	push	ds
+	mov	es,word ptr uda_segment
+	mov	cl,byte ptr io_drive
+	mov	ch,byte ptr io_count
+	push	cx
+	mov	cx,word ptr io_track
+	push	cx
+	mov	cx,word ptr io_sector
+	push	cx
+	mov	cx,word ptr io_segment
+	push	cx
+	mov	cx,word ptr io_offset
+	push	cx
+	mov	ax,word ptr io_function
+	mov	ds,word ptr system_segment
+	callf	dword ptr .28h
+	add	sp,0ah
+	pop	ds
+	pop	es
+	ret
+advance_buffer:
+	mov	ax,word ptr io_track
+	inc	ax
+	cmp	ax,word ptr last_track
+	ja	branch_03d9
+	mov	bx,ax
+	mov	word ptr io_offset,00h
+	mov	ax,word ptr io_segment
+	add	ax,word ptr track_paras
+	mov	cx,ax
+	mov	ax,word ptr buffer_index
+	inc	ax
+	cmp	ax,word ptr buffer_tracks
+	ja	branch_03d6
+	mov	word ptr buffer_index,ax
+	mov	word ptr io_segment,cx
+	mov	word ptr io_track,bx
+	xor	al,al
+	ret
+branch_03d6:
+	mov	al,01h
+	ret
+branch_03d9:
+	mov	al,02h
+	ret
+save_batch:
+	mov	ax,word ptr buffer_start
+	mov	word ptr io_segment,ax
+	mov	ax,word ptr io_track
+	mov	word ptr saved_track,ax
+	mov	word ptr buffer_index,00h
+	ret
+restore_batch:
+	mov	ax,word ptr saved_track
+	mov	word ptr io_track,ax
+	mov	ax,word ptr buffer_start
+	mov	word ptr io_segment,ax
+	mov	word ptr buffer_index,00h
+	ret
+
+;-----------------------------------------------------------------------------
+; Derive track and transfer-buffer sizes from the DPB and EXTRA group length.
+;-----------------------------------------------------------------------------
+size_buffers:
+	mov	bx,offset source_dpb
+	mov	ax,080h
+	mov	cl,0fh[bx]
+	shl	ax,cl
+	mov	cx,[bx]
+	mov	word ptr sectors_per_track,cx
+	mov	byte ptr io_count,cl
+	mul	cx
+	mov	word ptr track_bytes,ax
+	shr	ax,1
+	shr	ax,1
+	shr	ax,1
+	shr	ax,1
+	mov	word ptr track_paras,ax
+	mov	ax,word ptr .0fh
+	mov	word ptr buffer_start,ax
+	mov	ax,word ptr .0ch
+	xor	dx,dx
+	mov	dl,byte ptr .0eh
+	div	word ptr track_bytes
+	dec	ax
+	mov	word ptr buffer_tracks,ax
+	xor	dx,dx
+	xor	cx,cx
+	mov	ax,05h[bx]
+	inc	ax
+	mov	cl,03h[bx]
+	inc	cl
+	mul	cx
+	push	ax
+	mov	cl,0fh[bx]
+	mov	ax,01h
+	shl	al,cl
+	mov	cx,[bx]
+	xor	dx,dx
+	mul	cx
+	pop	cx
+	xchg	ax,cx
+	div	cx
+	mov	word ptr last_track,ax
+	mov	ax,0dh[bx]
+	mov	word ptr io_track,ax
+	mov	ax,00h
+	mov	word ptr io_sector,ax
+	ret
+select_source:
+	mov	si,offset source_prompt_letter
+	mov	di,offset source_dpb
+	mov	dx,offset source_drive
+	jmps	select_argument
+select_target:
+	mov	si,offset target_prompt_letter
+	mov	di,offset target_dpb
+	mov	dx,offset target_drive
+select_argument:
+	xor	bh,bh
+	mov	al,0375h[bx]
+	xchg	bx,dx
+	mov	[bx],al
+	mov	ah,al
+	add	ah,041h
+	mov	[si],ah
+	mov	byte ptr confirm_drive_letter,ah
+	mov	cl,al
+	call	copy_dpb
+	ret
+copy_dpb:
+	push	di
+	call	select_new_disk
+	pop	di
+	or	ax,ax
+	jz	branch_04b1
+	push	es
+	mov	ax,ds
+	mov	es,ax
+	call	read_dpb
+	pop	es
+branch_04b1:
+	ret
+select_new_disk:
+	mov	dl,00h
+select_disk:
+	mov	al,09h
+	call	xios_call
+	or	bx,bx
+	ret
+select_known_disk:
+	mov	dl,01h
+	jmps	select_disk
+read_dpb:
+	push	ds
+	mov	ds,word ptr system_segment
+	mov	si,08h[bx]
+	mov	cx,011h
+	rep	movsb
+	pop	ds
+	ret
+confirm_copy:
+	mov	si,offset copy_confirm_record
+confirmation:
+	push	si
+	call	clear_and_menu
+	cmp	al,04eh
+	jz	branch_04ee
+	cmp	al,06eh
+	jz	branch_04ee
+	cmp	al,059h
+	jz	branch_04ec
+	cmp	al,079h
+	jz	branch_04ec
+	call	beep
+	pop	si
+	jmps	confirmation
+branch_04ec:
+	inc	al
+branch_04ee:
+	pop	si
+	pushf
+	mov	ax,0808h
+	mov	cx,03h
+	call	clear_rows
+	popf
+	ret
+confirm_format:
+	mov	si,offset format_confirm_record
+	jmps	confirmation
+show_track:
+	mov	ax,02020h
+	mov	bx,offset track_digits
+	mov	[bx],ax
+	inc	bx
+	inc	bx
+	mov	[bx],ax
+	mov	ax,word ptr io_track
+	mov	cx,04h
+	mov	di,offset track_digits
+	call	decimal
+	mov	bx,02h
+	mov	si,offset track_record
+	call	draw_record
+	ret
+compare_dpbs:
+	push	es
+	mov	ax,ds
+	mov	es,ax
+	mov	si,offset source_dpb
+	mov	di,offset target_dpb
+	mov	cx,011h
+	repe	cmpsb
+	pop	es
+	jnz	branch_0538
+	inc	al
+	ret
+branch_0538:
+	xor	al,al
+	ret
+prompt_source:
+	mov	si,offset insert_source
+	jmps	prompt_swap
+prompt_target:
+	mov	si,offset insert_target
+prompt_swap:
+	mov	al,byte ptr source_drive
+	cmp	al,byte ptr target_drive
+	jnz	branch_055f
+	mov	word ptr swap_prompt,si
+	mov	si,offset swap_record
+	call	show_menu
+	mov	ax,0807h
+	mov	cx,01h
+	call	clear_rows
+branch_055f:
+	ret
+drive_menu:
+	push	si
+	call	clear_and_menu
+branch_0564:
+	pop	si
+	mov	si,06h[si]
+	add	si,02h
+	mov	si,[si]
+	inc	si
+	cmp	byte ptr [bx+si],0c4h
+	ret
+redraw_drive_menu:
+	push	si
+	call	show_menu
+	jmps	branch_0564
+
+;-----------------------------------------------------------------------------
+; XIOS function 14 supplies the installed drive list.
+;-----------------------------------------------------------------------------
+enumerate_drives:
+	mov	al,0eh
+	mov	cx,00h
+	call	xios_call
+	push	ds
+	mov	ds,word ptr system_segment
+	mov	ax,[bx]
+	pop	ds
+	mov	bx,ax
+	inc	bx
+	mov	si,offset record_0549
+	mov	[si],bx
+	inc	si
+	mov	cx,ax
+	push	es
+	mov	dx,ds
+	mov	es,dx
+	mov	di,offset record_054f
+	xchg	si,di
+	rep	movsb
+	mov	byte ptr [di],0c4h
+	pop	es
+	shl	ax,1
+	mov	si,offset record_0554
+	mov	[si],bx
+	inc	si
+	inc	si
+	add	si,ax
+	mov	ax,05ach
+	mov	[si],ax
+	ret
+
+;-----------------------------------------------------------------------------
+; Far call through SYSDAT:28h with the process UDA in ES.
+;-----------------------------------------------------------------------------
+xios_call:
+	push	ds
+	push	es
+	mov	es,word ptr uda_segment
+	mov	ds,word ptr system_segment
+	callf	dword ptr .28h
+	pop	es
+	pop	ds
+	ret
+draw_frame:
+	mov	al,0c4h
+	mov	cx,04eh
+	mov	di,offset record_0cdf
+	rep	stosb
+	mov	si,offset record_0cca
+	mov	bx,00h
+	call	draw_record
+	mov	ax,0102h
+	call	draw_side
+	mov	ax,05002h
+	call	draw_side
+	mov	ax,0118h
+	call	position_cursor
+	mov	si,offset record_0cd2
+	mov	bx,00h
+	call	draw_record
+	mov	si,offset title_record
+	call	draw_caption
+	mov	al,0cdh
+	mov	di,offset record_0d3f
+	mov	cx,04eh
+	rep	stosb
+	mov	si,offset record_0d36
+	call	draw_caption
+	ret
+draw_side:
+	mov	word ptr cursor_position,ax
+	call	position_cursor
+	mov	cx,016h
+branch_0613:
+	push	cx
+	mov	dl,0b3h
+	mov	cl,02h
+	call	bdos
+	call	next_row
+	pop	cx
+	loop	branch_0613
+	ret
+clear_and_menu:
+	push	si
+	call	clear_window
+	pop	si
+show_menu:
+	mov	bx,06h
+	call	draw_records
+	xor	bx,bx
+	mov	bl,byte ptr key_index
+	mov	al,byte ptr key_value
+	ret
+draw_records:
+	mov	word ptr record_limit,bx
+	xor	bx,bx
+branch_063d:
+	lodsw
+	or	ax,ax
+	jz	branch_064b
+	push	si
+	push	bx
+	mov	si,ax
+	call	draw_record
+	pop	bx
+	pop	si
+branch_064b:
+	cmp	bx,word ptr record_limit
+	jz	branch_0655
+	inc	bx
+	inc	bx
+	jmps	branch_063d
+branch_0655:
+	ret
+draw_record:
+	lodsw
+	mov	cx,ax
+branch_0659:
+	push	cx
+	push	bx
+	lodsw
+	push	si
+	mov	si,ax
+	call	word ptr draw_handlers[bx]
+	pop	si
+	pop	bx
+	pop	cx
+	loop	branch_0659
+	ret
+draw_table:
+	lodsw
+	mov	word ptr cursor_position,ax
+	push	si
+	call	position_cursor
+	pop	si
+	call	draw_key_box
+	lodsw
+	mov	cx,ax
+	lodsw
+	mov	word ptr cursor_position,ax
+	push	si
+	push	cx
+	call	position_cursor
+	pop	cx
+	pop	si
+branch_0683:
+	push	cx
+	lodsw
+	mov	si,ax
+	push	si
+	call	write_buffer
+	call	next_row
+	pop	si
+	pop	cx
+	loop	branch_0683
+	ret
+draw_key_box:
+	mov	di,offset record_0d9a
+	mov	cx,03h
+	push	es
+	mov	ax,ds
+	mov	es,ax
+	rep	movsb
+	pop	es
+	push	si
+	mov	si,offset record_0d8e
+	call	write_buffer
+	call	next_row
+	mov	si,offset record_0d96
+	call	write_buffer
+	call	next_row
+	mov	si,offset record_0d9e
+	call	write_buffer
+	pop	si
+	ret
+draw_caption:
+	lodsw
+	push	si
+	call	position_cursor
+	pop	si
+	lodsw
+	push	si
+	mov	byte ptr video_mode,ah
+	call	set_video
+	pop	si
+	mov	si,[si]
+	call	write_buffer
+	mov	al,byte ptr video_mode
+	call	set_video
+	ret
+read_menu_key:
+	xor	ax,ax
+	lodsb
+	mov	word ptr key_count,ax
+	xchg	si,di
+branch_06e0:
+	push	di
+	push	di
+	call	get_key
+	mov	byte ptr key_value,al
+	mov	cx,word ptr key_count
+	pop	di
+	jcxz	branch_06f3
+	repne	scasb
+	jnz	branch_0704
+branch_06f3:
+	pop	di
+	mov	ax,word ptr key_count
+	sub	ax,cx
+	dec	al
+	mov	byte ptr key_index,al
+	mov	bl,al
+	mov	al,byte ptr key_value
+	ret
+branch_0704:
+	call	beep
+	pop	di
+	jmps	branch_06e0
+clear_window:
+	mov	ax,0804h
+	mov	cx,014h
+clear_rows:
+	push	cx
+	mov	word ptr cursor_position,ax
+	call	position_cursor
+	pop	cx
+branch_0718:
+	push	cx
+	mov	si,offset record_0da9
+	call	write_buffer
+	call	next_row
+	pop	cx
+	loop	branch_0718
+	ret
+next_row:
+	inc	byte ptr cursor_position
+	mov	ax,word ptr cursor_position
+	call	position_cursor
+	ret
+
+;-----------------------------------------------------------------------------
+; INT E0h entry; callers supply the function and parameters.
+;-----------------------------------------------------------------------------
+bdos:
+	int	byte ptr 0e0h
+	ret
+
+;-----------------------------------------------------------------------------
+; BDOS 111 outputs the length-prefixed text via a segmented buffer descriptor.
+;-----------------------------------------------------------------------------
+write_buffer:
+	lodsw
+	mov	word ptr output_length,ax
+	mov	word ptr output_offset,si
+	mov	cl,06fh
+	mov	dx,offset output_offset
+	jmp	bdos
+write_string:
+	mov	cl,09h
+	mov	dx,si
+	jmp	bdos
+read_buffer:
+	lodsw
+	mov	word ptr input_length,ax
+	mov	word ptr input_offset,si
+	mov	cl,070h
+	mov	dx,offset input_offset
+	jmp	bdos
+beep:
+	mov	si,offset record_0da6
+	jmp	write_buffer
+get_key:
+	mov	dl,0fdh
+	mov	cl,06h
+	jmp	bdos
+decimal:
+	dec	di
+	add	di,cx
+	mov	bx,0ah
+branch_076e:
+	sub	dx,dx
+	div	bx
+	add	dl,030h
+	mov	[di],dl
+	dec	di
+	test	ax,ax
+	jz	branch_077e
+	loop	branch_076e
+branch_077e:
+	ret
+check_abort:
+	mov	cl,0bh
+	call	bdos
+	or	al,al
+	jz	branch_078e
+	call	get_key
+	cmp	al,03h
+	ret
+branch_078e:
+	inc	al
+	ret
+set_priority:
+	mov	dl,096h
+	mov	cl,091h
+	jmp	bdos
+
+;-----------------------------------------------------------------------------
+; Set P_KEEP so termination cannot bypass cleanup while global locks are held.
+;-----------------------------------------------------------------------------
+keep_process:
+	mov	bx,word ptr process_offset
+	push	ds
+	mov	ds,word ptr system_segment
+	or	word ptr 06h[bx],02h
+	pop	ds
+	ret
+release_process:
+	mov	bx,word ptr process_offset
+	push	ds
+	mov	ds,word ptr system_segment
+	and	word ptr 06h[bx],0fffdh
+	pop	ds
+	ret
+
+;-----------------------------------------------------------------------------
+; Require a foreground, unbuffered console; atomically set NOSWITCH.
+;-----------------------------------------------------------------------------
+lock_console:
+	mov	bx,word ptr console_offset
+	push	ds
+	mov	ds,word ptr system_segment
+	cli
+	cmp	word ptr 0eh[bx],00h
+	jz	branch_07cc
+	xor	ax,ax
+	jmps	branch_07d1
+branch_07cc:
+	or	word ptr 0eh[bx],08h
+branch_07d1:
+	sti
+	pop	ds
+	ret
+unlock_console:
+	mov	bx,word ptr console_offset
+	push	ds
+	mov	ds,word ptr system_segment
+	and	word ptr 0eh[bx],0fff7h
+	pop	ds
+	ret
+
+;-----------------------------------------------------------------------------
+; Reject open files; open MXdisk and read its token to exclude filesystem I/O.
+;-----------------------------------------------------------------------------
+lock_disk:
+	push	ds
+	mov	ds,word ptr system_segment
+	mov	ax,word ptr .088h
+	or	ax,ax
+	pop	ds
+	jnz	branch_0806
+	mov	cl,087h
+	mov	dx,offset disk_queue
+	call	bdos
+	mov	cl,089h
+	mov	dx,offset disk_queue
+	call	bdos
+	xor	al,al
+	inc	al
+	ret
+branch_0806:
+	xor	ax,ax
+	ret
+
+;-----------------------------------------------------------------------------
+; Return the MXdisk token before releasing console and process restrictions.
+;-----------------------------------------------------------------------------
+unlock_disk:
+	mov	cl,08bh
+	mov	dx,offset disk_queue
+	call	bdos
+	ret
+
+;-----------------------------------------------------------------------------
+; Fetch SYSDAT, process descriptor, UDA and this console control block.
+;-----------------------------------------------------------------------------
+get_os_data:
+	push	es
+	mov	cl,09ah
+	call	bdos
+	mov	word ptr system_segment,es
+	mov	cl,09ch
+	call	bdos
+	mov	word ptr process_offset,bx
+	mov	ax,es:010h[bx]
+	mov	word ptr uda_segment,ax
+	mov	cl,099h
+	call	bdos
+	xor	ah,ah
+	mov	byte ptr console_number,al
+	mov	bx,02ch
+	mul	bx
+	add	ax,es:word ptr .054h
+	mov	word ptr console_offset,ax
+	pop	es
+	ret
+position_cursor:
+	mov	si,offset record_0e85
+	add	ax,01f1fh
+	mov	[si],ax
+	mov	si,offset record_0e81
+	jmp	write_buffer
+hide_cursor:
+	mov	si,offset record_0eaa
+	jmp	write_buffer
+show_cursor:
+	mov	si,offset record_0eae
+	jmp	write_buffer
+set_video:
+	mov	si,offset record_0e9f
+	xor	ah,ah
+	add	si,ax
+	mov	al,[si]
+	mov	byte ptr data_0ea9,al
+	mov	si,offset record_0ea6
+	jmp	write_buffer
+restore_screen:
+	mov	si,offset record_0e91
+	jmp	write_buffer
+check_console:
+	mov	cl,099h
+	call	bdos
+	cmp	ax,04h
+	jc	branch_088e
+	mov	si,offset msg_terminal
+	call	write_buffer
+	xor	cx,cx
+	xor	dx,dx
+	jmp	branch_0087
+branch_088e:
+	mov	cl,06dh
+	mov	dx,08eh
+	call	bdos
+	mov	si,offset record_0e87
+	call	write_buffer
+	call	enumerate_drives
+	ret
+
+; ---- DATA: runtime offsets include the loader base page ----
 	dseg
-ndrives	dw	00h	; number of diskette drives
-biosfunc	db	00h	; int 13h function: 2 read, 3 write, 4 verify, 5 format
-drive	db	00h	; selected drive, 0 for A:
-track	db	00h	; current track, 0..79
-trkcount	db	00h	; tracks still to do in this pass
-trktotal	db	00h	; tracks in the whole copy
-retries	db	00h	; attempts left for this track
-autofmt	db	00h	; the write function once a write failed as unformatted, else 0ffh
-sides	db	00h	; 0 single sided, 1 double sided
-srcsides	db	00h	; sides flag found on the source
-dstdrive	db	00h	; destination of a copy
-srcdrive	db	00h	; source of a copy
-menusel	dw	00h	; byte offset into fntable of the item in progress
-promptptr	dw	00h	; prompt line shown by the drive menu
-trkbuf	dw	00h	; the BDOS memory parameter block starts here: base, which is
-buflen	db	00h	; also the segment of the track buffer, then the length,
-buflenhi	db	00h	; whose high byte counts 1000h byte units,
-bufflag	db	00h	; and a last byte that is cleared before the block is freed
-copyseg	dw	00h	; segment of the copy area, one track past trkbuf
-ntrkbuf	db	00h	; whole tracks that fit in it
-curseg	dw	00h	; segment of the track being moved
-oldvec	db	00h,00h,00h,00h	; BIOS diskette parameter pointer found at start
-newvec	dw	00h	; the replacement pointer: offset
-newvecseg	dw	00h	; and segment
-
-; The 8 sector diskette parameter table installed while formatting, at 0757h.
-; IBM layout: two specify bytes, motor off delay, 512 byte sectors, 8 sectors
-; a track, gap, data length, format gap, fill byte 0e5h, head settle, motor start.
-	db	0cfh,02h,25h,02h,08h,2ah,0ffh,50h,0e5h,19h,04h
-
-; Screen setup, sent at the start: clear (ESC E), text wrap off (w), cursor off
-; (n), and reverse video (q), blinking (t) and high intensity (u) all off.  The
-; restore at the end: clear, text wrap on (v), cursor on (m).
-scrninit	db	1bh,45h,1bh,77h,1bh,6eh,1bh,71h,1bh,74h,1bh,75h
-	db	00h
-scrnrest	db	1bh,45h,1bh,76h,1bh,6dh,00h
-
-; Frame corner glyphs: row, column, character.  Row and column are biased by
-; 20h on the way out, so they are stored unbiased here.
-corners	db	00h,00h,0dah,00h,4fh,0bfh,02h,00h,0c6h,02h,4fh
-	db	0b5h,17h,00h,0c0h,17h,4fh,0d9h
-titlestr	db	'CP/M-86 Disk Maintenance Program for the'
-	db	' IBM PC   version 1.2',00h
-
-; Decoration of a menu entry.  itemfrm draws a 6 by 3 box and leaves the cursor
-; inside it with an F in high intensity (ESC r); the key number follows; itemend
-; ends the high intensity (ESC u) and draws a rule and an arrow towards the text.
-itemfrm	db	0dah,0c4h,0c4h,0c4h,0c4h,0bfh,0ah,08h,0b3h,08h
-	db	08h,08h,08h,08h,08h,0b3h,0ah,08h,0c0h,0c4h,0c4h
-	db	0c4h,0c4h,0d9h,1bh,41h,08h,08h,08h,08h,1bh
-	db	72h,46h,00h
-itemend	db	1bh,75h,1bh,43h,20h,20h,0cdh,0cdh,10h,20h,20h,00h
-mainhdr	db	'Main Menu',00h
-
-; Main menu entries: row, column, key label, text.
-menuitems	db	08h,14h,31h,20h
-vfytxt	db	'Verify a Diskette',00h
-	db	0bh,14h,33h,20h
-copytxt	db	'Copy from one Diskette to another',00h
-	db	0eh,14h,35h,20h
-fmt1txt	db	'Format a Single Sided Diskette',00h
-	db	11h,14h,37h,20h
-fmt2txt	db	'Format a Double Sided Diskette',00h
-	db	14h,14h
-	db	'9 Exit this Program',00h
-selfunc	db	'SELECT FUNCTION',00h
-
-; Function keys accepted at the main menu: F1, F3, F5, F7, F9.
-mainkeys	db	01h,03h,05h,07h,09h
-
-; One handler per main menu item, in key order.
-fntable	dw	doverify,docopy,fmt1,fmt2,doexit
-
-; The prompts for the drive menu, at 08b5h, 08cfh, 08e6h and 0902h, shown in
-; high intensity.  The code loads them into promptptr by address.
-	db	'SELECT DISKETTE TO VERIFY',00h
-	db	'SELECT SOURCE DISKETTE',00h
-	db	'SELECT DESTINATION DISKETTE',00h
-	db	'SELECT DISKETTE TO FORMAT',00h
-insrcmsg	db	'INSERT SOURCE DISK, AND TYPE ANY KEY',00h
-indstmsg	db	'INSERT DESTINATION DISK, AND TYPE ANY',' KEY'
-	db	00h
-anykeymsg	db	'TYPE ANY KEY TO CONTINUE',00h
-vfyingmsg	db	' Verifying',00h
-copyingmsg	db	'Copying from',00h
-tomsg	db	74h,6fh,00h
-fmtingmsg	db	'Formatting',00h
-readmsg	db	'   Reading',00h
-writemsg	db	'   Writing',00h
-checkmsg	db	'  Checking',00h
-destroymsg	db	'This operation will Destroy any data on',00h
-; The question ends in a blinking '?': ESC s is blinking on, ESC t off.
-askmsg	db	'Is this what you want to do (Y or N) ',1bh
-	db	73h,3fh,1bh,74h,00h
-drvmenu	db	14h,14h
-	db	'10 Exit to Main Menu',00h
-	db	08h,14h
-	db	'2  A:',00h
-	db	0bh,14h
-	db	'4  B:',00h
-	db	0eh,14h
-	db	'6  C:',00h
-	db	11h,14h
-	db	'8  D:',00h
-
-; Function keys accepted at the drive menu: F10, then F2, F4, F6, F8.
-drvkeys	db	0ah,02h,04h,06h,08h
-indrvmsg	db	' the Diskette in Drive ',00h
-trkmsg	db	' track',00h
-
-; The boot sector written to track 0 by the formatter, 93h bytes.  It is meant
-; to run at 0000:7c00.  The sides flag goes into byte 1ffh of the track.
-; embedded real-mode code (int 10h x1, int 12h x1, int 13h x2), kept as data
+	org	100h
+revision	db	' DATE OF LAS'
+	db	'T CHANGE 26 '
+	db	'JAN 84   '
+msg_version	db	0dh,0ah,054h,068h,069h,073h,020h,044h,053h,04bh,04dh,041h
+	db	'INT requires'
+	db	' Concurrent '
+	db	043h,050h,02fh,04dh,020h,033h,02eh,031h,02eh,0dh,0ah,024h
+menu_handlers	dw	verify_menu,copy_menu,format_single,format_double,exit_program
+title_record	db	02h,0eh,02h,02h,061h,01h,034h,00h,043h,06fh,06eh,063h
+	db	'urrent CP/M '
+	db	'Disk Mainten'
+	db	'ance Program'
+	db	' version 1.5'
+msg_background	db	03eh,00h,0dh,0ah,044h,053h,04bh,04dh,041h,049h,04eh,054h
+	db	' cannot run '
+	db	'in the backg'
+	db	'round or in '
+	db	'buffered mod'
+	db	065h,02eh,0dh,0ah
+msg_open_files	db	048h,00h,0dh,0ah,044h,053h,04bh,04dh,041h,049h,04eh,054h
+	db	' cannot run '
+	db	'while there '
+	db	'are open fil'
+	db	'es on any of'
+	db	' the drives.'
+	db	0dh,0ah
+main_menu_record	db	00h,00h,029h,02h,065h,02h,04ah,03h,02h,00h,02fh,02h
+	db	040h,02h,05h,023h,02h,02h,035h,02h,09h,00h,04dh,061h
+	db	069h,06eh,020h,04dh,065h,06eh,075h,07h,019h,05h,06h,046h
+	db	02h,01dh,00h,053h,020h,045h,020h,04ch,020h,045h,020h,043h
+	db	' T   F U N C'
+	db	020h,054h,020h,049h,020h,04fh,020h,04eh,05h,00h,071h,02h
+	db	07ch,02h,087h,02h,092h,02h,09dh,02h,09h,01ah,046h,031h
+	db	020h,01h,00h,0ah,020h,0a8h,02h,0ch,01ah,046h,033h,020h
+	db	01h,00h,0dh,020h,0c0h,02h,0fh,01ah,046h,035h,020h,01h
+	db	00h,010h,020h,0e8h,02h,012h,01ah,046h,037h,020h,01h,00h
+	db	013h,020h,0dh,03h,015h,01ah,046h,039h,020h,01h,00h,016h
+	db	020h,032h,03h,016h,00h,020h,02dh,02dh,010h,020h,056h,065h
+	db	'rify a diske'
+	db	074h,074h,065h,026h,00h,020h,02dh,02dh,010h,020h,043h,06fh
+	db	'py from one '
+	db	'Diskette to '
+	db	061h,06eh,06fh,074h,068h,065h,072h,023h,00h,020h,02dh,02dh
+	db	010h,020h,046h,06fh,072h,06dh,061h,074h,020h,061h,020h,053h
+	db	'ingle Sided '
+	db	044h,069h,073h,06bh,065h,074h,074h,065h,023h,00h,020h,02dh
+	db	02dh,010h,020h,046h,06fh,072h,06dh,061h,074h,020h,061h,020h
+	db	'Double Sided'
+	db	020h,044h,069h,073h,06bh,065h,074h,074h,065h,016h,00h,020h
+	db	02dh,02dh,010h,020h,045h,078h,069h,074h,020h,074h,068h,069h
+	db	073h,020h,070h,072h,06fh,067h,072h,061h,06dh,01h,00h,04eh
+	db	03h,05h,0bbh,0bdh,0bfh,0c1h,0c3h,020h,044h,041h,054h,045h
+	db	' OF LAST CHA'
+	db	'NGE 26 JAN 8'
+	db	'4   '
+drive_numbers	db	00h,01h,02h,03h
+source_dpb	db	00h,00h,00h,00h,00h,00h,00h,00h,00h,00h,00h,00h
+	db	00h,00h,00h,00h,00h
+target_dpb	db	00h,00h,00h,00h,00h,00h,00h,00h,00h,00h,00h,00h
+	db	00h,00h,00h,00h,00h
+track_bytes	db	00h,00h
+track_paras	db	00h,00h
+buffer_tracks	db	00h,00h
+last_track	db	00h,00h
+sectors_per_track	db	00h,00h
+buffer_index	db	00h,00h
+buffer_start	db	00h,00h
+saved_track	db	00h,00h
+source_drive	db	00h
+target_drive	db	00h
+io_function	db	00h,00h
+io_drive	db	00h
+format_tracks	db	00h,00h
+io_count	db	00h
+io_track	db	00h,00h
+io_sector	db	00h,00h
+io_offset	db	00h,00h
+io_segment	db	00h,00h
+drive_menu_record	db	00h,00h,0c3h,03h,054h,05h,045h,05h,02h,00h,0abh,04h
+	db	0c9h,03h,07h,0dh,05h,06h
+drive_prompt	db	00h,00h
+record_03cf	db	035h,00h,020h,020h,053h,020h,045h,020h,04ch,020h,045h,020h
+	db	'C T   D I S '
+	db	'K E T T E   '
+	db	'T O   V E R '
+	db	'I F Y  '
+record_0406	db	035h,00h,020h,020h,053h,020h,045h,020h,04ch,020h,045h,020h
+	db	'C T   D I S '
+	db	'K E T T E   '
+	db	'T O   F O R '
+	db	'M A T  '
+record_043d	db	035h,00h,020h,020h,020h,020h,020h,053h,020h,045h,020h,04ch
+	db	' E C T   S O'
+	db	' U R C E   D'
+	db	' I S K E T T'
+	db	' E     '
+record_0474	db	035h,00h,053h,020h,045h,020h,04ch,020h,045h,020h,043h,020h
+	db	'T   D E S T '
+	db	'I N A T I O '
+	db	'N   D I S K '
+	db	045h,020h,054h,020h,054h,020h,045h,05h,016h,02h,02h
+action_caption	db	00h,00h
+record_04b1	db	023h,00h,020h,020h,020h,020h,020h,020h,020h,020h,020h,056h
+	db	'erify a Disk'
+	db	'ette        '
+	db	' '
+record_04d6	db	023h,00h,043h,06fh,070h,079h,020h,066h,072h,06fh,06dh,020h
+	db	'one Diskette'
+	db	' to another '
+	db	' '
+record_04fb	db	023h,00h,020h,020h,046h,06fh,072h,06dh,061h,074h,020h,061h
+	db	' Single Side'
+	db	'd Diskette  '
+	db	' '
+record_0520	db	023h,00h,020h,020h,046h,06fh,072h,06dh,061h,074h,020h,061h
+	db	' Double Side'
+	db	'd Diskette  '
+	db	020h,01h,00h,049h,05h
+record_0549	db	00h,00h,00h,00h,00h,00h
+record_054f	db	0bch,0beh,0c0h,0c2h,0c4h
+record_0554	db	05h,00h,060h,05h,073h,05h,086h,05h,099h,05h,0ach,05h
+	db	09h,01ah,046h,032h,020h,01h,00h,0ah,020h,06bh,05h,06h
+	db	00h,02dh,02dh,010h,020h,041h,03ah,0ch,01ah,046h,034h,020h
+	db	01h,00h,0dh,020h,07eh,05h,06h,00h,02dh,02dh,010h,020h
+	db	042h,03ah,0fh,01ah,046h,036h,020h,01h,00h,010h,020h,091h
+	db	05h,06h,00h,02dh,02dh,010h,020h,043h,03ah,012h,01ah,046h
+	db	038h,020h,01h,00h,013h,020h,0a4h,05h,06h,00h,02dh,02dh
+	db	010h,020h,044h,03ah,015h,01ah,046h,031h,030h,01h,00h,016h
+	db	020h,0b7h,05h,014h,00h,02dh,02dh,010h,045h,078h,069h,074h
+	db	' to main men'
+	db	'u'
+record_05cd	db	04h,0bh,03h,04h,0d3h,05h,039h,00h,053h,06fh,075h,072h
+	db	'ce and desti'
+	db	'nation diske'
+	db	'ttes are not'
+	db	' of the same'
+	db	' type'
+error_record	db	00h,00h,016h,06h,00h,00h,0ebh,07h,02h,00h
+error_caption	db	01ch,06h,036h,06h
+msg_bad_disk	db	04h,01fh,03h,04h,022h,06h,012h,00h,020h,042h,020h,041h
+	db	' D    D I S '
+	db	04bh,020h,08h,018h,03h,04h,03ch,06h,01fh,00h,050h,072h
+	db	'ess any key '
+	db	'to return to'
+	db	' Menu'
+copy_confirm_record	db	00h,00h,06dh,06h,00h,00h,0ebh,07h
+format_confirm_record	db	00h,00h,077h,06h,00h,00h,0ebh,07h,04h,00h,07fh,06h
+	db	0ach,06h,0d9h,06h,021h,07h,03h,00h,052h,07h,0d9h,06h
+	db	021h,07h,05h,015h,02h,02h,085h,06h,025h,00h,043h,06fh
+	db	'pying from t'
+	db	'he Diskette '
+	db	'in Drive '
+source_prompt_letter	db	020h,03ah,06h,015h,02h,02h,0b2h,06h,025h,00h,020h,020h
+	db	'        to t'
+	db	'he Diskette '
+	db	'in Drive '
+target_prompt_letter	db	020h,03ah,08h,08h,02h,02h,0dfh,06h,040h,00h,054h,068h
+	db	'is operation'
+	db	' will destro'
+	db	'y any data o'
+	db	'n the Disket'
+	db	'te in Drive '
+confirm_drive_letter	db	020h,03ah,0ah,013h,02h,02h,027h,07h,029h,00h,049h,073h
+	db	' this what y'
+	db	'ou want to d'
+	db	06fh,020h,028h,059h,020h,06fh,072h,020h,04eh,029h,01bh,073h
+	db	03fh,01bh,074h,06h,016h,02h,02h,058h,07h,023h,00h,046h
+	db	'ormatting th'
+	db	'e Diskette i'
+	db	'n Drive '
+format_drive_letter	db	' :'
+swap_record	db	00h,00h,085h,07h,00h,00h,0ebh,07h,01h,00h,089h,07h
+	db	07h,012h,05h,06h
+swap_prompt	db	00h,00h
+insert_target	db	02ch,00h,049h,04eh,053h,045h,052h,054h,020h,044h,045h,053h
+	db	'TINATION DIS'
+	db	'KETTE AND TY'
+	db	'PE ANY KEY'
+insert_source	db	02ch,00h,020h,020h,049h,04eh,053h,045h,052h,054h,020h,053h
+	db	'OURCE DISKET'
+	db	'TE AND TYPE '
+	db	041h,04eh,059h,020h,04bh,045h,059h,020h,020h,020h,01h,00h
+	db	0efh,07h,00h
+track_record	db	02h,00h,0f6h,07h,0fch,07h,0ah,01dh,02h,02h
+track_caption	db	00h,00h,0ah,02eh,02h,02h,02h,08h,04h,00h
+track_digits	db	'    '
+reading_record	db	011h,00h,020h,052h,065h,061h,064h,069h,06eh,067h,020h,074h
+	db	'rack   '
+writing_record	db	011h,00h,020h,057h,072h,069h,074h,069h,06eh,067h,020h,074h
+	db	'rack   '
+checking_record	db	011h,00h,020h,043h,068h,065h,063h,06bh,069h,06eh,067h,020h
+	db	' track '
+formatting_record	db	011h,00h,046h,06fh,072h,06dh,061h,074h,074h,069h,06eh,067h
+	db	' track '
+record_0854	db	01h,00h,058h,08h,05h,019h,02h,02h,05eh,08h,01eh,00h
+	db	'Verifying Di'
+	db	'skette in Dr'
+	db	'ive '
+data_087c	db	020h,03ah,01h,00h,082h,08h,05h,018h,02h,02h,088h,08h
+	db	01fh,00h,046h,06fh,072h,06dh,061h,074h,074h,069h,06eh,067h
+	db	' Diskette in'
+	db	' Drive  :'
+sides	db	00h
+bootsect:
 	include	bootsect.inc
-
-; The loader written at offset 900h of track 0, 34eh bytes.  It looks for
-; CPM.SYS or CCPM.SYS on the diskette and loads it.
-; embedded real-mode code (int 10h x1, int 13h x2, int 16h x2), kept as data
+loader:
 	include	loader.inc
-nomemmsg	db	0dh,0ah,'Not enough available memory.',0dh,0ah
+revision_2	db	00h,020h,044h,041h,054h,045h,020h,04fh,046h,020h,04ch,041h
+	db	'ST CHANGE 26'
+	db	' JAN 84   '
+cursor_position	db	00h,00h
+video_mode	db	00h
+record_limit	db	00h,00h
+key_index	db	00h
+key_value	db	00h
+key_count	db	00h,00h
+draw_handlers	dw	write_buffer,draw_caption,draw_table,read_menu_key
+output_offset	db	00h,00h
+output_segment	db	00h,00h
+output_length	db	00h,00h
+input_offset	db	00h,00h,00h,00h
+input_length	db	00h,00h
+record_0cca	db	03h,00h,0dah,0ch,0ddh,0ch,02dh,0dh
+record_0cd2	db	03h,00h,030h,0dh,0ddh,0ch,033h,0dh,01h,00h,0dah,04eh
 	db	00h
-copymemmsg	db	' Memory not available for Copying ',00h
-mismatmsg	db	' Source and Destination data do not ma','tch '
-	db	00h
+record_0cdf	db	00h,00h,00h,00h,00h,00h,00h,00h,00h,00h,00h,00h
+	db	00h,00h,00h,00h,00h,00h,00h,00h,00h,00h,00h,00h
+	db	00h,00h,00h,00h,00h,00h,00h,00h,00h,00h,00h,00h
+	db	00h,00h,00h,00h,00h,00h,00h,00h,00h,00h,00h,00h
+	db	00h,00h,00h,00h,00h,00h,00h,00h,00h,00h,00h,00h
+	db	00h,00h,00h,00h,00h,00h,00h,00h,00h,00h,00h,00h
+	db	00h,00h,00h,00h,00h,00h,01h,00h,0bfh,01h,00h,0c0h
+	db	01h,00h,0d9h
+record_0d36	db	03h,01h,02h,02h,03ch,0dh,050h,00h,0c6h
+record_0d3f	db	00h,00h,00h,00h,00h,00h,00h,00h,00h,00h,00h,00h
+	db	00h,00h,00h,00h,00h,00h,00h,00h,00h,00h,00h,00h
+	db	00h,00h,00h,00h,00h,00h,00h,00h,00h,00h,00h,00h
+	db	00h,00h,00h,00h,00h,00h,00h,00h,00h,00h,00h,00h
+	db	00h,00h,00h,00h,00h,00h,00h,00h,00h,00h,00h,00h
+	db	00h,00h,00h,00h,00h,00h,00h,00h,00h,00h,00h,00h
+	db	00h,00h,00h,00h,00h,00h,0b5h
+record_0d8e	db	06h,00h,0dah,0c4h,0c4h,0c4h,0c4h,0bfh
+record_0d96	db	06h,00h,0b3h,020h
+record_0d9a	db	020h,020h,020h,0b3h
+record_0d9e	db	06h,00h,0c0h,0c4h,0c4h,0c4h,0c4h,0d9h
+record_0da6	db	01h,00h,07h
+record_0da9	db	042h,00h,020h,020h,020h,020h,020h,020h,020h,020h,020h,020h
+	db	'            '
+	db	'            '
+	db	'            '
+	db	'            '
+	db	020h,020h,020h,020h,020h,020h,020h,020h,00h,020h,044h,041h
+	db	'TE OF LAST C'
+	db	'HANGE 26 JAN'
+	db	' 84   '
+process_offset	db	00h,00h
+system_segment	db	00h,00h
+console_offset	db	00h,00h
+uda_segment	db	00h,00h
+console_number	db	00h
+disk_queue	db	00h,00h,00h,00h,00h,00h,00h,00h
+queue_name	db	'MXdisk   DAT'
+	db	'E OF LAST CH'
+	db	'ANGE 26 JAN '
+	db	'84   '
+msg_terminal	db	036h,00h,0dh,0ah,054h,068h,069h,073h,020h,075h,074h,069h
+	db	'lity cannot '
+	db	'be used from'
+	db	' a user term'
+	db	069h,06eh,061h,06ch,02eh,0dh,0ah,0ah
+record_0e81	db	04h,00h,01bh,059h
+record_0e85	db	00h,00h
+record_0e87	db	08h,00h,01bh,077h,01bh,036h,01bh,066h,01bh,045h
+record_0e91	db	0ch,00h,01bh,045h,01bh,071h,01bh,074h,01bh,037h,01bh,065h
+	db	01bh,076h
+record_0e9f	db	'sttpqru'
+record_0ea6	db	02h,00h,01bh
+data_0ea9	db	' '
+record_0eaa	db	02h,00h,01bh,065h
+record_0eae	db	02h,00h,01bh,066h,00h,00h,00h,00h,00h,00h,00h,00h
+	db	00h,00h,00h,00h,00h,00h
 
-; int 13h status and the address of its message: ten entries, then the
-; messages themselves.
-errtab	db	80h,0e7h,0eh,40h,00h,0fh,20h,18h,0fh,10h,32h,0fh
-	db	09h,44h,0fh,08h,59h,0fh,04h,6dh,0fh,03h,80h,0fh
-	db	02h,9ah,0fh,01h,0b2h,0fh
-	db	' Drive does not respond ',00h
-	db	' Seek operation failed ',00h
-	db	' Disk Controller failure ',00h
-	db	' Disk Read Error ',00h
-	db	' DMA Boundary Error ',00h
-	db	' DMA Overrun Error ',00h
-	db	' Sector not found ',00h
-	db	' Disk is Write Protected ',00h
-	db	' Disk is not Formatted ',00h
-	db	' Bad Command ',00h
-fatalmsg	db	' Fatal Disk Error ',00h
-	db	00h,00h,00h,00h,00h,00h,00h,00h,00h,00h,00h,00h
-	db	00h,00h,00h,00h,00h,00h,00h,00h,00h,00h,00h,00h
-	db	00h,00h,00h,00h,00h,00h,00h,00h,00h,00h,00h,00h
-	db	00h,00h,00h,00h,00h,00h,00h,00h,00h,00h,00h,00h
-	db	00h,00h,00h,00h,00h,00h,00h,00h,00h,00h,00h,00h
-	db	00h,00h,00h,00h,00h,00h,00h,00h,00h,00h,00h,00h
-	db	00h,00h,00h,00h,00h,00h,00h,00h,00h,00h,00h,00h
-	db	00h,00h,00h,00h,00h,00h,00h,00h,00h,00h,00h,00h
-	db	00h,00h,00h,00h,00h,00h,00h,00h,00h,00h,00h,00h
-	db	00h,00h,00h,00h,00h,00h,00h,00h,00h,00h,00h,00h
-	db	00h,00h,00h,00h,00h,00h,00h,00h
-	db	0dbh
-	db	00h,00h,00h,00h,00h,00h,00h,00h,00h,00h,00h,00h
-
+	eseg
+	org	0
+	sseg
+	org	0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
 	end
