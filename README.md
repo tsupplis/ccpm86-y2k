@@ -176,7 +176,8 @@ GENCCPM flag records, PIN and build corrections. CGA graphics modes 4/6 now
 use kernel-controlled BIOS mode/palette calls on EGA/VGA, preserving the CGA
 path and restoring text. Native EGA mode 10h (640x350, 16 colours) is also
 available on EGA with >=128 KB or VGA. Other native EGA modes and a general
-application INT 10h layer are not provided.
+application INT 10h layer are not provided. The super annoying sysdisk to B: 
+vs C: when 2 floppies are on the system is also fixed...
 
 ## Build and checks
 
