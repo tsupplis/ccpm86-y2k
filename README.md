@@ -22,6 +22,7 @@ system more consumable (CP/M-Plus style) and accessible to anyone interested in 
 | Full source distribution | Kernel, nine RSPs, most commands; gaps below |
 | Additional tools | ASM80, HEXCOM, DREDIX, DR development chain, Microsoft BASIC 5.50A |
 | Y2K components | SDIR, DATE, SHOW, TOD for CCP/M-86 3.2 through Concurrent DOS 4.1; 3.1 fixes included |
+| Usability and Bug fixes| CP/M Plus usability, known problem fixes (like the failing sysdisk on systems with 2 floppies and a hard disk) ... |
 
 The current version already incorporate:
 - CP/M Plus mapped and direction keys command line recall and editing,
