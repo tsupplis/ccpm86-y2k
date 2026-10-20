@@ -485,7 +485,7 @@ init_v3:
 ;	2)	save disk interrupt vector for far call usage
 ;	3)	initialize HDINF vectors about physical drive char.
 ;	4)	try to login first hard disk
-;	5)	decide who will be system disk and temp disk
+;	5)	select the boot hard disk as system disk on a hard-disk boot
 ;
 ;	this code assumes that it is running in XIOS codeseg and that
 ;	the floppy initialization has already been done
@@ -527,13 +527,22 @@ hd_init1:
 	call	hd_login
 	or	al,al ! jz hd_init_done		;if can't login, forget rest!
 
-;	login is successful, correct the dpb pointers, sysdisk, and tempdisk
+;	Login succeeded: use the label DPBs for the hard disks.
 
 	mov	si,offset hd_dph0 + 8	; point to dpb pointer
 	mov	word ptr [si],offset HD_DPB0
 	mov	word ptr .dph_size[si],offset HD_DPB1
-	inc	SYS_DISK		; SYS and TEMP disks now
-	inc	TEMP_DISK		;   default to first hard disk
+;	A hard-disk boot must find STARTUP on that disk. BIOS drive 80h
+;	follows the installed floppies (C: with two), not the configured
+;	system drive plus one. Floppy boots retain the GENCCPM settings.
+	mov	al,boot_disk
+	test	al,80h
+	jz	hd_init_done
+	and	al,7fh
+	cmp	al,byte ptr num_hard
+	jae	hd_init_done		; ignore an invalid BIOS drive
+	add	al,byte ptr num_flop
+	mov	SYS_DISK,al
 
 hd_init_done:
 	mov	hd_init_flag,0ffh		;set XIOS initialized flag

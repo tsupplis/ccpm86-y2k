@@ -74,7 +74,7 @@ changed or rebooted. Add SETDEF to `STARTUP.nnn` for persistent preferences.
 Automatic SUB execution requires the rebuilt `SUBMIT.CMD` on the search
 path. An explicit `.SUB` runs a script even with the default CMD-only order.
 Loading commands from other drives preserves the working drive and user.
-See `HELP SETDEF` and [PATCHES.md](PATCHES.md) for details and limitations.
+See `HELP SETDEF` and [Patches](patches.md) for details and limitations.
 
 ## Distributions
 
@@ -170,7 +170,7 @@ Audit: CCP/M-86/Concurrent DOS 3.2; boot regressions: 3.1.
 
 ## Kernel and RSP patches
 
-[PATCHES.md](PATCHES.md): RTC startup/persistence, yellow status, adapter-aware
+[Patches](patches.md): RTC startup/persistence, yellow status, adapter-aware
 cursor, EGA/VGA retrace handling, console shortcuts, configured drives,
 GENCCPM flag records, PIN and build corrections. CGA graphics modes 4/6 now
 use kernel-controlled BIOS mode/palette calls on EGA/VGA, preserving the CGA

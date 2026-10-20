@@ -44,8 +44,12 @@ User-facing commands and key bindings are documented in README.md and HELP.
 
 ## Kernel and display
 
-- Standalone BDOS excludes unavailable DOS filesystem objects. Startup retains
-  the system and temporary drives selected by GENCCPM.
+- Standalone BDOS excludes unavailable DOS filesystem objects. Floppy startup retains
+  the system drive selected by GENCCPM. Hard-disk startup selects the BIOS boot
+  disk after the installed floppies (normally C:), avoiding an erroneous B:
+  selection after successful hard-disk login. Temporary-drive configuration is
+  unchanged by hard-disk login. `python3 tools/bootdrv.py` checks the built XIOS
+  startup routines with synthetic BIOS geometry and disk-login results.
 - BIOS RTC startup and time-setting support preserve the software-clock fallback
   and required interrupt vectors. Date display/input handles century rollover.
 - Status text is bright yellow on black. Cursor shape uses enhanced-adapter
