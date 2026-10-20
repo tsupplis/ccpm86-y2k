@@ -29,7 +29,9 @@ The current version already incorporate:
 - CP/M Plus setdef style configurability
 - support for CGA, EGA modes even on VGA card,
 - Y2K compliance,
+- CLIs for floppy copy, format and more
 - New terminal commands (cls, sysdisk)
+- and many other patches ...
 
 Those little changes make the OS far more friendly than the original.
 
