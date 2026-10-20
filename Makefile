@@ -13,6 +13,7 @@ commands:
 
 kernel: commands
 	$(MAKE) -C kernel all
+	$(MAKE) -C kernel/sysgen all
 
 boot:
 	$(MAKE) -C boot all

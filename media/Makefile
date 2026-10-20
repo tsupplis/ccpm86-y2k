@@ -3,7 +3,7 @@ FORMAT = ccpm86-320
 TWIST = $(PYTHON) ../tools/cpm86twist.py
 CPMCP = cpmcp -f $(FORMAT)
 
-.PHONY: all prepare test check check-media check-qemu clean
+.PHONY: all test check check-media check-qemu clean
 .DELETE_ON_ERROR:
 IMAGES = ccpm86.img ccpmtools.img ccpmdev.img ccpmmaint.img
 all: $(IMAGES)
@@ -40,31 +40,15 @@ DEV_COMMANDS = ../dev/rasm86.cmd ../dev/link86.cmd ../dev/lib86.cmd \
     ../dev/pbasic.cmd ../dev/mbasic86.cmd ../commands/asm80/asm80.cmd \
     ../commands/hexcom/hexcom.cmd ../commands/ddt86/gentab.cmd
 
-COMMAND_DIRS = chset date era help initdir pip ren sdir set show submit systat tod \
-    type vcmode asm86 asm80 ddt86 gencmd genccpm hexcom dredix ed sysdisk setdef dskmaint
-
-# Recurse so building directly in media/ picks up changes to included sources.
-prepare:
-	@set -e; for d in $(COMMAND_DIRS); do $(MAKE) -C ../commands/$$d all; done
-	$(MAKE) -C ../commands/help help.hlp
-	$(MAKE) -C ../commands/sysdisk check
-	$(MAKE) -C ../commands/dskmaint check
-	$(MAKE) -C ../kernel/con all
-	$(MAKE) -C ../kernel/rsp1 all
-	$(MAKE) -C ../kernel/rsp2 all
-	$(MAKE) -C ../kernel/sysgen all
-	$(MAKE) -C ../boot check
-
-# prepare also builds and checks the source boot track for a direct media build.
-../boot/boottrack.bin: prepare
-	@test -f $@
+# Commands, kernel and boot are built by the top-level Makefile.
+# This Makefile packages their outputs.
 
 # Keep the empty filesystem template, but always install the source-built boot.
-ccpm86base.img: base.img ../boot/boottrack.bin diskdefs ../tools/cpm86twist.py Makefile prepare
+ccpm86base.img: base.img ../boot/boottrack.bin diskdefs ../tools/cpm86twist.py Makefile
 	cp base.img $@
 	dd if=../boot/boottrack.bin of=$@ bs=4096 count=1 conv=notrunc 2>/dev/null
 
-ccpm86.img: ccpm86base.img startup.0 $(BASE_SYSTEM_COMMANDS) Makefile prepare
+ccpm86.img: ccpm86base.img startup.0 ../kernel/sysgen/ccpm.sys $(SYSTEM_COMMANDS) $(BASE_SYSTEM_COMMANDS) ../commands/pip/pip4.cmd Makefile
 	$(TWIST) untwist ccpm86base.img $@.logical.tmp
 	$(CPMCP) $@.logical.tmp ../kernel/sysgen/ccpm.sys startup.0 $(SYSTEM_COMMANDS) $(BASE_SYSTEM_COMMANDS) 0:
 	$(CPMCP) $@.logical.tmp ../commands/pip/pip4.cmd 0:PIP.CMD
@@ -73,7 +57,7 @@ ccpm86.img: ccpm86base.img startup.0 $(BASE_SYSTEM_COMMANDS) Makefile prepare
 	mv $@.tmp $@
 	$(RM) $@.logical.tmp
 
-ccpmtools.img: ccpm86base.img startup.0 Makefile prepare
+ccpmtools.img: ccpm86base.img startup.0 ../kernel/sysgen/ccpm.sys $(TOOLS_COMMANDS) ../commands/pip/pip4.cmd Makefile
 	$(TWIST) untwist ccpm86base.img $@.logical.tmp
 	$(CPMCP) $@.logical.tmp ../kernel/sysgen/ccpm.sys startup.0 $(TOOLS_COMMANDS) 0:
 	$(CPMCP) $@.logical.tmp ../commands/pip/pip4.cmd 0:PIP.CMD
@@ -82,7 +66,7 @@ ccpmtools.img: ccpm86base.img startup.0 Makefile prepare
 	mv $@.tmp $@
 	$(RM) $@.logical.tmp
 
-ccpmdev.img: ccpm86base.img $(DEV_COMMANDS) Makefile prepare
+ccpmdev.img: ccpm86base.img $(DEV_COMMANDS) Makefile
 	$(TWIST) untwist ccpm86base.img $@.logical.tmp
 	$(CPMCP) $@.logical.tmp $(DEV_COMMANDS) 0:
 	cpmls -F -f $(FORMAT) $@.logical.tmp '0:*.*'
@@ -90,7 +74,7 @@ ccpmdev.img: ccpm86base.img $(DEV_COMMANDS) Makefile prepare
 	mv $@.tmp $@
 	$(RM) $@.logical.tmp
 
-ccpmmaint.img: ccpm86base.img startup.0 $(MAINT_COMMANDS) Makefile prepare
+ccpmmaint.img: ccpm86base.img startup.0 ../kernel/sysgen/ccpm.sys $(MAINT_COMMANDS) ../commands/pip/pip4.cmd Makefile
 	$(TWIST) untwist ccpm86base.img $@.logical.tmp
 	$(CPMCP) $@.logical.tmp ../kernel/sysgen/ccpm.sys startup.0 $(MAINT_COMMANDS) 0:
 	$(CPMCP) $@.logical.tmp ../commands/pip/pip4.cmd 0:PIP.CMD
@@ -104,6 +88,7 @@ ccpmtest.img: ccpm86base.img
 
 # Check every packaged file, allowing only CP/M record padding after its bytes.
 check-media: all
+	$(MAKE) -C ../commands/dskmaint check
 	@set -e; for image in $(IMAGES); do \
 	    $(TWIST) untwist $$image $$image.verify.tmp; \
 	    case $$image in \

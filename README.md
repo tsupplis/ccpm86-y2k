@@ -141,7 +141,7 @@ SUBMIT's existing parameter and quoting rules remain unchanged.
 | --- | --- | --- |
 | `ccpm86.img` | Yes | Kernel, stock commands, ED, HELP, SYSTAT, configuration utilities, reconstructed SYSDISK, SETDEF |
 | `ccpmtools.img` | Yes | DREDIX, ASM86, DDT86, GENCMD, GENCCPM, WINDOW/WMENU with sample SUB files, PIP, TOD |
-| `ccpmmaint.img` | Yes | DSKMAINT, HDMAINT, INITDIR, PIP, TOD |
+| `ccpmmaint.img` | Yes | DSKMAINT, DFORM, HDMAINT, INITDIR, PIP, TOD |
 | `ccpmdev.img` | No | DR development/BASIC tools, Microsoft BASIC, ASM80, HEXCOM, GENTAB |
 
 `make dist` places the images above and `disks.zip` containing all four at the repository root.
@@ -149,7 +149,6 @@ SUBMIT's existing parameter and quoting rules remain unchanged.
 320 KB: **untwist → cpmtools `ccpm86-320` → twist**.
 [Media recipes and emulator usage](media/README.md).
 The full HELP is on the main disk; WINDOW and WMENU are on the tools disk.
-DSKMAINT, HDMAINT and INITDIR are on the bootable maintenance disk.
 Window layouts: `CARDDECK.SUB`, `CLEAR.SUB`, `GLASS.SUB` and `WORDPROC.SUB`.
 The [source-built boot track](boot/README.md) reproduces all 4,096 bytes of the original.
 
@@ -161,38 +160,39 @@ Format: [cpm86-kernel](../cpm86-kernel/README.md). **3.1** = rebuildable sources
 | --- | --- | --- | --- |
 | `asm86` | 8086 assembler | — | 3.1 |
 | `cls` | Clear the terminal screen | — | TMP built-in; VT52 ESC-E |
-| `chset` | Inspect or change CMD header flags | — | 3.1 |
+| `chset` | Inspect or change CMD header flags | — | Recompiled from CCP/M-86 3.1 and adapted |
 | `config` | Configure serial ports | Original | — |
-| `date` | Display or set the date | — | 3.1, Y2K patched |
-| `ddt86` | Interactive machine-code debugger | — | 3.1 |
-| `dir` | List directory contents | — | 3.1; command/RSP |
-| `dskmaint` | Format, verify and copy diskettes | Original | — |
-| `ed` | Line-oriented text editor | — | 3.1 |
-| `era` / `eraq` | Erase files, optionally with confirmation | — | 3.1 |
+| `date` | Display or set the date | — | Recompiled from CCP/M-86 3.1 and adapted, Y2K patched |
+| `ddt86` | Interactive machine-code debugger | — | Recompiled from CCP/M-86 3.1 and adapted |
+| `dir` | List directory contents | — | Recompiled from CCP/M-86 3.1 and adapted; command/RSP |
+| `dform` | Command-line floppy formatter | — | New |
+| `dskmaint` | Format, verify and copy diskettes | Reverse engineered from CCP/M-86 |
+| `ed` | Line-oriented text editor | — | Recompiled from CCP/M-86 3.1 and adapted |
+| `era` / `eraq` | Erase files, optionally with confirmation | — | Recompiled from CCP/M-86 3.1 and adapted |
 | `function` | Program function keys | Original | — |
-| `gencmd` | Convert H86 output into CMD executables | — | 3.1 |
-| `genccpm` | Generate and configure the system image | — | 3.1; flag-table fix |
-| `gentab` | Generate disassembler opcode tables | — | 3.1 |
+| `gencmd` | Convert H86 output into CMD executables | — | Recompiled from CCP/M-86 3.1 and adapted |
+| `genccpm` | Generate and configure the system image | — | Recompiled from CCP/M-86 3.1 and adapted; flag-table fix |
+| `gentab` | Generate disassembler opcode tables | — | Recompiled from CCP/M-86 3.1 and adapted |
 | `hdmaint` | Hard-disk maintenance | Original | — |
-| `help` / `help.hlp` | Browse indexed command help | — | 3.1; indexed from `help.dat` |
-| `initdir` | Enable directory date/time stamps | — | 3.1 |
+| `help` / `help.hlp` | Browse indexed command help | — | Recompiled from CCP/M-86 3.1 and adapted; indexed from `help.dat` |
+| `initdir` | Enable directory date/time stamps | — | Recompiled from CCP/M-86 3.1 and adapted |
 | `pcetime` | Synchronize time with the PCE host | Original | — |
-| `pip` | Copy and transfer files | — | 4.1; shipping PIP4 as 3.1N |
+| `pip` | Copy and transfer files | — | Recompiled from CDOS 4.1 and adapted |
 | `ren` | Rename files | — | 3.1 |
-| `sdir` | Detailed, sorted directory listing | — | 3.1, Y2K/DPB/tail fixes |
-| `set` | Set file and drive attributes | — | 3.1 |
+| `sdir` | Detailed, sorted directory listing | — | Recompiled from CCP/M-86 3.1 and adapted, Y2K/DPB/tail fixes |
+| `set` | Set file and drive attributes | — | Recompiled from CCP/M-86 3.1 and adapted |
 | `setup` | Customize IBM PC/XT XIOS settings | Original | — |
-| `show` | Display disk space and drive information | — | 3.1, Y2K patched |
-| `setdef` | Display/change the per-console command drive list; fixed system fallback | — | Source-built `SETDEF.CMD`; local kernel extension |
-| `submit` | Run batch command files | — | 3.1 |
-| `sysdisk` | Display or change the system drive; TMP built-in and standalone tool | — | TMP built-in + standalone `SYSDISK.CMD`; byte-identical CMD reconstruction |
-| `systat` | Inspect processes and system resources | — | 3.1 |
-| `tod` | Display or set date and time | — | 3.1, Y2K patched |
-| `type` | Display a text file | — | 3.1 |
+| `show` | Display disk space and drive information | — | Recompiled from CCP/M-86 3.1 and adapted, Y2K patched |
+| `setdef` | Display/change the per-console command drive list; fixed system fallback | — | New, Source-built `SETDEF.CMD`; local kernel extension |
+| `submit` | Run batch command files | — | Recompiled from CCP/M-86 3.1 and adapted |
+| `sysdisk` | Display or change the system drive; TMP built-in and standalone tool | — | TMP built-in + standalone `SYSDISK.CMD` recompiled from CCP/M-86 3.1 and adapted; byte-identical CMD reconstruction |
+| `systat` | Inspect processes and system resources | — | Recompiled from CCP/M-86 3.1 and adapted |
+| `tod` | Display or set date and time | — | Recompiled from MCP/M-86 2.1 and adapted, Y2K patched |
+| `type` | Display a text file | — | Recompiled from CCP/M-86 3.1 and adapted |
 | `window` | Control console windows from commands | Original | — |
 | `wmenu` | Interactive console-window manager | Original | — |
-| `vcmode` | Set virtual-console background modes | — | 3.1 |
-| `asm80` | 8080 assembler | — | CP/M 2.2 8080 ASM; XLT86-translated and fixed |
+| `vcmode` | Set virtual-console background modes | — | Recompiled from CCP/M-86 3.1 and adapted |
+| `asm80` | 8080 assembler | — | Adapted from CP/M-80 2.2 and translated using XLT86 |
 | `hexcom` | Convert Intel HEX to COM binaries | — | HEXCOM 3.00-compatible C from [tpzasm](https://github.com/johnsonjh/tpzasm) |
 | `dredix` | Full-screen text editor | — | 4.1; DREDIX C Backported from Concurrent DOS 4.1 |
 
