@@ -270,3 +270,9 @@ The boot build requires native `h862bin` from `cpm86-cmdtools` on PATH.
 | [cpm86-menu](https://github.com/tsupplis/cpm86-menu)   | A submit replacement and a menu system for submit orchestration for CP/M-86 1.1 |
 | [cpm86-make](https://github.com/tsupplis/cpm86-make)   | A simple submit based make tool for CP/M-86 1.1 |
 | [pcdos11-hacking](https://github.com/tsupplis/pcdos11-hacking) | PC-DOS 1.1 distribution, tools and notes |
+
+--
+
+## License
+
+The whole repository is under CP/M (License)[LICENSE.md] when derived from CP/M or under MIT MIT (License)[License-bis.md] unless specified otherwise in a subdirectory.
