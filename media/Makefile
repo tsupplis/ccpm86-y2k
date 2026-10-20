@@ -32,6 +32,7 @@ TOOLS_COMMANDS = ../commands/asm86/asm86.cmd ../commands/ddt86/ddt86.cmd \
     $(WINDOW_COMMANDS) $(WINDOW_SAMPLES)
 
 MAINT_COMMANDS = ../commands/dskmaint/dskmaint.cmd ../commands/dskmaint/dform.cmd \
+    ../commands/disk/dcopy.cmd ../commands/disk/dcomp.cmd \
     ../base/hdmaint.cmd ../commands/initdir/initdir.cmd ../commands/tod/tod.cmd
 
 # Data-only developer disk; omit the older MBASIC 5.22 reference binary.
@@ -89,6 +90,7 @@ ccpmtest.img: ccpm86base.img
 # Check every packaged file, allowing only CP/M record padding after its bytes.
 check-media: all
 	$(MAKE) -C ../commands/dskmaint check
+	$(MAKE) -C ../commands/disk check
 	@set -e; for image in $(IMAGES); do \
 	    $(TWIST) untwist $$image $$image.verify.tmp; \
 	    case $$image in \

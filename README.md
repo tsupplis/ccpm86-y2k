@@ -141,7 +141,7 @@ SUBMIT's existing parameter and quoting rules remain unchanged.
 | --- | --- | --- |
 | `ccpm86.img` | Yes | Kernel, stock commands, ED, HELP, SYSTAT, configuration utilities, reconstructed SYSDISK, SETDEF |
 | `ccpmtools.img` | Yes | DREDIX, ASM86, DDT86, GENCMD, GENCCPM, WINDOW/WMENU with sample SUB files, PIP, TOD |
-| `ccpmmaint.img` | Yes | DSKMAINT, DFORM, HDMAINT, INITDIR, PIP, TOD |
+| `ccpmmaint.img` | Yes | DSKMAINT, DFORM, DCOPY, DCOMP, HDMAINT, INITDIR, PIP, TOD |
 | `ccpmdev.img` | No | DR development/BASIC tools, Microsoft BASIC, ASM80, HEXCOM, GENTAB |
 
 `make dist` places the images above and `disks.zip` containing all four at the repository root.
@@ -163,6 +163,8 @@ Format: [cpm86-kernel](../cpm86-kernel/README.md). **3.1** = rebuildable sources
 | `chset` | Inspect or change CMD header flags | — | Recompiled from CCP/M-86 3.1 and adapted |
 | `config` | Configure serial ports | Original | — |
 | `date` | Display or set the date | — | Recompiled from CCP/M-86 3.1 and adapted, Y2K patched |
+| `dcomp` | Compare floppy diskettes | — | Ported from [PC DOS 1.10](https://github.com/tsupplis/pcdos11-hacking) |
+| `dcopy` | Copy floppy diskettes | — | Ported from [PC DOS 1.10](https://github.com/tsupplis/pcdos11-hacking) |
 | `ddt86` | Interactive machine-code debugger | — | Recompiled from CCP/M-86 3.1 and adapted |
 | `dir` | List directory contents | — | Recompiled from CCP/M-86 3.1 and adapted; command/RSP |
 | `dform` | Command-line floppy formatter | — | New |

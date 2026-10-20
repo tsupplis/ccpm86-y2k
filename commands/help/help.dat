@@ -404,6 +404,74 @@
 
     Prompts you for date and time entries.
 
+///1dcomp
+  Syntax:
+
+  DCOMP drive1: {drive2:} {[1]}
+
+  Purpose:
+
+      DCOMP compares every sector of two floppy diskettes and reports
+  differences by track and side. It compares raw disk contents, including
+  the boot area and unused sectors; it does not interpret a filesystem.
+
+  Arguments and options:
+
+  drive1:   First installed floppy drive, A: or B: (required).
+  drive2:   Second floppy drive; defaults to the current CP/M drive.
+  [1]       Compare head zero only. The closing ] may be omitted.
+
+      Specify the same drive twice to compare diskettes by swapping them
+  at the prompts. The option may follow a drive directly, as in B:[1].
+  Answer Y to compare another pair, or N to exit. An empty or invalid
+  command line displays usage without starting disk operations.
+
+      This build supports CP/M-86 1.1 using ROM BIOS and CCP/M-86 3.1
+  using native IBM PC XIOS. Both support 40 cylinders with eight 512-byte
+  sectors per head: 160K single-sided or 320K double-sided media. Close
+  all open files first on CCP/M. Ctrl-C cancels and releases disk locks.
+
+  Examples:
+
+      A>DCOMP A: B:
+      A>DCOMP A: A:[1]
+      A>DCOMP A: B:[1
+
+///1dcopy
+  Syntax:
+
+  DCOPY drive1: {drive2:} {[1]}
+
+  Purpose:
+
+      DCOPY copies an entire floppy diskette from drive1: onto drive2:,
+  replacing the target contents. It copies raw sectors, including the
+  boot area and unused sectors, and verifies the writes. It can format
+  target tracks while copying when the original utility's retry logic
+  detects that formatting is needed. No filesystem is interpreted.
+
+  Arguments and options:
+
+  drive1:   Source installed floppy drive, A: or B: (required).
+  drive2:   Target floppy drive; defaults to the current CP/M drive.
+  [1]       Copy head zero only. The closing ] may be omitted.
+
+      Specify the same drive twice for a one-drive copy; insert source
+  and target diskettes as prompted. The option may follow a drive
+  directly, as in B:[1]. Answer Y to copy another pair, or N to exit.
+  An empty or invalid command line displays usage without copying.
+
+      This build supports CP/M-86 1.1 using ROM BIOS and CCP/M-86 3.1
+  using native IBM PC XIOS. Both support 40 cylinders with eight 512-byte
+  sectors per head: 160K single-sided or 320K double-sided media. Close
+  all open files first on CCP/M. Ctrl-C cancels and releases disk locks.
+
+  Examples:
+
+      A>DCOPY A: B:
+      A>DCOPY A: A:[1]
+      A>DCOPY A: B:[1
+
 ///1DDT86
     Syntax:
 
