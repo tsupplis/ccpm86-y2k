@@ -80,6 +80,7 @@ User-facing commands and key bindings are documented in README.md and HELP.
 | HELP | Rebuild indexed help, restore original CONFIG/maintenance/DDT86/SET/FILESPEC/window topics and examples, correct function-key defaults, and document PIP archive/confirmation options and HEX validation; support topics beyond 64 KiB. |
 | DREDIX | Use BDOS keyboard input and console escapes with a local 80x24 screen buffer; preserve navigation, highlighting and console restoration. |
 | SYSDISK | Reconstruct readable source with byte-identical output; retain the original OS-version guard. |
+| INITDIR | Rebuild with corrected PL/I object conversion: preserve frame/target relocations and reserved DATA storage. Track declaration/converter dependencies; explicit `make -C commands/initdir check` exercises timestamp creation/removal on disposable disks. |
 | Resident processes | Rebuild supplied sources; remove PIN's duplicate Ctrl-C declaration and obsolete standalone CLS/SYSDISK RSPs. |
 | GENCCPM | Correct three-byte RTM flag serialization; size disk buffers to keep kernel/RSP data within 64 KiB. |
 | Build/media | Track source dependencies, rebuild the byte-identical 4,096-byte boot track (including loader extent count), remove the alternate loader/TCOPY, and handle physical floppy track ordering, including reversed head-1 cylinders. |

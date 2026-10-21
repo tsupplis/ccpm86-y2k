@@ -17,11 +17,17 @@ SNIPPETS=
 
 all: $(TOOLS) $(SNIPPETS)
 
-initdir.cmd: initdir.obj initdira.obj diomod.obj
+.PHONY: all check clean
+check: all
+	python3 ../../tools/initdir_check.py
+
+initdir.cmd: initdir.obj initdira.obj diomod.obj Makefile
 	$(PLILINK86) initdir [locals],initdira,diomod
 	cmdinfo $@
 
-initdir.obj: initdir.pli
+# Recompile after declarations or the object converter change. Old converted
+# objects cannot recover the reserved DATA storage removed by a faulty tool.
+initdir.obj: initdir.pli initdira.dcl diomod.dcl Makefile $(shell command -v $(PLIOBJFIX))
 	$(PLI86) $< \$$dl
 	$(PLIOBJFIX) $@
 
