@@ -1741,11 +1741,13 @@
     SETDEF drive-list
     SETDEF [ORDER=(CMD)]
     SETDEF [ORDER=(CMD,SUB)]
-    SETDEF drive-list [ORDER=(CMD,SUB)]
+    SETDEF [ORDER=(CMD,DOS)]
+    SETDEF [ORDER=(CMD,SUB,DOS)]
+    SETDEF drive-list [ORDER=(CMD,SUB,DOS)]
 
     Display or change command search settings for this console. With no
     arguments, SETDEF displays the drive list and file order. Defaults
-    are * (current drive) and CMD only. Sys Disk is shown last in the
+    are * (current drive) and CMD,DOS. Sys Disk is shown last in the
     drive list as a fixed role. Path and order are independent:
     changing either preserves the other. Invalid input changes neither.
 
@@ -1755,16 +1757,28 @@
     SETDEF *,A:,C:                 Search current drive, A:, then C:.
     SETDEF M:,*                    Prefer utilities copied to M:.
     SETDEF [ORDER=(CMD,SUB)]        Enable automatic SUB scripts.
-    SETDEF * [ORDER=(CMD)]          Restore both defaults.
+    SETDEF * [ORDER=(CMD,DOS)]      Restore both defaults.
 
-    CMD only is the default. CMD,SUB is the only alternative. SUB alone
-    and SUB,CMD are rejected. Bare SETDEF displays both settings.
+    Four orders are accepted:
+      CMD                 CMD only; no automatic SUB or DOS lookup.
+      CMD,SUB             CMD then SUB; no automatic DOS lookup.
+      CMD,DOS             CMD then COM, EXE, BAT (default).
+      CMD,SUB,DOS         CMD then SUB, COM, EXE, BAT.
 
-    With CMD,SUB enabled, try CMD then SUB on each drive before moving
-    to the next drive. A SUB on an earlier drive can therefore precede
-    a CMD on a later drive. Explicit .CMD selects only CMD. Explicit
-    .SUB selects a script even in CMD-only mode. Other types are invalid.
-    An existing invalid CMD reports its load error without trying SUB.
+    DOS is a fixed group: COM then EXE then BAT. Native TMP ignores DOS
+    and uses only CMD/SUB. The syntax and stored settings are the same
+    in native TMP and PC-MODE. Native TMP cannot run DOS programs.
+    SUB alone, SUB,CMD and individual COM/EXE/BAT entries are rejected.
+
+    Try the selected types on each drive before moving to the next.
+    A SUB or COM on an earlier drive can precede a CMD on a later drive.
+    An explicit extension bypasses ORDER: .SUB selects a script even
+    when automatic SUB lookup is disabled; in PC-MODE an explicit .COM,
+    .EXE or .BAT works even when automatic DOS lookup is disabled.
+    Native TMP accepts only .CMD and .SUB. An existing invalid CMD
+    reports its load error without trying another type or drive.
+    BAT uses PC-MODE's existing BATCH route and needs its interpreter;
+    enabling DOS does not install a BAT interpreter.
 
     Resident commands have priority for names without an explicit type.
     An explicit drive bypasses the list. Missing drives are skipped and

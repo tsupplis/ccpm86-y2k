@@ -35,6 +35,8 @@ TITLE '** CCP/M-86 XIOS for IBM PC **'
 ;
 
 
+include		pcmode.lib	; opt-in XIOS personality switches
+
 include		xbegin.lib	; header, entry, patch_space, ints
 
 include		xchar.lib	; conin, status_line, list, ccb/lcb's
@@ -46,6 +48,10 @@ include		xfloppy.lib	; floppy, mdisk, disk error handling
 include		xhard.lib	; XT hard disk, FIDDS
 
 include		xrtc.lib	; BIOS RTC read/write and calendar conversion
+
+if PCMODE_XIOS
+include		xpcmode.lib	; PC-MODE hardware services, still one XIOS
+endif
 
 include		xinit.lib	; startup, hardware init, int vectors
 

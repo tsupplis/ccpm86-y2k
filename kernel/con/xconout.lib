@@ -668,7 +668,14 @@ video_bios:
 	mov	ss,ax
 	mov	sp,offset video_bios_stack_top
 	mov	ax,video_bios_ax
+if PCMODE_XIOS
+; Reach captured firmware through the existing native PIC/stack guard.
+	pushf
+	callf	cs:dword ptr pc_video_rom
+endif
+if not PCMODE_XIOS
 	int	10h
+endif
 	cli
 	push	cs ! pop ds
 	mov	ax,video_bios_ss

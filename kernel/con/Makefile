@@ -8,7 +8,8 @@ SNIPPETS=bdos.con sup.con rtm.con cio.con sysdat.con xios.con mem.con
 all: $(SNIPPETS)
 
 # Included assembly sources must invalidate their parent object.
-xios.h86: xbegin.lib xchar.lib xconout.lib xfloppy.lib xhard.lib xrtc.lib xinit.lib
+xios.h86: xbegin.lib xchar.lib xconout.lib xfloppy.lib xhard.lib xrtc.lib xinit.lib \
+  pcmode.lib xpcmode.lib
 bdos.obj: $(wildcard *.bdo) uda.cic xioscb.def
 sup.h86: $(wildcard *.sup) patch.cod
 rtm.h86: $(wildcard *.rtm) s8087.lib

@@ -488,6 +488,13 @@ function_table:
 	dw	io_ret			;28 dummy
 	dw	io_ret			;29 dummy
 	dw	get_set_screen		;30 alpha/graphics screens
+if PCMODE_XIOS
+; PCTMP hardware services retain native 24-row console ownership.
+	dw	pc_video		;31 BIOS video subset
+	dw	pc_text_state		;32 DOS text entry/exit
+	dw	pc_shift_status	;33 BIOS shift status
+	dw	pc_equipment		;34 BIOS equipment word
+endif
 
 io_ret:
 	ret			; for null function calls
@@ -706,6 +713,16 @@ i_keyboard:
 	out kbd_control,al		;set keyboard back to normal state
 
 	mov al,scan_code		;restore the scan code
+if PCMODE_XIOS
+; Physical prefix filter precedes native action/translation handling.
+if PCMODE_ENHANCED_KEYS
+	call pc_scan_event
+	jnc pc_scan_accepted
+	jmp key_scan_done
+pc_scan_accepted:
+endif
+	call pc_key_event
+endif
 
 
 ;	Test for CTRL, ALT already being down and DEL being current
@@ -777,6 +794,16 @@ key_console_event:
     mov key_type,0ffh
     jmp save_key_code
 key_translate:
+if PCMODE_XIOS
+if PCMODE_ENHANCED_KEYS
+; Dedicated E0 keys bypass native keypad Num/Shift selection.
+	cmp pc_key_extended,0
+	je pc_key_native_translation
+	mov bx,offset key_table
+	jmp translate
+pc_key_native_translation:
+endif
+endif
 	mov bx,offset key_table		;translation table for single keys
 	test down_bits,ctrl_bit		;was control key already down ?
 	jz test_for_keypad		;no $ try numlock
@@ -1174,6 +1201,10 @@ i_clock:
 	push ax ! push bx ! push cx ! push dx
 	push bp ! push di ! push si ! push es
 
+if PCMODE_XIOS
+; Preserve BIOS clock rate with the original PIT divisor.
+	call pc_clock_tick
+endif
 	cmp beep_counter,00		;test for beeping now
 	jz check_motor_off		;no then leap to the next test
 	  cmp beep_ticks,00		;is this the first time through

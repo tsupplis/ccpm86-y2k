@@ -719,7 +719,10 @@ conasn:	mov cx,f_conassign ! mov dx,offset cli_acb
 ; Local BDOS 165: v1 packet is ten bytes (drive search API).
 ; v2 adds byte 10: order 0=CMD, 1=CMD,SUB. Operations are bit masks:
 ; 0=query, 1=set path, 2=set order, 3=set both (v1 supports 0/1 only).
-; Count byte in each private console record has order in bit 7.
+; v3 keeps the 11-byte packet: byte 10 bit 0 enables SUB, bit 1 disables DOS.
+; Zero initialization therefore means CMD,DOS. v1/v2 updates preserve DOS mode;
+; v2 queries return only their existing SUB bit. Native CLI ignores DOS entries.
+; Console header: low 6 bits path length, bit 7 SUB, bit 6 DOS disabled.
 setdef_ent:
     mov bx,rlr
     xor ax,ax ! mov al,p_cns[bx]
@@ -734,10 +737,14 @@ sd_console:
     cmp word ptr [si],04453h ! jne sd_invalid
     mov al,2[si]
     cmp al,1 ! je sd_v1
-    cmp al,2 ! jne sd_invalid
+    cmp al,2 ! je sd_extended
+    cmp al,3 ! jne sd_invalid
+sd_extended:
     cmp si,0fff5h ! ja sd_invalid
     cmp byte ptr 3[si],3 ! ja sd_invalid
     test byte ptr 3[si],2 ! jz sd_check_path
+    cmp byte ptr 10[si],3 ! ja sd_invalid
+    cmp al,3 ! je sd_check_path
     cmp byte ptr 10[si],1 ! ja sd_invalid
     jmps sd_check_path
 sd_v1:
@@ -761,7 +768,7 @@ sd_invalid:
 sd_validated:
     pushf ! cli
     test byte ptr 3[si],1 ! jz sd_order
-    mov al,cs:[bx] ! and al,080h ! or al,4[si]
+    mov al,cs:[bx] ! and al,0c0h ! or al,4[si]
     mov cs:[bx],al
     xor cx,cx ! mov cl,4[si]
     mov di,si ! add di,5
@@ -773,13 +780,21 @@ sd_publish:
 sd_order:
     test byte ptr 3[si],2 ! jz sd_query
     and cs:byte ptr [bx],07fh
-    cmp byte ptr 10[si],0 ! je sd_query
+    test byte ptr 10[si],1 ! jz sd_dos_order
     or cs:byte ptr [bx],080h
+sd_dos_order:
+    cmp byte ptr 2[si],3 ! jne sd_query
+    and cs:byte ptr [bx],0bfh
+    test byte ptr 10[si],2 ! jz sd_query
+    or cs:byte ptr [bx],040h
 sd_query:
-    cmp byte ptr 2[si],2 ! jne sd_read_count
+    cmp byte ptr 2[si],1 ! je sd_read_count
     mov al,cs:[bx] ! mov cl,7 ! shr al,cl ! mov 10[si],al
+    cmp byte ptr 2[si],3 ! jne sd_read_count
+    mov al,cs:[bx] ! and al,040h ! mov cl,5 ! shr al,cl
+    or 10[si],al
 sd_read_count:
-    mov al,cs:[bx] ! and al,07fh
+    mov al,cs:[bx] ! and al,03fh
     or al,al ! jnz sd_read
     mov byte ptr 4[si],1
     mov byte ptr 5[si],0ffh
@@ -820,7 +835,7 @@ cp_console:
     pushf ! cli
     mov al,cs:[bx]
     mov cs:cp_mode,al
-    and al,07fh
+    and al,03fh
     or al,al ! jz cp_default_locked
     mov cs:cp_count,al
     mov ax,cs:1[bx] ! mov cs:word ptr cp_entries,ax

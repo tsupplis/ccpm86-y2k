@@ -1,5 +1,6 @@
 title 'SETDEF - per-console command search settings'
-; Version 2 of local BDOS 165; v1 drive-only clients remain supported.
+; Version 3 of local BDOS 165; kernel keeps v1/v2 clients compatible.
+; ORDER always starts with CMD; optional SUB precedes the fixed DOS group.
 bdos equ 0e0h
 cseg
 org 0
@@ -41,7 +42,9 @@ store:
     mov entries[bp],al ! inc bp
     mov ax,bp ! mov entry_count,al
     call spaces
-    cmp si,di ! jae apply
+    cmp si,di ! jb path_more
+    jmp apply
+path_more:
     cmp byte ptr [si],'[' ! je parse_order
     call getchr
     cmp al,',' ! jne bad_path
@@ -50,20 +53,35 @@ store:
 parse_order:
     or operation,2
     mov bx,offset order_prefix ! call match
-    mov type_order,0
+    mov type_order,2             ; CMD alone disables automatic DOS search
     call spaces ! call getchr
     cmp al,')' ! je close_order
-    cmp al,',' ! jne bad_path
-    call spaces
-    mov bx,offset sub_text ! call match
-    mov type_order,1
+    cmp al,',' ! jne order_bad
     call spaces ! call getchr
-    cmp al,')' ! jne bad_path
+    cmp al,'D' ! je order_dos
+    cmp al,'S' ! jne order_bad
+    dec si
+    mov bx,offset sub_text ! call match
+    or type_order,1
+    call spaces ! call getchr
+    cmp al,')' ! je close_order
+    cmp al,',' ! jne order_bad
+    call spaces ! call getchr
+    cmp al,'D' ! jne order_bad
+order_dos:
+    dec si
+    mov bx,offset dos_text ! call match
+    and type_order,0fdh
+    call spaces ! call getchr
+    cmp al,')' ! jne order_bad
 close_order:
     call spaces ! call getchr
-    cmp al,']' ! jne bad_path
+    cmp al,']' ! jne order_bad
     call spaces
-    cmp si,di ! jne bad_path
+    cmp si,di ! jne order_bad
+    jmp apply
+order_bad:
+    jmp syntax_error
 apply:
     call api
     jmp display
@@ -74,7 +92,7 @@ api:
     cmp bx,0 ! jne not_supported
     cmp entry_count,1 ! jb not_supported
     cmp entry_count,4 ! ja not_supported
-    cmp type_order,1 ! ja not_supported
+    cmp type_order,3 ! ja not_supported
     ret
 not_supported:
     mov dx,offset unavailable ! jmp print_exit
@@ -122,8 +140,11 @@ printed:
     mov dx,offset system_end ! call print
     mov dx,offset newline ! call print
     mov dx,offset type_message ! call print
-    cmp type_order,0 ! je end_settings
+    test type_order,1 ! jz display_dos
     mov dx,offset sub_message ! call print
+display_dos:
+    test type_order,2 ! jnz end_settings
+    mov dx,offset dos_message ! call print
 end_settings:
     mov dx,offset newline
 print_exit:
@@ -144,12 +165,13 @@ put:
     mov cl,2 ! int bdos ! ret
 order_prefix db '[ORDER=(CMD',0
 sub_text db 'SUB',0
+dos_text db 'DOS',0
 
 dseg
 org 080h
 command_length rb 1
 org 100h
-packet db 'SD',2
+packet db 'SD',3
 operation db 0
 entry_count db 0
 entries db 0,0,0,0
@@ -166,13 +188,14 @@ default_text db 'Default$'
 newline db 13,10,'$'
 type_message db 'Search Order         - CMD$'
 sub_message db ', SUB$'
+dos_message db ', DOS$'
 system_text db 'Sys Disk ($'
 system_end db ':)',13,10,'$'
-usage db 'Usage: SETDEF [drive-list] [ORDER=(CMD)]',13,10
-      db '       SETDEF [drive-list] [ORDER=(CMD,SUB)]',13,10
+usage db 'Usage: SETDEF [drive-list] [ORDER=(CMD[,SUB][,DOS])]',13,10
+      db 'DOS searches COM, EXE, BAT in that fixed order.',13,10
       db 'Drive list: up to four entries, for example *,A:,C:',13,10
-      db 'SETDEF displays settings. CMD only is the default.',13,10,'$'
-unavailable db 'SETDEF requires a kernel with CMD/SUB search support.',13,10,'$'
+      db 'SETDEF displays settings. CMD,DOS is the default.',13,10,'$'
+unavailable db 'SETDEF requires a kernel with v3 command search support.',13,10,'$'
 rb 128
 stack_top equ offset $
 end

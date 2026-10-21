@@ -1,0 +1,882 @@
+; Calling convention: entered through the legacy XIOS table with DS selecting
+; SYSDAT/XIOS, AL=function, CX/DX=arguments, ES=caller UDA. The dispatcher
+; returns AX in BX as well. These handlers do not change DS or the caller stack.
+; Included by xios.a86 only when PCMODE_XIOS is enabled in pcmode.lib.
+; Source reference: a.sys XIOS entries 291Dh, 29BAh, 16D5h and 3B7Ch.
+;
+; Preserve the combined code/data origin after xrtc.lib's trailing data.
+pc_reorg equ offset $
+        cseg
+        org pc_reorg
+
+; Experimental PCTMP text-console bridge, not the complete PC-MODE XIOS.
+; Original a.sys uses functions 31..34, absent from our legacy table.
+; This experiment keeps our normal 24-row console and status line throughout.
+; It supports DOS console calls and selected BIOS text services below.
+; Cursor shape and CGA palette/pixel writes are supported; other graphics
+; operations still require explicit implementation and tests.
+;
+; Function 32 is called with CX=1 on DOS entry and CX=0 on return.
+; Restore mode/cursor state on return; retain native 24-row buffer geometry.
+pc_text_state:
+        jmp pc_session
+;
+; Do not claim that unimplemented BIOS video/status requests succeeded.
+pc_not_supported:
+        mov     ax,0ffffh
+        ret
+;
+; INT 11h equipment query. Avoid calling the interrupt PCTMP has hooked.
+; Original XIOS 16D5h reads a boot-time BIOS snapshot and replaces display
+; bits using the console's saved DOS-entry mode (+40h), not its current mode.
+; This bridge returns the live physical BDA word. The tested 80-column color
+; entry environment agrees across DOS modes 2..6; it is not general virtual
+; equipment emulation. A future 40-column/mono policy needs explicit adaptation.
+pc_equipment:
+        push    es
+        mov     ax,40h
+        mov     es,ax
+        mov     ax,es:word ptr .10h
+        pop     es
+        ret
+
+; ---------------------------------------------------------------------------
+; Legacy XIOS 31: PCTMP puts the BIOS subfunction in BL. The XIOS dispatcher
+; exchanges AX/BX, so AL here is the subfunction, not 31. Simple calls carry
+; DL=console and CX=argument; packet calls use CX:DX as documented below.
+; Implement cursor, cell read/write and teletype using the virtual console.
+; Never call INT 10h here: PCTMP has hooked it and that would recurse.
+; ---------------------------------------------------------------------------
+pc_video:
+        cmp al,13
+        je pc_video_graphics
+        cmp al,11
+        je pc_video_graphics
+        cmp al,12
+        jne pc_video_cursor
+pc_video_graphics:
+        jmp pc_graphics_packet
+pc_video_cursor:
+        cmp al,1
+        jne pc_video_scroll
+        jmp pc_cursor_shape
+pc_video_scroll:
+        cmp al,6
+        je pc_scroll_dispatch
+        cmp al,7
+        jne pc_video_simple
+pc_scroll_dispatch:
+        jmp pc_scroll
+pc_video_simple:
+        cmp al,2
+        je pc_cursor_set
+        cmp al,3
+        je pc_cursor_get
+        cmp al,14
+        je pc_teletype
+        cmp al,8
+        jne pc_video_try_write
+        jmp pc_read_cell
+pc_video_try_write:
+        cmp al,9
+        jne pc_video_try_char
+        mov si,1
+        jmp pc_write_cells
+pc_video_try_char:
+        cmp al,10
+        jne pc_video_reject
+        xor si,si
+        jmp pc_write_cells
+pc_video_reject:
+        jmp pc_not_supported
+
+; INT 10h/AH=02: CX=row,column, DL=console. Clamp to our 24x80 text area,
+; preserving the status row until full DOS/native window transitions exist.
+pc_cursor_set:
+        cmp dl,num_vir_cons
+        jae pc_video_bad
+        push cx
+        call point_vs
+        call get_mx
+        pop dx
+        cmp dh,crt_rows-1
+        jbe pc_cursor_row
+        mov dh,crt_rows-1
+pc_cursor_row:
+        cmp dl,crt_cols-1
+        jbe pc_cursor_column
+        mov dl,crt_cols-1
+pc_cursor_column:
+        call put_cursor
+        mov vs_mx,0
+        xor ax,ax
+        ret
+
+; INT 10h/AH=03: AX=row,column, which PCTMP places into caller DX.
+; Cursor shape is separately returned as zero by the original PCTMP handler.
+pc_cursor_get:
+        cmp dl,num_vir_cons
+        jae pc_video_bad
+        call point_vs
+        call get_mx
+        mov ax,vs_cursor
+        mov vs_mx,0
+        ret
+
+; INT 10h/AH=0E: CL=character, DL=console. Reuse virtual-console output,
+; including scrolling and ownership. It acquires/releases its own semaphore.
+pc_teletype:
+        cmp dl,num_vir_cons
+        jae pc_video_bad
+        call io_conout
+        xor ax,ax
+        ret
+pc_video_bad:
+        jmp pc_not_supported
+
+; INT 10h/AH=08: return AX=attribute/character under the virtual cursor.
+; A full-screen console can use physical memory as its authoritative image.
+; Select the authoritative segment without calling copy_full_top: that helper
+; changes match_bit and requires a corresponding window ownership transition.
+; Direct mode is enabled by native release_match only when sync_bit is clear.
+pc_read_cell:
+        cmp dl,num_vir_cons
+        jb pc_read_valid
+        jmp pc_not_supported
+pc_read_valid:
+        call point_vs
+        call get_mx
+        mov dx,vs_cursor
+        call point_cursor
+        push es
+        call pc_cell_segment
+        mov ax,es:[di]
+        pop es
+        mov vs_mx,0
+        ret
+
+; INT 10h/AH=09/0A packet at CX:DX:
+;   +0 AX (AL=character), +2 BX (BL=attribute), +4 CX (repeat count),
+;   +6 DX (unused for these operations), +8 virtual console number.
+; SI=1 writes character+attribute; SI=0 preserves each existing attribute.
+; This deliberately differs from original XIOS:3CA5h, which substitutes the
+; console default attribute. Preserve per-cell attributes for BIOS AH=0Ah.
+; Neither operation advances the cursor. Clamp the repeat count to the end
+; of the virtual text area, protecting the status row and adjacent consoles.
+pc_write_cells:
+        push es
+        mov es,cx
+        mov di,dx
+        xor dx,dx
+        mov dl,es:byte ptr 8[di]
+        cmp dl,num_vir_cons
+        jb pc_write_valid
+        pop es
+        jmp pc_not_supported
+pc_write_valid:
+        mov ax,es:[di]
+        mov ah,es:byte ptr 2[di]
+        mov cx,es:word ptr 4[di]
+        pop es
+        push ax
+        push cx
+        push si
+        call point_vs
+        call get_mx
+        pop si
+        pop cx
+        pop ax
+        push ax
+        mov dx,vs_cursor
+        call point_cursor
+        mov dx,crt_size
+        sub dx,ax
+        cmp cx,dx
+        jbe pc_write_count
+        mov cx,dx
+pc_write_count:
+        pop ax
+        push es
+        call pc_cell_segment
+        jcxz pc_write_done
+pc_write_loop:
+        or si,si
+        jnz pc_write_store
+        mov ah,es:byte ptr 1[di]
+pc_write_store:
+        stosw
+        loop pc_write_loop
+pc_write_done:
+        pop es
+        call update_window
+        mov vs_mx,0
+        xor ax,ax
+        ret
+
+; ES receives the authoritative text image. Native match_bit means updates
+; are mediated through a virtual backing screen; clear means a full-screen
+; unsynchronized console uses physical display memory directly. Keep this
+; distinction intact, otherwise later native output disappears into a buffer.
+pc_cell_segment:
+        test vs_mode,match_bit
+        jz pc_cell_physical
+        mov es,vs_vc_seg
+        ret
+pc_cell_physical:
+        mov es,vs_crt_seg
+        ret
+
+; INT 10h/AH=06/07: scroll a rectangular text window up/down.
+; Packet CX:DX: AX=count, BX=BH fill attribute, CX=top/left,
+; DX=bottom/right, byte +8=console. Original handlers: 3BE2h/3BF5h.
+; Clip the bottom/right edges, reject inverted/outside rectangles, and treat
+; zero or excessive counts as clear. The cursor and status row are untouched.
+; Use the authoritative screen without changing native window ownership.
+; Local state is on the caller stack, not shared between virtual consoles:
+pc_sc_direction equ word ptr 20[bp]
+pc_sc_count equ word ptr 18[bp]
+pc_sc_fill equ word ptr 16[bp]
+pc_sc_top equ word ptr 14[bp]
+pc_sc_bottom equ word ptr 12[bp]
+pc_sc_first equ word ptr 10[bp]
+pc_sc_last equ word ptr 8[bp]
+pc_sc_width equ word ptr 6[bp]
+pc_sc_rows equ word ptr 4[bp]
+pc_sc_source equ word ptr 2[bp]
+pc_sc_step equ word ptr 0[bp]
+pc_scroll:
+        push bp
+        sub sp,22
+        mov bp,sp
+        push es
+        xor ah,ah
+        mov pc_sc_direction,ax
+        mov es,cx
+        mov di,dx
+        mov al,es:byte ptr [di]
+        xor ah,ah
+        mov pc_sc_count,ax
+        mov ah,es:byte ptr 3[di]
+        mov al,20h
+        mov pc_sc_fill,ax
+        mov ax,es:word ptr 4[di]
+        mov pc_sc_top,ax
+        mov ax,es:word ptr 6[di]
+        mov pc_sc_bottom,ax
+        mov dl,es:byte ptr 8[di]
+        cmp dl,num_vir_cons
+        jb pc_scroll_console
+        jmp pc_scroll_invalid
+pc_scroll_console:
+        mov cx,pc_sc_top
+        mov ax,pc_sc_bottom
+        cmp ch,crt_rows
+        jae pc_scroll_empty
+        cmp cl,crt_cols
+        jae pc_scroll_empty
+        cmp ah,crt_rows-1
+        jbe pc_scroll_bottom
+        mov ah,crt_rows-1
+pc_scroll_bottom:
+        cmp al,crt_cols-1
+        jbe pc_scroll_right
+        mov al,crt_cols-1
+pc_scroll_right:
+        cmp ch,ah
+        ja pc_scroll_empty
+        cmp cl,al
+        ja pc_scroll_empty
+        jmp pc_scroll_bounds
+pc_scroll_empty:
+        jmp pc_scroll_invalid
+pc_scroll_bounds:
+        mov pc_sc_bottom,ax
+        sub al,cl
+        inc al
+        xor ah,ah
+        mov pc_sc_width,ax
+        mov ax,pc_sc_bottom
+        sub ah,ch
+        inc ah
+        mov al,ah
+        xor ah,ah
+        mov pc_sc_rows,ax
+        cmp pc_sc_count,0
+        je pc_scroll_clear
+        cmp pc_sc_count,ax
+        jb pc_scroll_count
+pc_scroll_clear:
+        mov pc_sc_count,ax
+pc_scroll_count:
+        call point_vs
+        call get_mx
+        mov dx,pc_sc_top
+        call point_cursor
+        mov pc_sc_first,di
+        mov dx,pc_sc_bottom
+        mov dl,byte ptr pc_sc_top
+        call point_cursor
+        mov pc_sc_last,di
+        mov ax,pc_sc_count
+        mov cx,crt_cols*2
+        mul cx
+        mov pc_sc_step,cx
+        cmp pc_sc_direction,6
+        jne pc_scroll_down
+        mov di,pc_sc_first
+        jmp pc_scroll_ready
+pc_scroll_down:
+        neg ax
+        neg pc_sc_step
+pc_scroll_ready:
+        mov pc_sc_source,ax
+        call pc_cell_segment
+pc_scroll_row:
+        mov si,di
+        add si,pc_sc_source
+        mov cx,pc_sc_width
+        push di
+        cmp si,pc_sc_first
+        jb pc_scroll_fill
+        cmp si,pc_sc_last
+        ja pc_scroll_fill
+; Vertical copy order avoids overlap: upward from the top, downward from
+; the bottom. Both segments remain unchanged; read and write through ES.
+pc_scroll_copy:
+        mov ax,es:[si]
+        stosw
+        add si,2
+        loop pc_scroll_copy
+        jmp pc_scroll_next
+pc_scroll_fill:
+        mov ax,pc_sc_fill
+        rep stosw
+pc_scroll_next:
+        pop di
+        add di,pc_sc_step
+        dec pc_sc_rows
+        jnz pc_scroll_row
+        call update_window
+        mov vs_mx,0
+        xor ax,ax
+        jmp pc_scroll_exit
+pc_scroll_invalid:
+        mov ax,0ffffh
+pc_scroll_exit:
+        pop es
+        mov sp,bp
+        add sp,22
+        pop bp
+        ret
+
+; XIOS 33 / INT 16h AH=02: IBM BIOS shift byte in AL, AH=0.
+; The native action table assigns bit 1 to RIGHT Shift, bit 2 to LEFT Shift,
+; despite the opposite names on its equates. Translate actual table order.
+; Num/Caps remain global, matching native translation and status display.
+; Scroll/Insert latches are per foreground console, maintained by the ISR hook.
+; Background callers see their own latches but physical live modifiers.
+pc_shift_status:
+        cmp dl,num_vir_cons
+        jb pc_shift_valid
+        jmp pc_not_supported
+pc_shift_valid:
+        pushf
+        cli
+        xor bx,bx
+        mov bl,dl
+        mov al,pc_key_latches[bx]
+        mov ah,down_bits
+        test ah,2
+        jz pc_shift_left
+        or al,1
+pc_shift_left:
+        test ah,4
+        jz pc_shift_ctrl
+        or al,2
+pc_shift_ctrl:
+        test ah,1
+        jz pc_shift_alt
+        or al,4
+pc_shift_alt:
+        and ah,8
+        or al,ah
+        mov ah,toggle_bits
+        and ah,30h
+        shl ah,1
+        or al,ah
+        xor ah,ah
+        popf
+        ret
+
+; Called immediately after scan_code is saved/restored in the copied XIOS ISR.
+; Preserve every register/flag touched. Track make/break edges so typematic
+; repeats cannot retoggle a latch. Native translation/flow control still runs.
+; Insert follows unmodified keypad semantics: no Ctrl/Alt, and Shift reverses
+; Num Lock for the keypad. Dedicated E0 Insert bypasses Num/Shift selection.
+pc_key_event:
+        pushf
+        push ax
+        push bx
+        mov ah,al
+        and al,7fh
+        cmp al,46h
+        je pc_key_scroll
+        cmp al,52h
+        jne pc_key_done
+        mov al,80h
+if PCMODE_ENHANCED_KEYS
+        cmp pc_key_extended,0
+        je pc_key_edge
+        mov al,40h                 ; separate physical edge for E0 Insert
+endif
+        jmp pc_key_edge
+pc_key_scroll:
+        mov al,10h
+pc_key_edge:
+        test ah,80h
+        jz pc_key_make
+        not al
+        and pc_key_down,al
+        jmp pc_key_done
+pc_key_make:
+        test pc_key_down,al
+        jnz pc_key_done
+        or pc_key_down,al
+if PCMODE_ENHANCED_KEYS
+        cmp al,40h
+        je pc_key_dedicated_insert
+endif
+        cmp al,80h
+        jne pc_key_toggle
+        test down_bits,ctrl_bit or alt_bit
+        jnz pc_key_done
+        test toggle_bits,numlock_bit
+        jz pc_key_no_num
+        test down_bits,6
+        jz pc_key_done
+        jmp pc_key_toggle
+pc_key_no_num:
+        test down_bits,6
+        jnz pc_key_done
+if PCMODE_ENHANCED_KEYS
+        jmp pc_key_toggle
+pc_key_dedicated_insert:
+        test down_bits,ctrl_bit or alt_bit
+        jnz pc_key_done
+        mov al,80h                 ; same per-console BIOS Insert latch
+endif
+pc_key_toggle:
+        xor bx,bx
+        mov bl,top_screen
+        cmp bl,num_vir_cons
+        jae pc_key_done
+        xor pc_key_latches[bx],al
+pc_key_done:
+        pop bx
+        pop ax
+        popf
+        ret
+
+if PCMODE_ENHANCED_KEYS
+; Experimental set-1 scan prefilter, called after the hardware ACK and before
+; native reset/action/translation handling. DS=ES=XIOS, IRQ1 is disabled.
+; All registers preserved. CF=1 consumes the byte; CF=0 lets native ISR run.
+; Other flags are scratch, as the next original instruction is CMP AL,83.
+; Prefix/physical modifier state is global for the one physical keyboard.
+; Per-console Scroll/Insert state remains owned by pc_key_event.
+pc_scan_event:
+        push ax
+        push bx
+        mov pc_key_extended,0
+        xor bx,bx
+        mov bl,pc_pause_step
+        or bl,bl
+        jz pc_scan_prefix
+        ; Match the five bytes following E1 in the Pause make sequence.
+        ; None reach native Ctrl/Num handling. On mismatch discard only the
+        ; already matched prefix and reconsider the current byte normally.
+        dec bx
+        cmp al,pc_pause_bytes[bx]
+        jne pc_scan_pause_invalid
+        inc pc_pause_step
+        cmp pc_pause_step,6
+        jae pc_scan_pause_complete
+        jmp pc_scan_consumed
+pc_scan_pause_complete:
+        mov pc_pause_step,0
+        jmp pc_scan_consumed
+pc_scan_pause_invalid:
+        mov pc_pause_step,0
+pc_scan_prefix:
+        cmp al,0e1h
+        jne pc_scan_not_pause
+        mov pc_pause_step,1
+        mov pc_e0_pending,0
+        jmp pc_scan_consumed
+pc_scan_not_pause:
+        cmp al,0e0h
+        jne pc_scan_payload
+        mov pc_e0_pending,1
+        jmp pc_scan_consumed
+pc_scan_payload:
+        mov bl,pc_e0_pending
+        mov pc_key_extended,bl
+        mov pc_e0_pending,0
+        mov ah,al
+        and ah,7fh
+        cmp ah,1dh
+        je pc_scan_ctrl
+        cmp ah,38h
+        je pc_scan_alt
+        or bl,bl
+        jz pc_scan_native
+        ; E0 fake Shift/Print/Ctrl-Break and unsupported enhanced keys are
+        ; consumed. Accept only Enter, slash and dedicated navigation here.
+        cmp ah,1ch
+        je pc_scan_native
+        cmp ah,35h
+        je pc_scan_native
+        cmp ah,47h
+        jb pc_scan_consumed
+        cmp ah,53h
+        ja pc_scan_consumed
+        cmp ah,4ah
+        je pc_scan_consumed
+        cmp ah,4eh
+        je pc_scan_consumed
+        jmp pc_scan_native
+pc_scan_ctrl:
+        mov ah,1                    ; left Ctrl bit in private physical mask
+        or bl,bl
+        jz pc_scan_modifier
+        mov ah,2                    ; right Ctrl (E0 1D)
+        jmp pc_scan_modifier
+pc_scan_alt:
+        mov ah,4                    ; left Alt
+        or bl,bl
+        jz pc_scan_modifier
+        mov ah,8                    ; right Alt (E0 38)
+pc_scan_modifier:
+        test al,80h
+        jz pc_scan_modifier_make
+        not ah
+        and pc_modifier_down,ah
+        jmp pc_scan_modifiers_merge
+pc_scan_modifier_make:
+        or pc_modifier_down,ah
+pc_scan_modifiers_merge:
+        ; Native code sees the union: one side's release cannot clear the
+        ; other. Consume these events so native action_key cannot undo it.
+        and down_bits,0ffh-ctrl_bit-alt_bit
+        test pc_modifier_down,3
+        jz pc_scan_merge_alt
+        or down_bits,ctrl_bit
+pc_scan_merge_alt:
+        test pc_modifier_down,12
+        jz pc_scan_consumed
+        or down_bits,alt_bit
+pc_scan_consumed:
+        pop bx
+        pop ax
+        stc
+        ret
+pc_scan_native:
+        pop bx
+        pop ax
+        clc
+        ret
+
+pc_e0_pending db 0
+pc_pause_step db 0
+pc_key_extended db 0
+pc_modifier_down db 0
+pc_pause_bytes db 1dh,45h,0e1h,9dh,0c5h
+
+endif
+
+; Private experimental state; no virtual-screen layout or production ABI change.
+pc_key_down db 0
+pc_key_latches db 0,0,0,0
+
+; Capture the firmware INT 10h vector during XIOS INIT, before PCTMP installs
+; its BIOS emulation. Native enhanced-video helpers must call this vector,
+; not INT 10h (which would recurse into PCTMP after its RSP starts).
+pc_capture_video:
+        push ax
+        push es
+        xor ax,ax
+        mov es,ax
+        mov ax,es:word ptr .40h
+        mov pc_video_rom,ax
+        mov ax,es:word ptr .42h
+        mov pc_video_rom+2,ax
+        pop es
+        pop ax
+        ret
+
+; XIOS 32: idempotent per-console DOS entry/exit. Keep the native 24-row
+; geometry until allocation, ownership maps and status-row handling support
+; row 25 together. Save native video mode, cursor shape and visibility, then
+; restore them on DOS exit. Keep the DOS cursor position (clamped), as the
+; original XIOS does; restoring its entry position would overwrite DOS output.
+; Record layout: active byte, mode byte, shape word, visibility byte, padding.
+pc_session:
+        cmp dl,num_vir_cons
+        jb pc_session_valid
+        jmp pc_not_supported
+pc_session_valid:
+        push cx
+        push dx
+        call get_all_mxs
+        pop dx
+        pop cx
+        call point_vs
+        xor ax,ax
+        mov al,dl
+        mov si,ax
+        shl si,1
+        add si,ax
+        shl si,1
+        test cl,1
+        jz pc_session_leave
+        cmp byte ptr pc_sessions[si],0
+        je pc_session_save
+        jmp pc_session_done
+pc_session_save:
+        mov al,vs_screen_mode
+        cmp al,1
+        jne pc_session_explicit
+; Native mode 1 means generic text, not BIOS mode -1. PCTMP subtracts two
+; from the XIOS mode query. Normalize it before exposing the DOS interface.
+        mov al,5                ; native explicit color text = BIOS mode 3
+        cmp vs_crt_seg,mono_seg
+        jne pc_session_explicit
+        mov al,9                ; native monochrome text = BIOS mode 7
+pc_session_explicit:
+        mov vs_screen_mode,al
+        mov byte ptr pc_sessions+1[si],al
+        mov ax,vs_cur_type
+        mov word ptr pc_sessions+2[si],ax
+        mov al,vs_mode
+        and al,cursor_bit
+        mov byte ptr pc_sessions+4[si],al
+        mov byte ptr pc_sessions[si],1
+        jmp pc_session_done
+pc_session_leave:
+        cmp byte ptr pc_sessions[si],0
+        je pc_session_done
+        mov cl,byte ptr pc_sessions+1[si]
+        cmp cl,vs_screen_mode
+        je pc_session_cursor
+        xor ch,ch
+        push si
+        push dx
+        push cx
+        test vs_screen_mode,0f0h
+        jnz pc_session_mode
+        call copy_full_top       ; save text before firmware mode reset clears it
+pc_session_mode:
+        pop cx
+        pop dx
+        push dx
+        call get_set_screen
+        pop dx
+        pop si
+        call point_vs
+pc_session_cursor:
+        mov ax,word ptr pc_sessions+2[si]
+        mov vs_cur_type,ax
+        and vs_mode,0ffh-cursor_bit
+        mov al,byte ptr pc_sessions+4[si]
+        or vs_mode,al
+        mov byte ptr pc_sessions[si],0
+        mov dx,vs_cursor
+        cmp dh,crt_rows-1
+        jbe pc_session_column
+        mov dh,crt_rows-1
+pc_session_column:
+        cmp dl,crt_cols-1
+        jbe pc_session_position
+        mov dl,crt_cols-1
+pc_session_position:
+        call put_cursor
+        mov al,vs_number
+        cmp al,top_screen
+        jne pc_session_done
+        call new_cursor_on
+pc_session_done:
+        call free_all_mxs
+        xor ax,ax
+        ret
+
+; BIOS AH=01 uses CX=start/end scan lines. The native visibility flag remains
+; separate; bit 5 in CH is the BIOS hide convention and belongs in the shape.
+; Hardware cursor updates use native ownership checks, never a hooked INT 10h.
+pc_cursor_shape:
+        cmp dl,num_vir_cons
+        jb pc_shape_valid
+        jmp pc_not_supported
+pc_shape_valid:
+        push cx
+        call point_vs
+        call get_mx
+        pop cx
+        mov vs_cur_type,cx
+        call show_cursor
+        mov vs_mx,0
+        xor ax,ax
+        ret
+
+pc_video_rom dw 0,0
+pc_sessions db 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+
+; BIOS AH=0B palette, AH=0C write and AH=0D read; packet at CX:DX as for scroll.
+; Use the captured firmware through the existing private-stack/PIC guard.
+; Only the foreground graphics owner may touch hardware. CGA modes 4/5/6,
+; page zero and in-range coordinates are supported; reject all other requests.
+; AL bit 7 retains the BIOS XOR-pixel convention. AH=0Dh returns a bounded read.
+pc_graphics_packet:
+        push es
+        xor ah,ah
+        mov si,ax
+        mov es,cx
+        mov di,dx
+        mov dl,es:byte ptr 8[di]
+        cmp dl,num_vir_cons
+        jb pc_graph_console
+        jmp pc_graph_bad
+pc_graph_console:
+        call point_vs
+        mov al,vs_number
+        cmp al,top_screen
+        jne pc_graph_bad
+        mov al,vs_bit
+        test graphic_bits,al
+        jz pc_graph_bad
+        mov al,vs_screen_mode
+        cmp al,20h
+        je pc_graph_mode
+        cmp al,30h
+        je pc_graph_mode
+        cmp al,40h
+        jne pc_graph_bad
+pc_graph_mode:
+        cmp si,11
+        je pc_graph_palette
+        cmp es:byte ptr 3[di],0
+        jne pc_graph_bad
+        mov cx,320
+        cmp al,40h
+        jne pc_graph_width
+        mov cx,640
+pc_graph_width:
+        cmp es:word ptr 4[di],cx
+        jae pc_graph_bad
+        cmp es:word ptr 6[di],200
+        jae pc_graph_bad
+        cmp si,13
+        jne pc_graph_call
+        jmp pc_graph_read
+pc_graph_palette:
+        cmp es:byte ptr 3[di],1
+        ja pc_graph_bad
+pc_graph_call:
+        call get_mx
+        push bx
+        mov ax,si
+        mov ah,al
+        mov al,es:byte ptr [di]
+        mov bx,es:word ptr 2[di]
+        mov cx,es:word ptr 4[di]
+        mov dx,es:word ptr 6[di]
+        call video_bios
+        pop bx
+        mov vs_mx,0
+        pop es
+        xor ax,ax
+        ret
+pc_graph_bad:
+        pop es
+        jmp pc_not_supported
+
+; CGA pixel read uses the same foreground/mode/page/coordinate checks as
+; pixel write above. Read direct CGA RAM instead of video_bios, whose ABI
+; preserves caller AX and therefore cannot supply BIOS AH=0Dh's returned AL.
+; BX initially selects the locked native screen; preserve it while computing
+; the CGA bank/byte. Return AX=color (0..3 or 0..1), with no mutable sidecar.
+pc_graph_read:
+        call get_mx
+        push bx
+        push bp
+        mov bp,2                  ; four two-bit pixels per byte, modes 4/5
+        cmp vs_screen_mode,40h
+        jne pc_read_format_ready
+        inc bp                    ; eight one-bit pixels per byte, mode 6
+pc_read_format_ready:
+        mov ax,es:word ptr 6[di]   ; y: even/odd bank, 80 bytes per paired row
+        mov cx,ax
+        and cx,1
+        shr ax,1
+        mov dx,80
+        mul dx
+        jcxz pc_read_bank_ready
+        add ax,2000h
+pc_read_bank_ready:
+        mov dx,es:word ptr 4[di]   ; x: byte index and pixel field within byte
+        mov bx,dx
+        mov cx,bp
+        shr bx,cl
+        add bx,ax
+        mov ax,0b800h
+        mov es,ax
+        mov al,es:byte ptr [bx]
+        cmp bp,3
+        jne pc_read_two_bits
+        and dx,7
+        mov cx,7
+        sub cx,dx
+        shr al,cl
+        and ax,1
+        jmps pc_read_done
+pc_read_two_bits:
+        and dx,3
+        mov cx,3
+        sub cx,dx
+        shl cl,1
+        shr al,cl
+        and ax,3
+pc_read_done:
+        pop bp
+        pop bx
+        mov vs_mx,0
+        pop es
+        ret
+
+; BIOS INT 1Ah/AH=00 reads the BDA clock directly. CCP/M owns IRQ0 and
+; programs the PIT for 60 Hz, so the ROM timer ISR no longer advances it.
+; Accumulate actual PIT input cycles: overflow at 65536 gives the original
+; BIOS tick rate without changing native scheduling. IRQ0 has saved all
+; registers and disabled interrupts. Do not chain the ROM IRQ handler: it
+; would acknowledge our interrupt and run incompatible floppy housekeeping.
+; Preserve the boot-time BDA value; roll over at the BIOS day boundary.
+pc_clock_tick:
+        add pc_clock_phase,timer_60_hz
+        jnc pc_clock_done
+        mov ax,40h
+        mov es,ax
+        xor bx,bx
+        add es:word ptr 6ch[bx],1
+        adc es:word ptr 6eh[bx],0
+        cmp es:word ptr 6eh[bx],18h
+        jb pc_clock_done
+        ja pc_clock_midnight
+        cmp es:word ptr 6ch[bx],0b0h
+        jb pc_clock_done
+pc_clock_midnight:
+        mov es:word ptr 6ch[bx],0
+        mov es:word ptr 6eh[bx],0
+        mov es:byte ptr 70h[bx],1
+pc_clock_done:
+        ret
+
+pc_clock_phase dw 0

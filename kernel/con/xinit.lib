@@ -59,6 +59,10 @@ reorg16	equ	offset $
 INIT:
 	cli
 	call	set_sys_vars		; set up system variables
+if PCMODE_XIOS
+; Capture firmware before PCTMP installs its INT 10h handler.
+	call	pc_capture_video
+endif
 	call	equip_check		; see what we've got
 	call	check_hi_mem		; from C000 up
 	call	ndp_init		; check for an 8087

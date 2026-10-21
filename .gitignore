@@ -36,11 +36,17 @@ local/**
 **/.*.swp
 **/.DS_Store
 **/*.new
-commands/dskmaint/*.bin
-commands/dskmaint/*.inc
+/commands/dskmaint/*.bin
+/commands/dskmaint/*.inc
 
 /commands/help/help.hlp
 /kernel/sysgen/ccpm.old
+
+# Recovered, immutable PC-MODE inputs (hashes/provenance live beside them).
+!/kernel/rsp3/inputs/pctmp.rsp
+
+# Opt-in personality output, independent of production media.
+/build/pcmode*/
 **/__pycache__/
 
 # Original binary inputs used to build the floppy images.

@@ -1,0 +1,5 @@
+; XIOS personality selection. Native build remains disabled.
+; The opt-in build enables this flag in its isolated CON source copy.
+; This is independent of BDOS PCMODE (the unavailable FAT filesystem).
+PCMODE_XIOS equ 0
+PCMODE_ENHANCED_KEYS equ 0ffffh

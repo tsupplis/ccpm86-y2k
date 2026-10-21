@@ -1,6 +1,6 @@
 ; Supervisor private SETDEF storage, using the historic 128-byte patch reserve.
-; No code branches into this area. Records start at CMD/* defaults.
-; Record count: low 7 bits = path length, bit 7 enables CMD,SUB.
+; No code branches into this area. Records start at CMD,DOS/* defaults.
+; Record count: low 6 bits = path length, bit 7 enables SUB, bit 6 disables DOS.
 patch:
 sd_paths db 0,0,0,0,0            ; console 0: count + four entries
     db 0,0,0,0,0                ; console 1
