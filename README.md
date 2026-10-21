@@ -1,6 +1,7 @@
 # Concurrent CP/M-86 3.1 Kernel and Tools
 
 **Disk Images are now available as part of the project releases, ready to use !**
+**Also stay tuned, we are adding PCMODE, so Concurrent PC DOS 3.1 is on its way!!!!!**
 
 This project preserves Digital Research's Concurrent CP/M-86 3.1 as a usable,
 rebuildable system for running and exploring classic 16-bit software. Runnable
