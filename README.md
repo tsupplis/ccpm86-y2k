@@ -1,7 +1,6 @@
 # Concurrent CP/M-86 3.1 Kernel and Tools
 
 **Disk Images are now available as part of the project releases, ready to use !**
-**Also stay tuned, we are adding PCMODE, so Concurrent PC DOS 3.1 is on its way!!!!!**
 
 This project preserves Digital Research's Concurrent CP/M-86 3.1 as a usable,
 rebuildable system for running and exploring classic 16-bit software. Runnable
@@ -101,47 +100,49 @@ The [source-built boot track](boot/README.md) reproduces all 4,096 bytes of the 
 
 Format: [cpm86-kernel](../cpm86-kernel/README.md). **3.1** = rebuildable sources; SYSDISK: byte-identical CMD plus TMP built-in.
 
-| Tool | Purpose | Binary (`base/`) | Source (`commands/`) |
-| --- | --- | --- | --- |
-| `asm86` | 8086 assembler | — | 3.1 |
-| `cls` | Clear the terminal screen | — | TMP built-in; VT52 ESC-E |
-| `chset` | Inspect or change CMD header flags | — | Recompiled from CCP/M-86 3.1 and adapted |
-| `config` | Configure serial ports | Original | — |
-| `date` | Display or set the date | — | Recompiled from CCP/M-86 3.1 and adapted, Y2K patched |
-| `dcomp` | Compare floppy diskettes | — | Ported from [PC DOS 1.10](https://github.com/tsupplis/pcdos11-hacking) |
-| `dcopy` | Copy floppy diskettes | — | Ported from [PC DOS 1.10](https://github.com/tsupplis/pcdos11-hacking) |
-| `ddt86` | Interactive machine-code debugger | — | Recompiled from CCP/M-86 3.1 and adapted |
-| `dir` | List directory contents | — | Recompiled from CCP/M-86 3.1 and adapted; command/RSP |
-| `dform` | Command-line floppy formatter | — | New |
-| `dskmaint` | Format, verify and copy diskettes | Reverse engineered from CCP/M-86 |
-| `ed` | Line-oriented text editor | — | Recompiled from CCP/M-86 3.1 and adapted |
-| `era` / `eraq` | Erase files, optionally with confirmation | — | Recompiled from CCP/M-86 3.1 and adapted |
-| `function` | Program function keys | Original | — |
-| `gencmd` | Convert H86 output into CMD executables | — | Recompiled from CCP/M-86 3.1 and adapted |
-| `genccpm` | Generate and configure the system image | — | Recompiled from CCP/M-86 3.1 and adapted; flag-table fix |
-| `gentab` | Generate disassembler opcode tables | — | Recompiled from CCP/M-86 3.1 and adapted |
-| `hdmaint` | Hard-disk maintenance | Original | — |
-| `help` / `help.hlp` | Browse indexed command help | — | Recompiled from CCP/M-86 3.1 and adapted; indexed from `help.dat` |
-| `initdir` | Enable directory date/time stamps | — | Recompiled from CCP/M-86 3.1 and adapted |
-| `pcetime` | Synchronize time with the PCE host | Original | — |
-| `pip` | Copy and transfer files | — | Recompiled from CDOS 4.1 and adapted |
-| `ren` | Rename files | — | 3.1 |
-| `sdir` | Detailed, sorted directory listing | — | Recompiled from CCP/M-86 3.1 and adapted, Y2K/DPB/tail fixes |
-| `set` | Set file and drive attributes | — | Recompiled from CCP/M-86 3.1 and adapted |
-| `setup` | Customize IBM PC/XT XIOS settings | Original | — |
-| `show` | Display disk space and drive information | — | Recompiled from CCP/M-86 3.1 and adapted, Y2K patched |
-| `setdef` | Display/change the per-console command drive list; fixed system fallback | — | New, Source-built `SETDEF.CMD`; local kernel extension |
-| `submit` | Run batch command files | — | Recompiled from CCP/M-86 3.1 and adapted |
-| `sysdisk` | Display or change the system drive; TMP built-in and standalone tool | — | TMP built-in + standalone `SYSDISK.CMD` recompiled from CCP/M-86 3.1 and adapted; byte-identical CMD reconstruction |
-| `systat` | Inspect processes and system resources | — | Recompiled from CCP/M-86 3.1 and adapted |
-| `tod` | Display or set date and time | — | Recompiled from MCP/M-86 2.1 and adapted, Y2K patched |
-| `type` | Display a text file | — | Recompiled from CCP/M-86 3.1 and adapted |
-| `window` | Control console windows from commands | Original | — |
-| `wmenu` | Interactive console-window manager | Original | — |
-| `vcmode` | Set virtual-console background modes | — | Recompiled from CCP/M-86 3.1 and adapted |
-| `asm80` | 8080 assembler | — | Adapted from CP/M-80 2.2 and translated using XLT86 |
-| `hexcom` | Convert Intel HEX to COM binaries | — | HEXCOM 3.00-compatible C from [tpzasm](https://github.com/johnsonjh/tpzasm) |
-| `dredix` | Full-screen text editor | — | 4.1; DREDIX C Backported from Concurrent DOS 4.1 |
+| Tool | Purpose | Binary (`base/`) | Source (`commands/`) | BDOS 2.2 Compat. |
+| --- | --- | --- | --- | :---: |
+| `asm86` | 8086 assembler | — | 3.1 | ✓ |
+| `cls` | Clear the terminal screen | — | TMP built-in; VT52 ESC-E |  |
+| `chset` | Inspect or change CMD header flags | — | Recompiled from CCP/M-86 3.1 and adapted |  |
+| `config` | Configure serial ports | Original | — |  |
+| `date` | Display or set the date | — | Recompiled from CCP/M-86 3.1 and adapted, Y2K patched |  |
+| `dcomp` | Compare floppy diskettes | — | Ported from [PC DOS 1.10](https://github.com/tsupplis/pcdos11-hacking) | ✓ |
+| `dcopy` | Copy floppy diskettes | — | Ported from [PC DOS 1.10](https://github.com/tsupplis/pcdos11-hacking) | ✓ |
+| `ddt86` | Interactive machine-code debugger | — | Recompiled from CCP/M-86 3.1 and adapted | ✓ |
+| `dir` | List directory contents | — | Recompiled from CCP/M-86 3.1 and adapted; command/RSP |  |
+| `dform` | Command-line floppy formatter | — | New | ✓ |
+| `dskmaint` | Format, verify and copy diskettes | Original | Reverse engineered from CCP/M-86 |  |
+| `ed` | Line-oriented text editor | — | Recompiled from CCP/M-86 3.1 and adapted | ✓ |
+| `era` / `eraq` | Erase files, optionally with confirmation | — | Recompiled from CCP/M-86 3.1 and adapted |  |
+| `function` | Program function keys | Original | — |  |
+| `gencmd` | Convert H86 output into CMD executables | — | Recompiled from CCP/M-86 3.1 and adapted | ✓ |
+| `genccpm` | Generate and configure the system image | — | Recompiled from CCP/M-86 3.1 and adapted; flag-table fix |  |
+| `gentab` | Generate disassembler opcode tables | — | Recompiled from CCP/M-86 3.1 and adapted |  |
+| `hdmaint` | Hard-disk maintenance | Original | — |  |
+| `help` / `help.hlp` | Browse indexed command help | — | Recompiled from CCP/M-86 3.1 and adapted; indexed from `help.dat` | ✓ |
+| `initdir` | Enable directory date/time stamps | — | Recompiled from CCP/M-86 3.1 and adapted |  |
+| `pcetime` | Synchronize time with the PCE host | Original | — |  |
+| `pip` | Copy and transfer files | — | Recompiled from CDOS 4.1 and adapted |  |
+| `ren` | Rename files | — | 3.1 |  |
+| `sdir` | Detailed, sorted directory listing | — | Recompiled from CCP/M-86 3.1 and adapted, Y2K/DPB/tail fixes |  |
+| `set` | Set file and drive attributes | — | Recompiled from CCP/M-86 3.1 and adapted |  |
+| `setup` | Customize IBM PC/XT XIOS settings | Original | — |  |
+| `show` | Display disk space and drive information | — | Recompiled from CCP/M-86 3.1 and adapted, Y2K patched |  |
+| `setdef` | Display/change the per-console command drive list; fixed system fallback | — | New, Source-built `SETDEF.CMD`; local kernel extension |  |
+| `submit` | Run batch command files | — | Recompiled from CCP/M-86 3.1 and adapted |  |
+| `sysdisk` | Display or change the system drive; TMP built-in and standalone tool | — | TMP built-in + standalone `SYSDISK.CMD` recompiled from CCP/M-86 3.1 and adapted; byte-identical CMD reconstruction |  |
+| `systat` | Inspect processes and system resources | — | Recompiled from CCP/M-86 3.1 and adapted |  |
+| `tod` | Display or set date and time | — | Recompiled from MP/M-86 2.1 and adapted, Y2K patched |  |
+| `type` | Display a text file | — | Recompiled from CCP/M-86 3.1 and adapted |  |
+| `window` | Control console windows from commands | Original | — |  |
+| `wmenu` | Interactive console-window manager | Original | — |  |
+| `vcmode` | Set virtual-console background modes | — | Recompiled from CCP/M-86 3.1 and adapted |  |
+| `asm80` | 8080 assembler | — | Translated using XLT86 from CP/M-80 2.2 and adapted | ✓ |
+| `hexcom` | Convert Intel HEX to COM binaries | — | HEXCOM 3.00-compatible C from [tpzasm](https://github.com/johnsonjh/tpzasm) | ✓ |
+| `dredix` | Full-screen text editor | — | 4.1; DREDIX C Backported from Concurrent DOS 4.1 |  |
+
+✓ = confirmed compatible with BDOS 2.2.
 
 ### Development binaries
 
