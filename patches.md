@@ -107,8 +107,10 @@ build succeed. A read-only inventory of all 13 base CMD files satisfies the
 new header checks. User PCE screenshots confirm row-25 ownership/status restoration
 and the equipment probe. Seventeen focused native CMD cases pass under both PCTMP and native TMP, covering
 header rejection, relocation bounds, truncated reads and shared failure/recovery.
-DOS loader and status-restoration checks are in progress; these results do not
-claim exhaustive allocation-failure or CHAIN coverage. Review notes and build logs remain in private/pcmode.
+A further 24 DOS/MZ/video checks pass, including stack/image bounds, valid EXE
+recovery, character output, status restoration and second-console return. All six
+packaged images pass payload, boot-track and size comparisons. These results do
+not claim exhaustive allocation-failure or CHAIN coverage. Review notes and build logs remain in private/pcmode.
 
 ## Commands and build
 

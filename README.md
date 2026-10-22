@@ -7,6 +7,39 @@ rebuildable system for running and exploring classic 16-bit software. Runnable
 disks and development tools accompany the sources and patch notes, making the
 system more consumable (CP/M-Plus style) and accessible to anyone interested in its history.
 
+## PC-MODE is back — DOS programs on Concurrent CP/M-86!
+
+**The default system now includes PC-MODE: run supported DOS `.COM` and `.EXE`
+programs alongside native CP/M-86 `.CMD` commands, from the same shell.**
+This brings a major part of the system's heritage into the normal source build
+and floppy distribution.
+
+<p align="center">
+<img src="images/pcmode.png" alt="Microsoft Macro Assembler 1.10 running under PC-MODE on Concurrent CP/M-86" width="85%">
+<br><sub>Microsoft Macro Assembler 1.10 running under PC-MODE in PCE</sub>
+</p>
+
+- **A familiar shell:** PCTMP includes command-line editing and recall, `?` help,
+  `CLS`, `SYSDISK`, startup scripts and configurable `SETDEF` search order.
+- **DOS text applications get all 25 rows.** Returning to the shell restores the
+  native 24-row console and status line. DOS/BIOS services connect to the shared XIOS.
+- **DOS development tools are included:** MASM, LIB, LINK, LINKCMD, LINKEXE,
+  EXE2BIN and Microsoft BASIC have their own `ccpmdos.img` companion disk.
+  `BATCH.CMD` is included on the system disks for BAT execution.
+- **Two personalities, one build:** `make` produces both the PC-MODE system
+  (`ccpm86.img`) and a native TMP alternative (`ccpmnative.img`). Choose at boot.
+
+With the project's `pcfloppy` launcher, boot PC-MODE and mount the DOS tools:
+
+```sh
+pcfloppy ccpm86.img ccpmdos.img
+```
+
+PC-MODE supports a bounded DOS/BIOS subset; application compatibility varies.
+The supplied disks use the CP/M filesystem—DOS FAT support is not enabled.
+See [patch notes](patches.md#pc-mode-and-loader-hardening) for the implementation
+and verification details, and [distributions](#distributions) for all six disks.
+
 <p align="center">
 <img src="images/ccpm86.png" alt="Concurrent CP/M-86 3.1 running in PCE" width="48%">
 <img src="images/windows.png" alt="Overlapping console windows" width="48%">
@@ -20,11 +53,12 @@ system more consumable (CP/M-Plus style) and accessible to anyone interested in 
 | Goal | Distribution |
 | --- | --- |
 | Full source distribution | Kernel, nine RSPs, most commands; gaps below |
+| PC-MODE | DOS COM/EXE execution, PCTMP shell, DOS development disk; native TMP boot alternative |
 | Additional tools | ASM80, HEXCOM, DREDIX, DR development chain, Microsoft BASIC 5.50A |
 | Y2K components | SDIR, DATE, SHOW, TOD for CCP/M-86 3.2 through Concurrent DOS 4.1; 3.1 fixes included |
 | Usability and Bug fixes| CP/M Plus usability, known problem fixes (like the failing sysdisk on systems with 2 floppies and a hard disk) ... |
 
-The current version already incorporate:
+Alongside PC-MODE, the current version includes:
 - CP/M Plus mapped and direction keys command line recall and editing,
 - CP/M Plus setdef style configurability
 - Support for CGA, EGA modes even on VGA card,
@@ -33,7 +67,7 @@ The current version already incorporate:
 - New terminal commands (cls, sysdisk)
 - and many other patches ...
 
-Those little changes make the OS far more friendly than the original.
+These additions make the system easier to use while preserving its native CP/M workflow.
 
 ## Command line conveniences
 
@@ -67,7 +101,9 @@ drives, invalid names, resource limits and malformed executables.
 | `SETDEF` | Show current settings |
 | `SETDEF *,A:,C:` | Search the current drive, then A: and C: |
 | `SETDEF [ORDER=(CMD,SUB)]` | Search CMD, then SUB on each drive |
-| `SETDEF * [ORDER=(CMD)]` | Restore current-drive, CMD-only defaults |
+| `SETDEF [ORDER=(CMD,DOS)]` | Search CMD, COM, EXE, BAT on each drive (default) |
+| `SETDEF [ORDER=(CMD,SUB,DOS)]` | Search CMD, SUB, COM, EXE, BAT on each drive |
+| `SETDEF * [ORDER=(CMD)]` | Search only the current drive for CMD commands, then the system fallback |
 
 Resident commands take priority; an explicit drive bypasses the path.
 The system disk remains the final fallback. `SYSDISK` selects that disk
@@ -75,7 +111,8 @@ globally, while SETDEF settings are local to each console and last until
 changed or rebooted. Add SETDEF to `STARTUP.nnn` for persistent preferences.
 
 Automatic SUB execution requires the rebuilt `SUBMIT.CMD` on the search
-path. An explicit `.SUB` runs a script even with the default CMD-only order.
+path. An explicit `.SUB` runs a script even when SUB is absent from the search
+order. Native TMP accepts the same settings and ignores DOS entries.
 Loading commands from other drives preserves the working drive and user.
 See `HELP SETDEF` and [Patches](patches.md) for details and limitations.
 
