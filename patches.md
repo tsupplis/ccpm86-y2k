@@ -22,7 +22,8 @@ User-facing commands and key bindings are documented in README.md and HELP.
   Explicit drives/extensions can still select external commands. Help expansion
   rejects oversized requests without adding per-console storage.
 - **SETDEF:** per-console paths of one to four drives, default `*`; search order
-  CMD (default) or CMD,SUB. Each drive is searched in that order, followed by
+  CMD, CMD,SUB, CMD,DOS (default) or CMD,SUB,DOS. DOS expands to COM, EXE,
+  BAT in PCTMP and is ignored by native TMP. Each drive is searched in that order, followed by
   the fixed SYS-restricted system-disk fallback. Bare SETDEF displays settings,
   including Sys Disk as the last path entry. Explicit drives/extensions restrict
   lookup; explicit SUB remains available in CMD-only mode. Resident commands
@@ -33,8 +34,8 @@ User-facing commands and key bindings are documented in README.md and HELP.
   and missing SUBMIT.CMD produce errors 43/44 (126-character expanded-tail
   limit). SUBMIT is located through CMD-only lookup; the caller's working
   drive/user and ordinary explicit SUBMIT behavior are preserved.
-- **Implementation:** private BDOS 165 supports drive-only v1 clients and v2
-  path/order updates. Settings reuse SUP's patch reserve without changing
+- **Implementation:** private BDOS 165 supports v3 path/order updates while retaining
+  compatibility with drive-only v1 clients and v2 path/order updates. Settings reuse SUP's patch reserve without changing
   SYSDAT, PD or UDA layouts. Recall reserves 4 KiB in CIO; cursor state uses
   ten bytes of the caller's stack frame. Recall truncates to the receiving
   buffer; full buffers reject overflow. Full recalled or middle-insertion lines
@@ -70,6 +71,45 @@ User-facing commands and key bindings are documented in README.md and HELP.
   drawing, XOR and 8x14 ROM-font text; older kernels reject enhanced requests
   without changing video mode.
 
+## PC-MODE and loader hardening
+
+- Normal kernel builds produce both PCTMP/PC-MODE and native TMP/XIOS systems.
+  Separate top-level XIOS assembly wrappers share the same implementation includes.
+  PCTMP uses the ordinary ASM86/H86/GENCMD build in kernel/rsp3; runtime builds
+  have no dependency on private/pcmode. Media packaging includes BATCH.CMD.
+- XIOS gives DOS sessions 25 text rows, hides the status line while row 25 is
+  owned, and restores native 24-row operation on return. Equipment reporting
+  uses cached hardware information and the console's saved entry mode. BIOS
+  character-only output uses the console attribute, matching recovered XIOS.
+- PCTMP validates EXE image placement against the actual allocation, excluding
+  private loader storage and PSP, and reserves image plus MINALLOC. Both aligned
+  and unaligned EXEs use the bounded scratch reader, avoiding final-record
+  padding writes outside the allocation and rejecting premature EOF.
+- Native CMD preflight rejects unsupported/duplicate group types, image lengths
+  exceeding group minima, file-paragraph overflow, missing base groups and
+  insufficient base-page capacity before allocation or CHAIN memory changes.
+  Empty groups do not participate in relative-memory spreading.
+- Native CMD relocation checks reject invalid groups, overflowing paragraph
+  calculations and writes beyond the actual group extent, including reused
+  shared-code extents. Premature group EOF is an error; read/abort error codes
+  survive loop-counter restoration.
+- Native CMD cleanup records allocations only after success. Shared-code
+  attachments are tracked for rollback; failures unlink the actual newly
+  created cache owner, preserving existing cached owners. Failed sharing is
+  handled instead of assuming memory-descriptor allocation always succeeds.
+  The rollback owner uses two spare bytes in SUP's existing patch reserve;
+  SYSDAT, PD and UDA layouts are unchanged.
+- Status cache invalidation also runs after window repaint, so a status refresh
+  during repaint cannot leave a blank line cached as already displayed.
+
+Validation on 22 October 2026: supervisor assembly and normal kernel/SYSGEN
+build succeed. A read-only inventory of all 13 base CMD files satisfies the
+new header checks. User PCE screenshots confirm row-25 ownership/status restoration
+and the equipment probe. Seventeen focused native CMD cases pass under both PCTMP and native TMP, covering
+header rejection, relocation bounds, truncated reads and shared failure/recovery.
+DOS loader and status-restoration checks are in progress; these results do not
+claim exhaustive allocation-failure or CHAIN coverage. Review notes and build logs remain in private/pcmode.
+
 ## Commands and build
 
 | Area | Changes |
@@ -84,7 +124,7 @@ User-facing commands and key bindings are documented in README.md and HELP.
 | Resident processes | Rebuild supplied sources; remove PIN's duplicate Ctrl-C declaration and obsolete standalone CLS/SYSDISK RSPs. |
 | GENCCPM | Correct three-byte RTM flag serialization; size disk buffers to keep kernel/RSP data within 64 KiB. |
 | Build/media | Track source dependencies, rebuild the byte-identical 4,096-byte boot track (including loader extent count), remove the alternate loader/TCOPY, and handle physical floppy track ordering, including reversed head-1 cylinders. |
-| Distribution | Main, tools, development and maintenance disks; retain full HELP on main, provide WINDOW/WMENU plus layout samples on tools, and place DSKMAINT/HDMAINT/INITDIR on maintenance. Select reference binaries explicitly. |
+| Distribution | PC-MODE and native system disks, tools, native/DOS development and maintenance disks; retain full HELP on main, provide WINDOW/WMENU plus layout samples on tools, and place DSKMAINT/HDMAINT/INITDIR plus configuration utilities and SYSTAT on maintenance. Tools and both developer disks are data-only. Select reference binaries explicitly. |
 
 ## Limits and verification
 

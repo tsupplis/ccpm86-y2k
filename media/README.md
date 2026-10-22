@@ -1,22 +1,33 @@
 # Reproducible 320 KB media
 
 Run `make` here, or `make -C media` from the repository root.
-Root `make dist` copies the four distribution images to the root alongside
+Root `make dist` copies the six distribution images to the root alongside
 `y2k-dist.zip` and `disks.zip`.
 
 | Image | Bootable | Contents |
 | --- | --- | --- |
-| `ccpm86.img` | Yes | Kernel, stock commands, ED, HELP, SYSTAT, original configuration utilities, source-rebuilt SYSDISK, SETDEF |
-| `ccpmtools.img` | Yes | Kernel, DREDIX, ASM86, DDT86, GENCMD, GENCCPM, WINDOW/WMENU with sample SUB files, PIP, TOD |
-| `ccpmmaint.img` | Yes | Kernel, source-rebuilt DSKMAINT, DFORM, DCOPY, DCOMP, HDMAINT, INITDIR, PIP, TOD |
-| `ccpmdev.img` | No | RASM86, LINK86, LIB86, XREF86, SID86, CBAS86, CRUN86, Personal BASIC, Microsoft BASIC 5.50A, ASM80, HEXCOM, GENTAB |
+| `ccpm86.img` | Yes | PC-MODE/PCTMP kernel, core commands, ED, full HELP, BATCH, SYSDISK, SETDEF, PIP |
+| `ccpmnative.img` | Yes | Native TMP/XIOS alternative, with the same core commands and shared kernel fixes |
+| `ccpmtools.img` | No | DREDIX, ASM86, DDT86, GENCMD, GENCCPM, WINDOW/WMENU, sample SUB files, PIP, TOD |
+| `ccpmmaint.img` | Yes | PC-MODE kernel, disk maintenance tools, CONFIG, FUNCTION, SETUP, SYSTAT, PIP, TOD |
+| `ccpmdev.img` | No | Native DR development/BASIC tools, Microsoft BASIC CMD, ASM80, HEXCOM, GENTAB |
+| `ccpmdos.img` | No | DOS MASM, LIB, LINK, LINKCMD, LINKEXE, EXE2BIN and Microsoft BASIC COM |
 
 Each image is 327,680 bytes. `PIP.CMD` is PIP4 with the `3.1N` banner.
 `base.img` is the empty physical/CHS filesystem template and original boot
 reference; `make clean` leaves it intact. Every generated image receives the
 source-built `../boot/boottrack.bin`, verified byte-for-byte against that reference.
-The older `dev/mbas522.cmd` remains an archive reference and is not placed on the
-developer disk.
+Native BASIC is supplied as dev/mbasic.cmd; DOS BASIC as dev/mbasic.com.
+
+
+Root `make` builds both kernels in one run: `kernel/sysgen/ccpm.sys` (PC-MODE)
+and `kernel/sysgen/ccpm-native.sys` (native TMP). The native floppy installs its
+kernel as `CCPM.SYS`, as required by the normal boot loader. Both personalities
+use the same XIOS implementation and shared kernel fixes. Native XIOS disables
+the PC-MODE gateway; this is a source-built alternative, not an archival binary.
+Boot either system disk in A: and use the data disks in B:. DOS programs require
+the PC-MODE system. Configuration utilities live on maintenance to keep both
+system disks within 320 KB.
 
 ## Build pipeline
 
@@ -41,7 +52,7 @@ Never use cpmtools directly on a physical 320 KB image: head 1 has reversed cyli
 | --- | --- |
 | `make test` / `make check` | Launch PCE |
 | `./ccpm86 vga` | Launch the PCE VGA configuration |
-| `make check-media` | Verify all four distributions and their payloads |
+| `make check-media` | Verify all six distributions and their payloads |
 | `make check-qemu` | Boot all three system disks; exercise consoles, HELP, SDIR, SYSDISK, SETDEF, DREDIX and windows |
 
 For WINDOW and WMENU, mount `ccpmtools.img` in B: and run `B:WINDOW VIEW`
@@ -53,7 +64,7 @@ Window layout samples are packaged alongside WINDOW.CMD:
 | Sample | Purpose |
 | --- | --- |
 | `CARDDECK.SUB` | Arrange four overlapping windows |
-| `CLEAR.SUB` | Restore all four consoles to full-screen windows |
+| `CLEAR.SUB` | Restore all six consoles to full-screen windows |
 | `GLASS.SUB` | Arrange mixed-size windows and select console 1 |
 | `WORDPROC.SUB` | Set up a large editing window and three small windows |
 

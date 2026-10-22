@@ -57,3 +57,7 @@ local/**
 # Source-built boot images.
 /boot/*.bin
 /boot/*.tmp
+
+/kernel/sysgen/native/*.old
+/media/*.img.logical.tmp
+!/dev/*.com

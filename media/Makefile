@@ -5,7 +5,7 @@ CPMCP = cpmcp -f $(FORMAT)
 
 .PHONY: all test check check-media check-qemu clean
 .DELETE_ON_ERROR:
-IMAGES = ccpm86.img ccpmtools.img ccpmdev.img ccpmmaint.img
+IMAGES = ccpm86.img ccpmtools.img ccpmdev.img ccpmmaint.img ccpmnative.img ccpmdos.img
 all: $(IMAGES)
 
 SYSTEM_COMMANDS = ../commands/chset/chset.cmd ../commands/date/date.cmd \
@@ -13,14 +13,13 @@ SYSTEM_COMMANDS = ../commands/chset/chset.cmd ../commands/date/date.cmd \
     ../commands/help/help.cmd ../commands/help/help.hlp \
     ../commands/ed/ed.cmd ../commands/ren/ren.cmd \
     ../commands/sdir/sdir.cmd ../commands/set/set.cmd ../commands/show/show.cmd \
-    ../commands/submit/submit.cmd ../commands/systat/systat.cmd \
+    ../commands/submit/submit.cmd \
     ../commands/tod/tod.cmd ../commands/type/type.cmd \
     ../commands/vcmode/vcmode.cmd ../commands/sysdisk/sysdisk.cmd \
     ../commands/setdef/setdef.cmd
 
 # SYSDISK is source-built; other base files are selected explicitly.
-BASE_SYSTEM_COMMANDS = ../base/config.cmd \
-    ../base/function.cmd ../base/pcetime.cmd ../base/setup.cmd
+BASE_SYSTEM_COMMANDS = ../base/batch.cmd ../base/pcetime.cmd
 
 WINDOW_COMMANDS = ../base/window.cmd ../base/wmenu.cmd
 WINDOW_SAMPLES = ../base/carddeck.sub ../base/clear.sub \
@@ -33,13 +32,17 @@ TOOLS_COMMANDS = ../commands/asm86/asm86.cmd ../commands/ddt86/ddt86.cmd \
 
 MAINT_COMMANDS = ../commands/dskmaint/dskmaint.cmd ../commands/dskmaint/dform.cmd \
     ../commands/disk/dcopy.cmd ../commands/disk/dcomp.cmd \
-    ../base/hdmaint.cmd ../commands/initdir/initdir.cmd ../commands/tod/tod.cmd
+    ../base/hdmaint.cmd ../commands/initdir/initdir.cmd ../commands/tod/tod.cmd \
+    ../base/config.cmd ../base/function.cmd ../base/setup.cmd ../commands/systat/systat.cmd
 
-# Data-only developer disk; omit the older MBASIC 5.22 reference binary.
+# Native and DOS development tools each occupy a data-only disk.
 DEV_COMMANDS = ../dev/rasm86.cmd ../dev/link86.cmd ../dev/lib86.cmd \
     ../dev/xref86.cmd ../dev/sid86.cmd ../dev/cbas86.cmd ../dev/crun86.cmd \
-    ../dev/pbasic.cmd ../dev/mbasic86.cmd ../commands/asm80/asm80.cmd \
+    ../dev/pbasic.cmd ../dev/mbasic.cmd ../commands/asm80/asm80.cmd \
     ../commands/hexcom/hexcom.cmd ../commands/ddt86/gentab.cmd
+
+DOS_COMMANDS = ../dev/exe2bin.exe ../dev/linkcmd.exe ../dev/linkexe.exe \
+    ../dev/mslib.exe ../dev/mslink.exe ../dev/msmasm.exe ../dev/mbasic.com
 
 # Commands, kernel and boot are built by the top-level Makefile.
 # This Makefile packages their outputs.
@@ -58,9 +61,9 @@ ccpm86.img: ccpm86base.img startup.0 ../kernel/sysgen/ccpm.sys $(SYSTEM_COMMANDS
 	mv $@.tmp $@
 	$(RM) $@.logical.tmp
 
-ccpmtools.img: ccpm86base.img startup.0 ../kernel/sysgen/ccpm.sys $(TOOLS_COMMANDS) ../commands/pip/pip4.cmd Makefile
+ccpmtools.img: ccpm86base.img $(TOOLS_COMMANDS) ../commands/pip/pip4.cmd Makefile
 	$(TWIST) untwist ccpm86base.img $@.logical.tmp
-	$(CPMCP) $@.logical.tmp ../kernel/sysgen/ccpm.sys startup.0 $(TOOLS_COMMANDS) 0:
+	$(CPMCP) $@.logical.tmp $(TOOLS_COMMANDS) 0:
 	$(CPMCP) $@.logical.tmp ../commands/pip/pip4.cmd 0:PIP.CMD
 	cpmls -F -f $(FORMAT) $@.logical.tmp '0:*.*'
 	$(TWIST) twist $@.logical.tmp $@.tmp
@@ -84,6 +87,23 @@ ccpmmaint.img: ccpm86base.img startup.0 ../kernel/sysgen/ccpm.sys $(MAINT_COMMAN
 	mv $@.tmp $@
 	$(RM) $@.logical.tmp
 
+# Alternative native TMP system, installed under the normal boot filename.
+ccpmnative.img: ccpm86base.img startup.0 ../kernel/sysgen/ccpm-native.sys $(SYSTEM_COMMANDS) $(BASE_SYSTEM_COMMANDS) ../commands/pip/pip4.cmd Makefile
+	$(TWIST) untwist ccpm86base.img $@.logical.tmp
+	$(CPMCP) $@.logical.tmp ../kernel/sysgen/ccpm-native.sys 0:CCPM.SYS
+	$(CPMCP) $@.logical.tmp startup.0 $(SYSTEM_COMMANDS) $(BASE_SYSTEM_COMMANDS) 0:
+	$(CPMCP) $@.logical.tmp ../commands/pip/pip4.cmd 0:PIP.CMD
+	$(TWIST) twist $@.logical.tmp $@.tmp
+	mv $@.tmp $@
+	$(RM) $@.logical.tmp
+
+ccpmdos.img: ccpm86base.img $(DOS_COMMANDS) Makefile
+	$(TWIST) untwist ccpm86base.img $@.logical.tmp
+	$(CPMCP) $@.logical.tmp $(DOS_COMMANDS) 0:
+	$(TWIST) twist $@.logical.tmp $@.tmp
+	mv $@.tmp $@
+	$(RM) $@.logical.tmp
+
 ccpmtest.img: ccpm86base.img
 	cp $< $@
 
@@ -95,17 +115,20 @@ check-media: all
 	    $(TWIST) untwist $$image $$image.verify.tmp; \
 	    case $$image in \
 	      ccpm86.img) sources='../kernel/sysgen/ccpm.sys startup.0 $(SYSTEM_COMMANDS) $(BASE_SYSTEM_COMMANDS)' ;; \
-	      ccpmtools.img) sources='../kernel/sysgen/ccpm.sys startup.0 $(TOOLS_COMMANDS)' ;; \
+	      ccpmtools.img) sources='$(TOOLS_COMMANDS)' ;; \
 	      ccpmdev.img) sources='$(DEV_COMMANDS)' ;; \
+	      ccpmdos.img) sources='$(DOS_COMMANDS)' ;; \
+	      ccpmnative.img) sources='../kernel/sysgen/ccpm-native.sys startup.0 $(SYSTEM_COMMANDS) $(BASE_SYSTEM_COMMANDS)' ;; \
 	      ccpmmaint.img) sources='../kernel/sysgen/ccpm.sys startup.0 $(MAINT_COMMANDS)' ;; \
 	    esac; \
 	    for source in $$sources; do \
 	      file=$$(basename $$source); \
+	      if test "$$file" = ccpm-native.sys; then file=ccpm.sys; fi; \
 	      $(CPMCP) $$image.verify.tmp 0:$$file $$image.file.tmp; \
 	      head -c "$$(wc -c < $$source)" $$image.file.tmp | cmp $$source -; \
 	      $(RM) $$image.file.tmp; \
 	    done; \
-	    if test $$image != ccpmdev.img; then \
+	    if test $$image != ccpmdev.img && test $$image != ccpmdos.img; then \
 	      $(CPMCP) $$image.verify.tmp 0:PIP.CMD $$image.file.tmp; \
 	      cmp ../commands/pip/pip4.cmd $$image.file.tmp; \
 	    fi; \

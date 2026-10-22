@@ -83,12 +83,24 @@ See `HELP SETDEF` and [Patches](patches.md) for details and limitations.
 
 | Image | Bootable | Contents |
 | --- | --- | --- |
-| `ccpm86.img` | Yes | Kernel, stock commands, ED, HELP, SYSTAT, configuration utilities, reconstructed SYSDISK, SETDEF |
-| `ccpmtools.img` | Yes | DREDIX, ASM86, DDT86, GENCMD, GENCCPM, WINDOW/WMENU with sample SUB files, PIP, TOD |
-| `ccpmmaint.img` | Yes | DSKMAINT, DFORM, DCOPY, DCOMP, HDMAINT, INITDIR, PIP, TOD |
-| `ccpmdev.img` | No | DR development/BASIC tools, Microsoft BASIC, ASM80, HEXCOM, GENTAB |
+| `ccpm86.img` | Yes | PC-MODE/PCTMP kernel, core commands, ED, full HELP, BATCH, SYSDISK, SETDEF, PIP |
+| `ccpmnative.img` | Yes | Native TMP/XIOS alternative, with the same core commands and shared kernel fixes |
+| `ccpmtools.img` | No | DREDIX, ASM86, DDT86, GENCMD, GENCCPM, WINDOW/WMENU, sample SUB files, PIP, TOD |
+| `ccpmmaint.img` | Yes | PC-MODE kernel, disk maintenance tools, CONFIG, FUNCTION, SETUP, SYSTAT, PIP, TOD |
+| `ccpmdev.img` | No | Native DR development/BASIC tools, Microsoft BASIC CMD, ASM80, HEXCOM, GENTAB |
+| `ccpmdos.img` | No | DOS MASM, LIB, LINK, LINKCMD, LINKEXE, EXE2BIN and Microsoft BASIC COM |
 
-`make dist` places the images above and `disks.zip` containing all four at the repository root.
+`make dist` places the images above and `disks.zip` containing all six at the repository root.
+
+
+Root `make` builds both kernels in one run: `kernel/sysgen/ccpm.sys` (PC-MODE)
+and `kernel/sysgen/ccpm-native.sys` (native TMP). The native floppy installs its
+kernel as `CCPM.SYS`, as required by the normal boot loader. Both personalities
+use the same XIOS implementation and shared kernel fixes. Native XIOS disables
+the PC-MODE gateway; this is a source-built alternative, not an archival binary.
+Boot either system disk in A: and use the data disks in B:. DOS programs require
+the PC-MODE system. Configuration utilities live on maintenance to keep both
+system disks within 320 KB.
 
 320 KB: **untwist → cpmtools `ccpm86-320` → twist**.
 [Media recipes and emulator usage](media/README.md).
