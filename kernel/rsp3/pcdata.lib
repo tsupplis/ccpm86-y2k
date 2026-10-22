@@ -13,7 +13,7 @@
 ; Resident-system-process prefix, following the TMP/GENCCPM layout.
 ; This normalized DATA is copied once per console; GENCCPM fixes segment links.
 rsp_system_link			dw	0
-rsp_sysdat_selector		dw	047h
+rsp_console_count_offset		dw	047h
 rsp_console_slot		db	0,0
 rsp_link_reserved		dw	0,0,0,0,0
 
@@ -134,8 +134,8 @@ load_user_zero_image:
 shell_reserved_image:
 	rb	1
 
-; 0219h..021Fh: Seven-byte resident-process name buffer for BDOS 135 lookup.
-resident_name_image:
+; 0219h..021Fh: Queue parameter prefix; its name overlaps command_fcb_image+1.
+queue_prefix_image:
 	rb	7
 
 ; 0220h..0244h: Startup/program FCB; 36 bytes plus original trailing zero.

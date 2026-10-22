@@ -1,6 +1,6 @@
 ;*****************************************************************************
 ;
-;	PCTMP - PC-MODE terminal message processor; partial reconstruction.
+;	PCTMP - PC-MODE terminal message processor; source reconstruction.
 ;	Concurrent CP/M-86 3.1, project PC-MODE personality.
 ;
 ;*****************************************************************************
@@ -20,8 +20,8 @@ code_origin:
 ; PCTMP - PC-MODE terminal message processor, Concurrent CP/M-86 3.1
 ;
 ; Provenance: inputs/pctmp.bin, recovered from a.sys.
-; This is a PARTIAL reconstruction of the shared CODE group. All undecoded
-; ranges are explicitly retained as DB data; they are not decoded instructions.
+; Executable ranges are decoded. Annotated instruction encodings retain bytes
+; where ASM86 would otherwise choose a different encoding.
 ; pcdata.lib declares the original normalized DATA bytes; the reference remains
 ; in inputs/pctmp.rsp. GENCMD generates both group headers and record padding.
 ;
@@ -7441,8 +7441,7 @@ dos_function_table:
 	dw	dos_fn_unsupported			; AH=31h
 
 
-; Remaining handler offsets are retained until their bodies are reconstructed. Roles
-; are established from this installation table and the corresponding gateways.
+; Interrupt installation aliases for the decoded gateway entry points.
 dos_terminate_handler		equ	dos_terminate_entry
 dos_dispatch_handler		equ	dos_dispatch_entry
 
