@@ -716,7 +716,7 @@ conasn:	mov cx,f_conassign ! mov dx,offset cli_acb
 	jmps jos
 
 
-; Local BDOS 165: v1 packet is ten bytes (drive search API).
+; Project-local BDOS 240 (F0h): v1 packet is ten bytes (drive search API).
 ; v2 adds byte 10: order 0=CMD, 1=CMD,SUB. Operations are bit masks:
 ; 0=query, 1=set path, 2=set order, 3=set both (v1 supports 0/1 only).
 ; v3 keeps the 11-byte packet: byte 10 bit 0 enables SUB, bit 1 disables DOS.
