@@ -57,6 +57,8 @@ ccpm86.img: ccpm86base.img startup.0 ../kernel/sysgen/ccpm.sys $(SYSTEM_COMMANDS
 	$(CPMCP) $@.logical.tmp ../kernel/sysgen/ccpm.sys startup.0 $(SYSTEM_COMMANDS) $(BASE_SYSTEM_COMMANDS) 0:
 	$(CPMCP) $@.logical.tmp ../commands/pip/pip4.cmd 0:PIP.CMD
 	cpmls -F -f $(FORMAT) $@.logical.tmp '0:*.*'
+	# System-disk fallback only finds interpreters marked SYS.
+	cpmchattr -f $(FORMAT) $@.logical.tmp s 0:BATCH.CMD
 	$(TWIST) twist $@.logical.tmp $@.tmp
 	mv $@.tmp $@
 	$(RM) $@.logical.tmp
@@ -93,6 +95,8 @@ ccpmnative.img: ccpm86base.img startup.0 ../kernel/sysgen/ccpm-native.sys $(SYST
 	$(CPMCP) $@.logical.tmp ../kernel/sysgen/ccpm-native.sys 0:CCPM.SYS
 	$(CPMCP) $@.logical.tmp startup.0 $(SYSTEM_COMMANDS) $(BASE_SYSTEM_COMMANDS) 0:
 	$(CPMCP) $@.logical.tmp ../commands/pip/pip4.cmd 0:PIP.CMD
+	# System-disk fallback only finds interpreters marked SYS.
+	cpmchattr -f $(FORMAT) $@.logical.tmp s 0:BATCH.CMD
 	$(TWIST) twist $@.logical.tmp $@.tmp
 	mv $@.tmp $@
 	$(RM) $@.logical.tmp
@@ -120,6 +124,10 @@ check-media: all
 	      ccpmdos.img) sources='$(DOS_COMMANDS)' ;; \
 	      ccpmnative.img) sources='../kernel/sysgen/ccpm-native.sys startup.0 $(SYSTEM_COMMANDS) $(BASE_SYSTEM_COMMANDS)' ;; \
 	      ccpmmaint.img) sources='../kernel/sysgen/ccpm.sys startup.0 $(MAINT_COMMANDS)' ;; \
+	    esac; \
+	    case $$image in \
+	      ccpm86.img|ccpmnative.img) \
+	        cpmls -A -f $(FORMAT) $$image.verify.tmp 0:batch.cmd | grep -q '^....s.... batch.cmd$$' ;; \
 	    esac; \
 	    for source in $$sources; do \
 	      file=$$(basename $$source); \

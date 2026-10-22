@@ -112,6 +112,12 @@ recovery, character output, status restoration and second-console return. All si
 packaged images pass payload, boot-track and size comparisons. These results do
 not claim exhaustive allocation-failure or CHAIN coverage. Review notes and build logs remain in private/pcmode.
 
+Real BATCH.CMD also passes eight grouped floppy cases: explicit and automatic BAT
+selection, multiple commands, %1/%2 arguments, empty scripts, REM/blank lines,
+missing-command continuation and subsequent script recovery. These use the
+packaged interpreter, not the earlier routing stub; broader batch semantics
+remain outside this check.
+
 ## Commands and build
 
 | Area | Changes |
@@ -149,3 +155,21 @@ sources; obsolete intermediate build-size figures are omitted here.
 
 Physical hardware, other video ROMs, cross-OS Y2K compatibility and all imported
 development binaries are not exhaustively tested.
+
+BATCH.CMD is marked SYS on both system disks, allowing the SYS-restricted
+system-disk fallback to find it from B:. Media verification checks this attribute.
+The real-interpreter suite now passes 11 cases, adding implicit/explicit BAT
+execution and arguments with B: current; all three preserve B: on return.
+
+DOS application validation now also includes a complete MASM 1.10 → LINK 1.10 →
+EXE execution → EXE2BIN → COM execution round trip, plus six supplied DOS BASIC
+5.50A workflow checks covering input, arithmetic, SAVE/NEW/LOAD, rerun and SYSTEM
+exit. Both generated programs and the saved BASIC program were extracted from
+the test disks. The COM-convertible assembly sample has an expected no-STACK
+linker warning. No kernel or application binary fixes were needed for these runs.
+
+The same DOS toolchain also completes inside a single BAT script via the real
+BATCH.CMD, with B: current and the interpreter on SYS A:. Freshly generated
+OBJ/EXE/COM match the individual-command outputs byte for byte; both programs
+run and the shell/status line return. This adds validation only, with no
+runtime code changes.
