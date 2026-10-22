@@ -2,7 +2,7 @@
 
 **Disk Images are now available as part of the project releases, ready to use !**
 
-This project preserves Digital Research's Concurrent CP/M-86 3.1 as a usable,
+This project preserves Digital Research's Concurrent CP/M-86 3.1 multitask OS as a usable,
 rebuildable system for running and exploring classic 16-bit software. Runnable
 disks and development tools accompany the sources and patch notes, making the
 system more consumable (CP/M-Plus style) and accessible to anyone interested in its history.
@@ -12,7 +12,7 @@ system more consumable (CP/M-Plus style) and accessible to anyone interested in 
 **The default system now includes PC-MODE: run supported DOS `.COM` and `.EXE`
 programs alongside native CP/M-86 `.CMD` commands, from the same shell.**
 This brings a major part of the system's heritage into the normal source build
-and floppy distribution.
+and floppy distribution... with plenty of fixes and patches.
 
 <p align="center">
 <img src="images/pcmode.png" alt="Microsoft Macro Assembler 1.10 running under PC-MODE on Concurrent CP/M-86" width="85%">
