@@ -3,12 +3,12 @@ GENCMD=cpm86_gencmd
 RASM86=pcdev_rasm86
 LINK86=pcdev_linkcmd
 
-SNIPPETS=bdos.con sup.con rtm.con cio.con sysdat.con xios.con mem.con
+SNIPPETS=bdos.con sup.con rtm.con cio.con sysdat.con xios.con xiosnat.con mem.con
 
 all: $(SNIPPETS)
 
 # Included assembly sources must invalidate their parent object.
-xios.h86: xbegin.lib xchar.lib xconout.lib xfloppy.lib xhard.lib xrtc.lib xinit.lib \
+xios.h86 xiosnat.h86: xbegin.lib xchar.lib xconout.lib xfloppy.lib xhard.lib xrtc.lib xinit.lib \
   pcmode.lib xpcmode.lib
 bdos.obj: $(wildcard *.bdo) uda.cic xioscb.def
 sup.h86: $(wildcard *.sup) patch.cod
@@ -22,6 +22,9 @@ bdos.con: bdos.obj
 	@cmdinfo $@
 
 xios.con: xios.h86
+xiosnat.con: xiosnat.h86
+
+xios.con xiosnat.con:
 	$(GENCMD) $< 8080
 	mv $(basename $@).cmd $@
 	@cmdinfo $@

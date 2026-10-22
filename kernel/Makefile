@@ -1,4 +1,4 @@
-SUBDIRS=con rsp1 rsp2 sysgen
+SUBDIRS=con rsp1 rsp2 rsp3 sysgen
 
 DISTDIR=dist
 DISTZIP=dist.zip

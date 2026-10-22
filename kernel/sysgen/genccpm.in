@@ -1,6 +1,6 @@
 verbose=y destdrive=a: deletesys=y
 sysparams
-sysdrive=a: tmpdrive=a: cmdlogging=n osstart=8008
+sysdrive=a: tmpdrive=a: cmdlogging=n osstart=7008
 
 memory
 
@@ -17,7 +17,7 @@ a:
 no
 
 oslabel
-CP/M-Plus Personality
+PC-MODE Personality
 
 rsps
 

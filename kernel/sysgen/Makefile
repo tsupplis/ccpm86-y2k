@@ -1,10 +1,10 @@
 
 TOOLS=
 
-SNIPPETS= ccpm.sys
+SNIPPETS= ccpm.sys ccpm-native.sys
 
 CONS=bdos.con cio.con mem.con rtm.con sup.con sysdat.con xios.con
-RSPS=abort.rsp clock.rsp dir.rsp echo.rsp pin.rsp serin.rsp serout.rsp tmp.rsp vout.rsp
+RSPS=abort.rsp clock.rsp dir.rsp echo.rsp pin.rsp serin.rsp serout.rsp pctmp.rsp vout.rsp
 
 all: $(TOOLS) $(SNIPPETS)
 
@@ -51,16 +51,28 @@ serin.rsp: ../rsp1/serin.rsp
 serout.rsp: ../rsp1/serout.rsp
 	@cp $< .
 
-tmp.rsp: ../rsp1/tmp.rsp
+pctmp.rsp: ../rsp3/pctmp.rsp
 	@cp $< .
 
 vout.rsp: ../rsp1/vout.rsp
 	@cp $< .
 
 ccpm.sys: ../../commands/genccpm/genccpm.cmd genccpm.in Makefile $(CONS) $(RSPS)
-	@$(RM) cls.rsp sysdisk.rsp
+	@$(RM) cls.rsp sysdisk.rsp tmp.rsp
 	@emu2 ../../commands/genccpm/genccpm.cmd < genccpm.in
 	@cmdinfo ccpm.sys
+
+# GENCCPM enumerates local RSPs: isolate the native selection from PCTMP.
+NATIVE_CONS=$(filter-out xios.con,$(CONS))
+NATIVE_RSPS=$(filter-out pctmp.rsp,$(RSPS))
+ccpm-native.sys: ../../commands/genccpm/genccpm.cmd genccpm-native.in Makefile $(NATIVE_CONS) $(NATIVE_RSPS) ../con/xiosnat.con ../rsp1/tmp.rsp
+	mkdir -p native
+	cp $(NATIVE_CONS) $(NATIVE_RSPS) native/
+	cp ../con/xiosnat.con native/xios.con
+	cp ../rsp1/tmp.rsp native/tmp.rsp
+	cd native && emu2 ../../../commands/genccpm/genccpm.cmd < ../genccpm-native.in
+	cp native/ccpm.sys $@
+	cmdinfo $@
 
 %.h86: %.a86
 	$(DRASM86) $^
@@ -83,6 +95,7 @@ ccpmtest: ccpm86.img
 	@./ccpm86
 
 clean:
+	$(RM) native/*.con native/*.rsp native/*.sys native/*.old
 	rm -f *.sys *.cmd *.obj *.h86 *.sym *.lin *.lst *.prn 
 	rm -f *.con *.rsp
 	rm -f ccpm86.img ccpmtest.img

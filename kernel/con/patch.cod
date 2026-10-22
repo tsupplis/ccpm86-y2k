@@ -25,4 +25,5 @@ cp_seen dw 0
 cp_fcb db 0,0,0,0,0,0,0,0,0,0,0
     db 0,0,0,0,0,0,0,0,0,0,0
     db 0,0,0,0,0,0,0,0,0,0,0
-    db 0,0,0,0,0,0,0               ; retain the full 128-byte reserve
+lod_newshare dw 0                  ; MXLoad-serialized rollback owner
+    db 0,0,0,0,0                   ; retain the full 128-byte reserve

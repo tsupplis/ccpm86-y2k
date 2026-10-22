@@ -1,41 +1,19 @@
 # PCTMP resident system process
 
-PCTMP is a separate optional PC-MODE RSP. Native TMP stays in rsp1; hardware
-services belong to the single XIOS module in kernel/con.
+PCTMP is the default PC-MODE RSP. Native TMP remains available in rsp1;
+hardware services belong to the single XIOS module in kernel/con.
 
-The build now follows the other assembly RSPs: **ASM86 → H86 → GENCMD**, then
-rename pctmp.cmd to pctmp.rsp. GENCMD creates the group headers and record padding.
-There is no NASM step or Python RSP packager in this module's Makefile.
+Build with `make -C kernel/rsp3`, or use the normal top-level `make` to
+build commands, kernel and distribution disks. RSP3 follows the other RSPs:
+ASM86 → H86 → GENCMD, then rename CMD to RSP. Outputs are local to the module.
 
-From the repository root:
+The normal kernel build includes rsp3, enables PCMODE_XIOS, and selects PCTMP
+instead of TMP during SYSGEN. OS placement is 7008h to leave room for the
+larger personality and console buffers below video memory.
 
-```sh
-make -C kernel/rsp3
-```
+`pcdefs.lib` selects the supported extensions. Setting PCMODE_BUILD to zero
+reconstructs original PCTMP; this is for reference work, not the default build.
+Undecoded historical ranges remain explicitly represented as DB data.
 
-The Makefile uses the same local `SNIPPETS`, pattern rules and `clean` structure
-as the other assembly RSP modules. Outputs are local to the build directory.
-There is no OUTPUT setting, source-copying wrapper or dependency on private.
-
-The checked-in pcdefs.lib selects supported extensions with PCMODE_BUILD=0ffffh.
-Reconstruction checks set it to 0 only in a temporary source copy. Sandbox tools
-copy sources into their chosen directory and invoke ordinary Make there. For an
-isolated complete personality build, use `make pcmode`; its default output is
-build/pcmode. The private sandbox is optional and disposable.
-
-`pctmp.a86` is native ASM86 source, with helpers in pcguard.lib, pcshell.lib,
-pcerror.lib, pchelp.lib and pcsearch.lib. Undecoded historical ranges remain clearly marked
-DB data; they are not presented as reconstructed instructions. pcdata.lib
-explicitly declares the original normalized 2,800-byte DATA template. Initialized
-CODE sidecars ensure GENCMD retains their full storage extent. Pinned reference
-inputs and provenance remain under inputs/.
-
-`tools/pctmpcheck.py` verifies group layout, DATA preservation and allowed patch
-locations; it does not build or package an RSP. `tools/pcmodeverify.py` builds
-the original configuration through Make in a temporary copy and compares the
-complete result to the original template.
-Historical XIOS/label checks and DOS test probes still use NASM separately.
-
-The top-level `make pcmode` includes this RSP with the normal RSP1/RSP2 services
-in isolated SYS generation; native TMP is not also selected. See the
-[PC-MODE build and checks](../pcmode/README.md) and [status](../pcmode/status.md).
+Experimental tools, reference binaries, tests and investigation documentation
+are kept in private/pcmode. They are not dependencies of the normal build.

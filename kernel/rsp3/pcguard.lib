@@ -227,6 +227,48 @@ validate_exe_stack:
         push si
         push di
         push bp
+; Bound the image independently of SS:SP. The recovered MAXALLOC placement
+; subtracts absolute segments and can land in the PSP/private loader area.
+; Keep its placement when image plus MINALLOC fits; otherwise use the normal
+; post-PSP base, provided the actual allocation can contain the request.
+        mov bx,word ptr .loader_memory_base
+        add bx,word ptr .loader_memory_size
+        jc exe_placement_invalid
+        mov ax,word ptr .loader_memory_base
+        add ax,2bh
+        jc exe_placement_invalid
+        cmp ax,bx
+        jae exe_placement_invalid
+        mov dx,word ptr .exe_load_segment
+        cmp dx,ax
+        jb exe_placement_low
+        cmp dx,bx
+        jae exe_placement_low
+        push bx
+        sub bx,dx
+        cmp bx,word ptr .exe_image_paragraphs
+        jb exe_placement_retry
+        sub bx,word ptr .exe_image_paragraphs
+        cmp bx,word ptr .exe_header+0ah
+        pop bx
+        jae exe_placement_ready
+        jmps exe_placement_low
+exe_placement_retry:
+        pop bx
+exe_placement_low:
+        mov dx,ax
+        sub bx,dx
+        cmp bx,word ptr .exe_image_paragraphs
+        jb exe_placement_invalid
+        sub bx,word ptr .exe_image_paragraphs
+        cmp bx,word ptr .exe_header+0ah
+        jb exe_placement_invalid
+exe_placement_ready:
+        mov word ptr .exe_load_segment,dx
+        jmps exe_placement_valid
+exe_placement_invalid:
+        jmp exe_stack_invalid
+exe_placement_valid:
         mov ax,word ptr .exe_load_segment
         add ax,word ptr .exe_initial_ss
         jc exe_stack_invalid         ; rebasing SS must not wrap to low memory
@@ -276,9 +318,8 @@ exe_stack_invalid:
         add sp,2                     ; discard helper CALL, return through loader
         jmp loader_read_error
 
-; Image starts inside a CP/M record when header paragraphs are not a multiple
-; of eight. Retain the original bulk reader for aligned files. For the other
-; case read one record into console-private scratch, skip the header tail and
+; Image data may start inside a CP/M record. Read each record into
+; console-private scratch, skip the header tail and
 ; copy only declared image bytes. No header-buffer or DATA-stride change.
 ; State layout: record DWORD, remaining DWORD, destination segment WORD,
 ; source skip WORD, copy count WORD, two reserved bytes. Four console slots.
@@ -289,11 +330,10 @@ reader_remaining_high   equ 6
 reader_destination      equ 8
 reader_skip             equ 10
 reader_count            equ 12
+; Use the bounded reader for aligned images too: CP/M reads whole 128-byte
+; records, but allocation is paragraph-rounded. Never DMA record padding into
+; the child allocation, and reject EOF before all declared bytes are copied.
 load_exe_header_tail:
-        mov ax,word ptr .exe_header_paragraphs
-        test ax,7
-        jnz load_exe_unaligned
-        jmp exe_aligned_record_index               ; resume direct record-index calculation
 load_exe_unaligned:
         call exe_reader_slot         ; BX=current console state; AX clobbered
         mov ax,word ptr .exe_header_paragraphs

@@ -15,7 +15,14 @@ crt_cols	equ	80	; crt width
 crt_size	equ	crt_rows * crt_cols
 crt_full	equ	100H*(crt_rows-1) + (crt_cols-1)
 s_l_offset	equ	crt_size	; status line offset
-buffer_size	equ	crt_size * (num_vir_cons*2 + 1)
+if PCMODE_XIOS
+buffer_rows equ 25
+endif
+if not PCMODE_XIOS
+buffer_rows equ crt_rows
+endif
+buffer_cells equ buffer_rows * crt_cols
+buffer_size equ buffer_cells * (num_vir_cons*2 + 1)
 				; this allows 2x bytes for each
 				; console and 1x for the map
 
@@ -147,11 +154,17 @@ io_switch:
 	call	draw_frame_s	;; background old frame
 	call	point_vs	;; bx -> virt structure
 	call	new_priority	;; set priority tables
+if PCMODE_XIOS
+	call pc_status_refresh
+endif
 	call	new_vc_list	;; make a new list
 	call	draw_frame_d	;; frame the window
 	call	update_window	;; update within mx
 	call	release_match	;; if full top, release it
 	call	new_cursor_on	;; take the cursor
+if PCMODE_XIOS
+	call pc_status_refresh ; invalidate after repaint as well as before
+endif
 	call	free_all_mxs	; allow updates
 	call	check_flag_wait	; in case of graphics
 io_switch_done:
@@ -292,7 +305,7 @@ ww_wrap_column:
 ww_full_window:
 	call	point_vs	;point to structure
 	mov	cx,0		;top left
-	mov	ax,crt_full	;bottom right
+	mov	ax,vs_crt_size	; bottom right for this console
 	cmp	vs_top_left,cx	;if the current top console
 	jnz	w_full1		;  is not a full screen,
 	cmp	vs_bot_right,ax	;  then make it one.
@@ -301,7 +314,7 @@ ww_full_window:
 	mov	ax,vs_old_b_r	;  then switch to previous.
 	cmp	cx,0		;if old window is not
 	jnz	w_full1		;  a full screen
-	cmp	ax,crt_full	;  then go ahead.
+	cmp	ax,vs_crt_size	; then go ahead.
 	jnz	w_full1
 	ret			;if both full, bag it
 w_full1:
@@ -846,7 +859,12 @@ in_window2:
 ;	vc line feed out
 
 vc_out_lf:
-	cmp	dh,crt_rows-1	; if at the bottom
+if PCMODE_XIOS
+	cmp	dh,vs_text_last
+endif
+if not PCMODE_XIOS
+	cmp	dh,crt_rows-1
+endif	; if at the bottom
 	jz	vc_lf1		;   do a scroll
 
 	inc	dh		; if not, move down
@@ -904,8 +922,14 @@ z_up:
 ;	esc B  -  cursor down
 z_down:
 	inc	dh		; next row down
+if PCMODE_XIOS
+	cmp	dh,vs_text_last
+	jbe	z_cursor
+endif
+if not PCMODE_XIOS
 	cmp	dh,crt_rows	; if not already at bottom,
-	jb	z_cursor	;   then set cursor
+	jb	z_cursor
+endif	;   then set cursor
 	ret
 
 ;	esc C  -  cursor forward
@@ -941,7 +965,14 @@ z_rev_index:
 
 ;	esc J  -  erase to end of screen
 z_erase_eos:
+if PCMODE_XIOS
+	mov ch,vs_text_last
+	inc ch
+	xor cl,cl
+endif
+if not PCMODE_XIOS
 	mov	cx,crt_rows shl 8
+endif
 	jmps	eraser		; common code
 
 ;	esc K  -  erase to end of line
@@ -1001,8 +1032,20 @@ erase1:
 z_insert_line:
 	mov	dl,0		; first column
 	call	point_cursor	; ax = count from top
+if PCMODE_XIOS
+	push ax
+	call pc_text_cells
+	dec ax
+	shl ax,1
+	mov di,ax
+	sub ax,crt_cols*2
+	mov si,ax
+	pop ax
+endif
+if not PCMODE_XIOS
 	mov	di,(crt_size-1)*2	; end of screen
 	mov	si,(crt_size-crt_cols-1)*2
+endif
 	std			; backwards move
 	jmps	z_line		; shared code
 
@@ -1017,14 +1060,23 @@ z_delete_line:
 ;	entry:	si,di set up for movsw
 ;		ax = count from top of screen
 z_line:
-	mov	cx,crt_size-crt_cols
+if PCMODE_XIOS
+	push ax
+	call pc_text_cells
+	mov cx,ax
+	sub cx,crt_cols
+	pop ax
+endif
+if not PCMODE_XIOS
+	mov	cx,buffer_cells-crt_cols
+endif
 	sub	cx,ax		; cx = character count
 	jbe	zline1		; skip if nothing to move
 
 	call	z_movsw		; movsw in vc_segment
 z_line1:
 	mov	cx,crt_cols	; one line's worth
-	jmps	erase		; blank one line
+	jmp	erase		; blank one line
 
 ;	repeat movsw in current screen segment
 z_movsw:
@@ -1057,7 +1109,7 @@ z_delete_char:
 	call	z_movsw		; shift left one char
 z_del_ch1:
 	mov	cx,1		; erase one last char
-	jmps	erase
+	jmp	erase
 
 ;	esc Y  -  set cursor position
 z_set_cursor:
@@ -1065,7 +1117,12 @@ z_set_cursor:
 	ret			; advance to row set
 
 z_set1:
-	mov	al,crt_rows-1	; maximum allowable row
+if PCMODE_XIOS
+	mov al,vs_text_last
+endif
+if not PCMODE_XIOS
+	mov	al,crt_rows-1
+endif	; maximum allowable row
 	call	z_limit		; clip oversize values
 	mov	vs_cur_row,cl	; save the row
 	mov	vs_vector,offset z_set2
@@ -1511,6 +1568,9 @@ new_mon3:
 ;	called from new_window, new_monitor and general_alpha
 
 update_all:
+if PCMODE_XIOS
+	call pc_status_refresh
+endif
 	call	new_vc_list	; redo the row list
 	mov	si,offset vc_priority
 	mov	cx,num_vir_cons	; loop counter
@@ -1533,6 +1593,9 @@ up_all2:
 
 	call	release_match	; if full top, release it
 	call	new_cursor_on	; turn on the cursor
+if PCMODE_XIOS
+	call pc_status_refresh ; invalidate after repaint as well as before
+endif
 	jmp	show_cursor	; display and done
 
 
@@ -1589,7 +1652,14 @@ release_done:
 ;	entry:	bx -> vs_
 
 check_full_top:
+if PCMODE_XIOS
+	mov al,vs_text_last
+	inc al
+	cmp vs_rowsb,al
+endif
+if not PCMODE_XIOS
 	cmp	vs_rowsb,crt_rows
+endif
 	jnz	check_ft_done	; skip if not full
 	cmp	vs_colsb,crt_cols
 	jnz	check_ft_done	; skip if not full
@@ -1848,8 +1918,14 @@ draw_frame:
 draw_f1:
 	mov	dh,vs_bottom
 	inc	dh		; down on row
+if PCMODE_XIOS
+	cmp dh,vs_text_last
+	ja draw_f2
+endif
+if not PCMODE_XIOS
 	cmp	dh,crt_rows
-	jz	draw_f2		; skip if bottom
+	jz	draw_f2
+endif		; skip if bottom
 
 	mov	ax,bot_corners
 	call	hline		; bottom line + corners
@@ -1987,7 +2063,15 @@ new_count:
 
 do_true_view:
 	mov	dx,vs_view_point
+if PCMODE_XIOS
+	mov al,vs_text_last
+	inc al
+
+endif
+if not PCMODE_XIOS
 	mov	al,crt_rows
+
+endif
 	sub	al,vs_rowsb	; get max view row
 	cmp	al,dh
 	jae	do_true1	; skip if ok
@@ -2011,7 +2095,7 @@ new_vc_map:
 	push	es
 	mov	es,vc_map_seg
 	sub	di,di		; top left corner
-	mov	cx,crt_size
+	mov	cx,buffer_cells
 	mov	al,vs_bit	; get vc bit mask
 	not	al
 new_map1:
@@ -2031,7 +2115,12 @@ new_map2:
 	dec	dl		; include frame
 new_map3:
 	mov	cx,vs_bot_right
-	cmp	ch,crt_rows-1	; if at crt bottom
+if PCMODE_XIOS
+	cmp ch,vs_text_last
+endif
+if not PCMODE_XIOS
+	cmp	ch,crt_rows-1
+endif	; if at crt bottom
 	jz	new_map4	;   skip bot frame
 	inc	ch		; include frame
 new_map4:
@@ -2146,7 +2235,7 @@ erase_crt:
 	sub	si,si		; start at top left
 	sub	di,di
 	mov	es,vc_map_seg
-	mov	cx,crt_size
+	mov	cx,buffer_cells
 	mov	ax,blank	; space + attrib
 erase_crt1:
 	test	es:byte ptr [si],dh
@@ -2180,7 +2269,13 @@ copy_full_top:
 	push	es
 	sub	si,si		; top left
 	sub	di,di		;   of both
+if PCMODE_XIOS
+	call pc_text_cells
+	mov cx,ax
+endif
+if not PCMODE_XIOS
 	mov	cx,crt_size
+endif
 	mov	es,vs_vc_seg	; image is destination
 	mov	ds,vs_crt_seg
 	mov	ah,in_sync	; sync for reading
@@ -2521,6 +2616,7 @@ vs_right	equ	byte ptr 4[bx]
 vs_bottom	equ	byte ptr 5[bx]
 vs_old_t_l	equ	word ptr 6[bx]		; last t l corner
 vs_old_b_r	equ	word ptr 8[bx]		; last b r corner
+vs_text_last equ byte ptr 11[bx] ; inclusive logical bottom row
 vs_crt_size	equ	word ptr 10[bx]		; total rows, columns
 vs_win_size	equ	word ptr 12[bx]		; including invisible
 vs_view_point	equ	word ptr 14[bx]		; window top left
@@ -2631,7 +2727,7 @@ compaq_str   db  71h,50h,5Ah,0Ah,19h,06h,19h,19h,02h,0Dh,2Bh,0Ch,0,0,0,0
 
 ;	dynamic row update list
 
-vc_list		rw	(2*num_vir_cons-1) * crt_rows * 2 + 4
+vc_list		rw	(2*num_vir_cons-1) * buffer_rows * 2 + 4
 
 ;	console control blocks have moved to xchar.lib
 

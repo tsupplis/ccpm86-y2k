@@ -605,6 +605,14 @@ sl_disp_prep:
 ;		dl = crt code mask   01 => mono  02 => color
 
 sl_put_char:
+if PCMODE_XIOS
+	push dx
+	push ax
+	mov al,pc_status_hide
+	not al
+	and dl,al
+	pop ax
+endif
 	cmp	ax,[bx]		; if character is the same
 	jz	sl_put4		;   then just bump pointers
 
@@ -654,6 +662,9 @@ sl_put4:
 	inc	di		; bump the crt pointer
 	inc	di
 sl_put5:
+if PCMODE_XIOS
+	pop dx
+endif
 	inc	bx		; bump the copy pointer
 	inc	bx
 	ret			; back to loop

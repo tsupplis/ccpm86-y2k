@@ -1,5 +1,5 @@
-; XIOS personality selection. Native build remains disabled.
-; The opt-in build enables this flag in its isolated CON source copy.
+; XIOS personality selection for the default PC-MODE build.
+; Native TMP remains available in rsp1.
 ; This is independent of BDOS PCMODE (the unavailable FAT filesystem).
-PCMODE_XIOS equ 0
+PCMODE_XIOS equ 0ffffh
 PCMODE_ENHANCED_KEYS equ 0ffffh

@@ -11,13 +11,13 @@ pc_reorg equ offset $
 
 ; Experimental PCTMP text-console bridge, not the complete PC-MODE XIOS.
 ; Original a.sys uses functions 31..34, absent from our legacy table.
-; This experiment keeps our normal 24-row console and status line throughout.
+; DOS entry uses 25 rows; native return restores 24 rows and the status line.
 ; It supports DOS console calls and selected BIOS text services below.
 ; Cursor shape and CGA palette/pixel writes are supported; other graphics
 ; operations still require explicit implementation and tests.
 ;
 ; Function 32 is called with CX=1 on DOS entry and CX=0 on return.
-; Restore mode/cursor state on return; retain native 24-row buffer geometry.
+; Restore mode/cursor state and native text height on return.
 pc_text_state:
         jmp pc_session
 ;
@@ -26,18 +26,42 @@ pc_not_supported:
         mov     ax,0ffffh
         ret
 ;
-; INT 11h equipment query. Avoid calling the interrupt PCTMP has hooked.
-; Original XIOS 16D5h reads a boot-time BIOS snapshot and replaces display
-; bits using the console's saved DOS-entry mode (+40h), not its current mode.
-; This bridge returns the live physical BDA word. The tested 80-column color
-; entry environment agrees across DOS modes 2..6; it is not general virtual
-; equipment emulation. A future 40-column/mono policy needs explicit adaptation.
+; INT 11h follows original XIOS 16D5h: cached firmware equipment with
+; display bits derived from the running console's saved DOS-entry mode.
 pc_equipment:
-        push    es
-        mov     ax,40h
-        mov     es,ax
-        mov     ax,es:word ptr .10h
-        pop     es
+        mov bx,rlr
+        mov dl,byte ptr 20h[bx]
+        cmp dl,num_vir_cons
+        jae pc_equipment_physical
+        call point_vs
+        xor ax,ax
+        mov al,vs_number
+        mov si,ax
+        shl si,1
+        add si,ax
+        shl si,1
+        mov dl,byte ptr pc_sessions+5[si]
+        mov ax,pc_equipment_word
+        cmp dl,1
+        je pc_equipment_done
+        and ax,0ffcfh
+        cmp dl,9
+        je pc_equipment_mono
+        cmp dl,2
+        je pc_equipment_40
+        cmp dl,3
+        je pc_equipment_40
+        or ax,20h
+        ret
+pc_equipment_40:
+        or ax,10h
+        ret
+pc_equipment_mono:
+        or ax,30h
+        ret
+pc_equipment_physical:
+        mov ax,pc_equipment_word
+pc_equipment_done:
         ret
 
 ; ---------------------------------------------------------------------------
@@ -90,8 +114,7 @@ pc_video_try_char:
 pc_video_reject:
         jmp pc_not_supported
 
-; INT 10h/AH=02: CX=row,column, DL=console. Clamp to our 24x80 text area,
-; preserving the status row until full DOS/native window transitions exist.
+; INT 10h/AH=02: CX=row,column, DL=console. Clamp to its logical text extent.
 pc_cursor_set:
         cmp dl,num_vir_cons
         jae pc_video_bad
@@ -99,9 +122,9 @@ pc_cursor_set:
         call point_vs
         call get_mx
         pop dx
-        cmp dh,crt_rows-1
+        cmp dh,vs_text_last
         jbe pc_cursor_row
-        mov dh,crt_rows-1
+        mov dh,vs_text_last
 pc_cursor_row:
         cmp dl,crt_cols-1
         jbe pc_cursor_column
@@ -158,11 +181,10 @@ pc_read_valid:
 ; INT 10h/AH=09/0A packet at CX:DX:
 ;   +0 AX (AL=character), +2 BX (BL=attribute), +4 CX (repeat count),
 ;   +6 DX (unused for these operations), +8 virtual console number.
-; SI=1 writes character+attribute; SI=0 preserves each existing attribute.
-; This deliberately differs from original XIOS:3CA5h, which substitutes the
-; console default attribute. Preserve per-cell attributes for BIOS AH=0Ah.
+; SI=1 uses the caller attribute; SI=0 uses the console default attribute,
+; matching original XIOS:3CA5h for BIOS AH=0Ah.
 ; Neither operation advances the cursor. Clamp the repeat count to the end
-; of the virtual text area, protecting the status row and adjacent consoles.
+; of the virtual text area, protecting adjacent consoles.
 pc_write_cells:
         push es
         mov es,cx
@@ -189,7 +211,10 @@ pc_write_valid:
         push ax
         mov dx,vs_cursor
         call point_cursor
-        mov dx,crt_size
+        push ax
+        call pc_text_cells
+        mov dx,ax
+        pop ax
         sub dx,ax
         cmp cx,dx
         jbe pc_write_count
@@ -202,7 +227,7 @@ pc_write_count:
 pc_write_loop:
         or si,si
         jnz pc_write_store
-        mov ah,es:byte ptr 1[di]
+        mov ah,vs_attrib
 pc_write_store:
         stosw
         loop pc_write_loop
@@ -268,15 +293,16 @@ pc_scroll:
         jb pc_scroll_console
         jmp pc_scroll_invalid
 pc_scroll_console:
+        call point_vs
         mov cx,pc_sc_top
         mov ax,pc_sc_bottom
-        cmp ch,crt_rows
-        jae pc_scroll_empty
+        cmp ch,vs_text_last
+        ja pc_scroll_empty
         cmp cl,crt_cols
         jae pc_scroll_empty
-        cmp ah,crt_rows-1
+        cmp ah,vs_text_last
         jbe pc_scroll_bottom
-        mov ah,crt_rows-1
+        mov ah,vs_text_last
 pc_scroll_bottom:
         cmp al,crt_cols-1
         jbe pc_scroll_right
@@ -308,7 +334,6 @@ pc_scroll_bounds:
 pc_scroll_clear:
         mov pc_sc_count,ax
 pc_scroll_count:
-        call point_vs
         call get_mx
         mov dx,pc_sc_top
         call point_cursor
@@ -610,16 +635,19 @@ pc_capture_video:
         mov pc_video_rom,ax
         mov ax,es:word ptr .42h
         mov pc_video_rom+2,ax
+        mov ax,40h
+        mov es,ax
+        mov ax,es:word ptr .10h
+        mov pc_equipment_word,ax
         pop es
         pop ax
         ret
 
-; XIOS 32: idempotent per-console DOS entry/exit. Keep the native 24-row
-; geometry until allocation, ownership maps and status-row handling support
-; row 25 together. Save native video mode, cursor shape and visibility, then
+; XIOS 32: idempotent per-console DOS entry/exit, 25 rows on entry and 24
+; on return. Save native video mode, cursor shape and visibility, then
 ; restore them on DOS exit. Keep the DOS cursor position (clamped), as the
 ; original XIOS does; restoring its entry position would overwrite DOS output.
-; Record layout: active byte, mode byte, shape word, visibility byte, padding.
+; Record: active, restore mode, shape word, visibility, original entry mode.
 pc_session:
         cmp dl,num_vir_cons
         jb pc_session_valid
@@ -644,6 +672,7 @@ pc_session_valid:
         jmp pc_session_done
 pc_session_save:
         mov al,vs_screen_mode
+        mov byte ptr pc_sessions+5[si],al ; original entry mode for INT 11h
         cmp al,1
         jne pc_session_explicit
 ; Native mode 1 means generic text, not BIOS mode -1. PCTMP subtracts two
@@ -661,6 +690,8 @@ pc_session_explicit:
         and al,cursor_bit
         mov byte ptr pc_sessions+4[si],al
         mov byte ptr pc_sessions[si],1
+        mov al,24
+        call pc_resize_text
         jmp pc_session_done
 pc_session_leave:
         cmp byte ptr pc_sessions[si],0
@@ -690,10 +721,12 @@ pc_session_cursor:
         mov al,byte ptr pc_sessions+4[si]
         or vs_mode,al
         mov byte ptr pc_sessions[si],0
+        mov al,23
+        call pc_resize_text
         mov dx,vs_cursor
-        cmp dh,crt_rows-1
+        cmp dh,vs_text_last
         jbe pc_session_column
-        mov dh,crt_rows-1
+        mov dh,vs_text_last
 pc_session_column:
         cmp dl,crt_cols-1
         jbe pc_session_position
@@ -880,3 +913,96 @@ pc_clock_done:
         ret
 
 pc_clock_phase dw 0
+
+; Logical text extent is per console; allocation always reserves 25 rows.
+; BX=screen, AX=result in cells. Preserve DX used by cursor/erase callers.
+pc_text_cells:
+        push dx
+        mov al,vs_text_last
+        inc al
+        mov dl,crt_cols
+        mul dl
+        pop dx
+        ret
+
+; Called with every screen semaphore held by pc_session.
+; AL=new inclusive bottom. Preserve smaller user windows, as original XIOS.
+pc_resize_text:
+        push si
+        push bx
+        push ax
+        call copy_full_top
+        pop ax
+        mov vs_text_last,al
+        cmp vs_rows,24
+        jb pc_resize_map
+        cmp vs_cols,crt_cols
+        jne pc_resize_map
+        mov vs_top_left,0
+        mov vs_bottom,al
+        mov vs_right,crt_cols-1
+        call new_count
+pc_resize_map:
+        mov al,vs_text_last
+        cmp vs_cur_row,al
+        jbe pc_resize_cursor_ok
+        mov vs_cur_row,al
+pc_resize_cursor_ok:
+        call do_true_view
+        call new_vc_map
+        call update_all
+        pop bx
+        pop si
+        ret
+
+; Suppress status writes when the front console on a monitor uses row 25.
+; Recompute after ownership changes, before repainting. Invalidate the cached
+; status text so native status returns even when its contents have not changed.
+pc_status_refresh:
+        push ax
+        push bx
+        push cx
+        push dx
+        push si
+        push di
+        push es
+        mov pc_status_hide,0
+        mov si,offset vc_priority+num_vir_cons-1
+        mov cx,num_vir_cons
+        xor dx,dx                 ; DH tracks monitors already visited
+pc_status_console:
+        mov dl,[si]
+        call point_vs
+        mov dl,1
+        cmp vs_crt_seg,mono_seg
+        je pc_status_monitor
+        mov dl,2
+pc_status_monitor:
+        test dh,dl
+        jnz pc_status_next
+        or dh,dl
+        cmp vs_text_last,24
+        jne pc_status_next
+        cmp vs_bottom,24
+        jne pc_status_next
+        or pc_status_hide,dl
+pc_status_next:
+        dec si
+        loop pc_status_console
+        push ds
+        pop es
+        mov di,offset status_copy
+        mov cx,crt_cols
+        mov ax,0ffffh
+        cld
+        rep stosw
+        pop es
+        pop di
+        pop si
+        pop dx
+        pop cx
+        pop bx
+        pop ax
+        ret
+pc_status_hide db 0
+pc_equipment_word dw 0

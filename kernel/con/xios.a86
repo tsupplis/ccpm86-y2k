@@ -35,7 +35,7 @@ TITLE '** CCP/M-86 XIOS for IBM PC **'
 ;
 
 
-include		pcmode.lib	; opt-in XIOS personality switches
+include pcmode.lib
 
 include		xbegin.lib	; header, entry, patch_space, ints
 
@@ -56,4 +56,3 @@ endif
 include		xinit.lib	; startup, hardware init, int vectors
 
 	end
-

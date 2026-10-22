@@ -101,11 +101,16 @@ ld_cf:	mov cx,fcblen/2 ! mov di,offset lod_fcb
 	mov cx,sysdat			;DMA segment
 	call drd ! cmp di,1             ;check for EOF in header read
           je lod_eof
-           jcxz ndpchk
+           jcxz header_check
 lod_eof:
         mov cx, e_bad_load              ; tried to load a 0 length cmd file
         mov bx, 0ffffh                  ; or one whose header is incorrect
         jmp lod_exit
+header_check:
+        call check_cmd_header
+        jc lod_eof
+        mov cs:word ptr lod_newshare,0
+        mov bx,offset lod_dma
 ndpchk:                                 ;see if 8087 required
         mov lod_ndp,0                   ;default = no
         mov bx, offset lod_dma
@@ -251,13 +256,17 @@ ch_nabs:    cmp ldt_type[si],9
 	      pop dx ! pop bx
 	      cmp cx,0 ! pop cx
 	      je ch_nxt
+        mov cx,e_no_memory
 		jmp ld_out
 ch_al:		push bx ! push dx ! push cx ! push si
 		mov cx,f_malloc ! mov dx,si
 		call osif ! pop si
-		mov ax,ldt_start[si] ! mov ldt_id[si],ax
-		cmp cx,0 ! pop cx ! pop dx ! pop bx
-		je ch_nxt
+        test cx,cx
+        jnz ch_alloc_failed
+        mov ax,ldt_start[si] ! mov ldt_id[si],ax
+ch_alloc_failed:
+        test cx,cx ! pop cx ! pop dx ! pop bx
+        je ch_nxt
 		    	;couldn't find memory
 		    mov bx,0ffffh ! mov cx,e_no_memory
 		    jmp ld_out
@@ -324,7 +333,8 @@ noloadf:mov ax,lod_pd ! mov ldt_pd[si],ax
 
 	    		;Not Enough Memory - release any
 			; memory already allocated
-ld_out:	    push cx
+ld_out:     push cx
+        call discard_new_share
 	    mov bx,offset ldtab
 	    mov cx,lod_nldt ! inc cx
 lg_more:    cmp ldt_id[bx],0 ! je lg_next
@@ -347,7 +357,8 @@ lt_sprd:
 			;1st give everyone the minimum
 	mov bx,offset ldtab
 	mov cx,lod_nldt
-ls_more:cmp ldt_start[bx],0 ! jne ls_next
+ls_more:cmp ldt_min[bx],0 ! je ls_next
+        cmp ldt_start[bx],0 ! jne ls_next
 	    mov ax,ldt_min[bx]
 	    sub ldt_min[si],ax
 	    cmp ax,ldt_max[bx] ! jne ls_next
@@ -359,7 +370,8 @@ ls_next:add bx,ldtlen ! loop ls_more
 			;spread whats left amongst those that need more
 	mov bx,offset ldtab
 	mov cx,lod_nldt
-lsl_mre:cmp ldt_start[bx],0 ! jne lsl_nxt
+lsl_mre:cmp ldt_min[bx],0 ! je lsl_nxt
+        cmp ldt_start[bx],0 ! jne lsl_nxt
 	    mov ax,ldt_start[si] ! mov ldt_start[bx],ax
 	    mov ax,ldt_min[si]
 	    cmp ax,0 ! je adj_start
@@ -384,53 +396,10 @@ lf_mre:	cmp ldt_flen[si],0 ! je lf_nxt
 	    push cx ! push ldt_start[si] ! push si
 	    call lod_group
 	    pop si ! pop ldt_start[si]
-	    cmp cx,0 ! pop cx
-	    je lf_nxt
-
-;if ccpm
-;
-;		jmp ld_out
-;endif
-
-;if mpm
-
-			; error in lod_group
-			; if loading shared code we also
-			; have to release Shared Code from SCL.
-			; It will be the top item in the list.
-
-		cmp ldt_atr[si],mf_load+mf_code+mf_share
-		je rm_sh
-		    jmp ld_out
-rm_sh:		push cx				; remember Err Code
-
-			; Remove PD from SCL
-		pushf ! cli
-		mov bx,scl
-		mov ax,p_thread[bx]
-		mov scl,ax
-		popf
-
-			; Release the memory
-
-		push ds ! push bx
-		mov bx,p_mem[bx] ! push ms_start[bx]
-		mov ax,ss ! mov ds,ax
-		mov dx,sp ! mov cx,f_memfree
-		call osif
-		pop ax ! pop bx ! pop ds
-		
-			; Place PD on PUL
-
-		pushf ! cli
-		mov ax,pul
-		mov pul,bx
-		mov p_link[bx],ax
-		popf
-
-		pop cx
-		jmp ld_out
-;endif
+        mov dx,cx ! pop cx
+        test dx,dx ! je lf_nxt
+        mov cx,dx
+        jmp ld_out
 
 lf_nxt:	add si,ldtlen ! loop lf_mre
 
@@ -438,7 +407,8 @@ lf_nxt:	add si,ldtlen ! loop lf_mre
 ;	 Check for fixup records and do fixups
 
         test lod_lbyte,80h        ; hi bit of last byte in cmd header
-        jz init_base              ; is set if fixups
+        jnz fx_read               ; is set if fixups
+        jmp init_base
 fx_read:
         mov ax,lod_fixrec         ; get record # of fixups in file
 	mov bx,1                  ; read one record
@@ -460,15 +430,33 @@ fx_chk:
 	test al,al
         jz init_base
         and al,0fh		  ; low nibble is target group
+        jnz fx_target_valid
+        jmp fx_err
+fx_target_valid:
         call tblsrch              ; find target group in load table
         mov dx,ldt_start[di]      ; DX = target segment, this is
 				  ; what we add to the load image
 	mov al,fix_grp[bx]	  ; location group is high nibble
         mov cl,4                  ; put in low nibble of AL
         shr al,cl
+        jnz fx_location_valid
+        jmp fx_err
+fx_location_valid:
         call tblsrch		  ; DI = location load table entry
-        mov ax,ldt_start[di]      ; AX = base segment of location
-	add ax,fix_para[bx]	  ; add paragraph offset
+; Check the word's last byte against the location group's actual allocated
+; paragraphs. The byte offset may be 0..255, not only canonical 0..15.
+        xor ax,ax
+        mov al,fix_offs[bx]
+        inc ax
+        mov cl,4
+        shr ax,cl
+        add ax,fix_para[bx]
+        jc fx_err
+        cmp ax,ldt_min[di]
+        jae fx_err
+        mov ax,ldt_start[di]
+        add ax,fix_para[bx]
+        jc fx_err
 
         push es                   ; absolute paragraph in memory
         mov es,ax
@@ -731,7 +719,7 @@ rd_indma:
 	    pop bx
 	    jcxz rd_agn
 		cmp cx,0ffh ! jne rd_r3
-		    mov cx,0
+		    mov cx,e_bad_read
 rd_r3:		ret
 rd_agn:	    mov ax,ldt_fstrt[bx]
 	    and ax,0fff8h			; note starting paragraph
@@ -753,7 +741,7 @@ xf_d:
 	pop ax ! pop bx
 	jcxz xfer_n
 	    cmp cx,0ffh ! jne rd_r4
-		xor cx,cx
+		mov cx,e_bad_read
 rd_r4:	    ret
 xfer_n: shl ax,1 ! shl ax,1 ! shl ax,1
 	add ldt_start[bx],ax
@@ -860,6 +848,7 @@ gs_nxt:	push si
 		    call shmem
 		    pop si ! pop bx
 		    cmp cx,0ffffh ! je no_sh  
+            mov ax,ldt_start[si] ! mov ldt_id[si],ax
 			mov ldt_flen[si],0
 
 				;  Put SHARE PD on end of SCL
@@ -885,7 +874,9 @@ no_sh:
 
 	pushf ! cli
 	mov bx,pul
-	cmp bx,0 ! je sherr
+	cmp bx,0 ! jne sh_have_pd
+        jmp sherr
+sh_have_pd:
 	    mov ax,p_link[bx] ! mov pul,ax
 	    popf
 
@@ -897,6 +888,7 @@ no_sh:
 	    call osif
 	    pop si ! pop bx
 	    cmp cx,0 ! jne merr
+        mov ax,ldt_start[si] ! mov ldt_id[si],ax
 
 			; initialize new PD name
 			; BX = New PD
@@ -925,6 +917,8 @@ no_sh:
 		call osif
 		add sp,6
 		pop ds ! pop si ! pop bx
+        test cx,cx ! jnz merr
+        mov cs:word ptr lod_newshare,bx
 
 		; put new PD on SCL
 
@@ -958,6 +952,10 @@ sm_nxt:
 	    mov ax,ms_flags[di]
 	    and ax,mf_share+mf_code+mf_load
 	    cmp ax,mf_share+mf_code+mf_load ! jne sm_nxt
+                ; Reused shared code uses its real extent, not the new header's
+                ; requested MIN, when validating relocation destinations.
+                mov ax,ms_length[di]
+                mov ldt_min[si],ax
 		push si ! push ds
 		push ms_start[di]
 		push ms_start[di]
@@ -967,12 +965,96 @@ sm_nxt:
 		mov dx,sp ! mov cx,f_share
 		call osif
 
-			; This will always work.
+        ; Sharing can fail if no memory descriptor is available.
 
 		pop ax ! pop ax ! pop ax
 		pop dx ! pop ds ! pop si
+        test cx,cx ! jz sm_shared
+        mov cx,0ffffh ! ret
+sm_shared:
 		mov ldt_start[si],dx
 		ret
 sm_no:	mov cx,0ffffh ! ret
 
+
+; Validate the complete header before CHAIN frees/transfers memory or any
+; allocations occur. Types 1..8 are base-page slots; 9 aliases code slot 1.
+; DX tracks the file paragraph offset; DI tracks occupied base-page slots.
+check_cmd_header:
+        mov bx,offset lod_dma
+        mov bp,ch_entmax
+        mov dx,8
+        xor di,di
+        xor si,si
+        xor ax,ax
+        push ax                       ; selected code minimum, then data minimum
+        push ax
+chv_next:
+        mov al,ch_form[bx]
+        test al,al ! jz chv_skip
+        cmp al,9 ! ja chv_bad
+        cmp al,9 ! jne chv_type
+        mov al,1
+chv_type:
+        mov cl,al
+        dec cl
+        mov ax,1 ! shl ax,cl
+        test di,ax ! jnz chv_bad
+        or di,ax
+        mov ax,ch_length[bx]
+        cmp ax,ch_min[bx] ! ja chv_bad
+        add dx,ax ! jc chv_bad
+        ; Preserve the chosen base-page capacity on the stack.
+        cmp cl,1 ! jne chv_code
+        pop ax
+        mov ax,ch_min[bx] ! push ax
+        jmps chv_skip
+chv_code:
+        cmp cl,0 ! jne chv_skip
+        pop si ! pop ax
+        mov ax,ch_min[bx] ! push ax ! push si
+chv_skip:
+        add bx,chlen
+        dec bp ! jnz chv_next
+        pop ax ! pop bx
+        test di,2 ! jnz chv_base
+        test di,1 ! jz chv_fail
+        mov ax,bx
+chv_base:
+        cmp ax,10h ! jb chv_fail
+        clc ! ret
+chv_bad:
+        pop ax ! pop ax
+chv_fail:
+        stc ! ret
+
+; Only a newly created shared-code owner is invalidated on failed load.
+; Existing cached owners survive; ld_out releases the requester's attachment
+; through ldt_id for both newly created and reused shared code.
+discard_new_share:
+        mov bx,cs:word ptr lod_newshare
+        test bx,bx ! jz dns_done
+        mov cs:word ptr lod_newshare,0
+        pushf ! cli
+        mov di,(offset scl)-p_thread
+ dns_find:
+        mov ax,p_thread[di]
+        cmp ax,bx ! je dns_unlink
+        test ax,ax ! jz dns_notfound
+        mov di,ax ! jmps dns_find
+ dns_unlink:
+        mov ax,p_thread[bx] ! mov p_thread[di],ax
+        popf
+        push bx ! push ds
+        mov si,p_mem[bx]
+        push bx ! push ms_start[si]
+        mov dx,sp ! push ss ! pop ds
+        mov cx,f_memfree ! call osif
+        pop ax ! pop ax ! pop ds ! pop bx
+        pushf ! cli
+        mov ax,pul ! mov p_link[bx],ax ! mov pul,bx
+ dns_notfound:
+        popf
+ dns_done:
+        ret
 

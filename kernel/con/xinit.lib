@@ -448,13 +448,13 @@ init_v0:
 init_v1:
 	mov	vs_vc_seg,ax		; tell each vs_ where to find
 	add	bx,size_vs		;   its buffer segment
-	add	ax,((crt_size+15) shr 4) * 2	; segment size
+	add	ax,((buffer_cells+15) shr 4) * 2	; segment size
 	loop	init_v1
 	mov	vc_map_seg,ax		; ownership map segment
 
 	mov	es,ax			; now set up the initial map
 	sub	di,di			; top left corner
-	mov	cx,crt_size
+	mov	cx,buffer_cells
 	mov	al,(1 shl num_vir_cons)-1	; all bits on
 	cld
 	rep	stosb				; fill the map
@@ -465,7 +465,7 @@ init_v2:
 	push	cx
 	mov	es,vs_vc_seg		; point to image
 	sub	di,di
-	mov	cx,crt_size
+	mov	cx,buffer_cells
 	mov	ax,blank		; to erase virtual images
 	rep	stosw			; fill with blanks
 	pop	cx

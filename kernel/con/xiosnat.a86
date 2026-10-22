@@ -1,0 +1,24 @@
+TITLE '** CCP/M-86 native XIOS for IBM PC **'
+; Same XIOS sources, without the PC-MODE hardware gateway.
+PCMODE_XIOS equ 0
+PCMODE_ENHANCED_KEYS equ 0
+
+include		xbegin.lib	; header, entry, patch_space, ints
+
+include		xchar.lib	; conin, status_line, list, ccb/lcb's
+
+include		xconout.lib	; console out only, including windows
+
+include		xfloppy.lib	; floppy, mdisk, disk error handling
+
+include		xhard.lib	; XT hard disk, FIDDS
+
+include		xrtc.lib	; BIOS RTC read/write and calendar conversion
+
+if PCMODE_XIOS
+include		xpcmode.lib	; PC-MODE hardware services, still one XIOS
+endif
+
+include		xinit.lib	; startup, hardware init, int vectors
+
+	end
