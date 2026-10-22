@@ -34,7 +34,7 @@ User-facing commands and key bindings are documented in README.md and HELP.
   and missing SUBMIT.CMD produce errors 43/44 (126-character expanded-tail
   limit). SUBMIT is located through CMD-only lookup; the caller's working
   drive/user and ordinary explicit SUBMIT behavior are preserved.
-- **Implementation:** private BDOS 165 supports v3 path/order updates while retaining
+- **Implementation:** project-local BDOS 240/F0h supports v3 path/order updates while retaining
   compatibility with drive-only v1 clients and v2 path/order updates. Settings reuse SUP's patch reserve without changing
   SYSDAT, PD or UDA layouts. Recall reserves 4 KiB in CIO; cursor state uses
   ten bytes of the caller's stack frame. Recall truncates to the receiving
@@ -173,3 +173,21 @@ BATCH.CMD, with B: current and the interpreter on SYS A:. Freshly generated
 OBJ/EXE/COM match the individual-command outputs byte for byte; both programs
 run and the shell/status line return. This adds validation only, with no
 runtime code changes.
+
+API coverage is documented in [api.md](api.md): DOS/BIOS services, DOS 1.10
+and MS-DOS 1.25 differences, native INT E0h functions and INT E6h selectors.
+This is a source inventory; implemented handlers are not a full-conformance claim.
+
+SETDEF's project-local INT E0h API moved from 165/A5h to 240/F0h because
+Concurrent DOS 4.1 assigns 165 to AUX attach. SUP, SETDEF.CMD and PCTMP
+are updated together; no old-number alias remains. Packet layouts v1–v3
+are unchanged. Old SETDEF/PCTMP binaries require rebuilding with the kernel.
+F0h is unused in the reviewed historical tables, not a universal reservation.
+
+## DOS version query
+
+- **NEW — INT 21h/AH=30h:** PCTMP returns AX=1901h (AL=1, AH=25 decimal), reporting 1.25. Other registers are preserved; no OEM/serial outputs are defined. This is a project extension, not a claim of complete DOS 1.25 compatibility. Native TMP is unchanged.
+
+SETDEF source follows the command-module layout: module header, routine sections,
+aligned ASM86 instructions, one instruction per line and descriptive helper labels.
+This source-only cleanup preserves SETDEF.CMD byte for byte.

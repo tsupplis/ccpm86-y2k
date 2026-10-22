@@ -1,201 +1,358 @@
-title 'SETDEF - per-console command search settings'
-; Version 3 of local BDOS 165; kernel keeps v1/v2 clients compatible.
-; ORDER always starts with CMD; optional SUB precedes the fixed DOS group.
-bdos equ 0e0h
-cseg
-org 0
-start:
-    pushf ! pop bx ! cli
-    mov ax,ds ! mov ss,ax ! mov sp,offset stack_top
-    push bx ! popf ! cld
-    call api
-    mov si,081h
-    xor ax,ax ! mov al,command_length
-    mov di,si ! add di,ax
-    call spaces
-    cmp si,di ! jb arguments
-    jmp display
-arguments:
-    cmp byte ptr [si],'[' ! jne parse_path
-    jmp parse_order
-parse_path:
-    or operation,1
-    xor bp,bp
-next_entry:
-    cmp bp,4 ! jb room
-    jmp syntax_error
-room:
-    call getchr
-    cmp al,'*' ! je current
-    cmp al,'A' ! jb bad_path
-    cmp al,'P' ! ja bad_path
-    sub al,'A' ! mov dl,al
-    call getchr
-    cmp al,':' ! jne bad_path
-    mov al,dl
-    jmps store
-bad_path:
-    jmp syntax_error
-current:
-    mov al,0ffh
-store:
-    mov entries[bp],al ! inc bp
-    mov ax,bp ! mov entry_count,al
-    call spaces
-    cmp si,di ! jb path_more
-    jmp apply
-path_more:
-    cmp byte ptr [si],'[' ! je parse_order
-    call getchr
-    cmp al,',' ! jne bad_path
-    call spaces
-    jmps next_entry
-parse_order:
-    or operation,2
-    mov bx,offset order_prefix ! call match
-    mov type_order,2             ; CMD alone disables automatic DOS search
-    call spaces ! call getchr
-    cmp al,')' ! je close_order
-    cmp al,',' ! jne order_bad
-    call spaces ! call getchr
-    cmp al,'D' ! je order_dos
-    cmp al,'S' ! jne order_bad
-    dec si
-    mov bx,offset sub_text ! call match
-    or type_order,1
-    call spaces ! call getchr
-    cmp al,')' ! je close_order
-    cmp al,',' ! jne order_bad
-    call spaces ! call getchr
-    cmp al,'D' ! jne order_bad
-order_dos:
-    dec si
-    mov bx,offset dos_text ! call match
-    and type_order,0fdh
-    call spaces ! call getchr
-    cmp al,')' ! jne order_bad
-close_order:
-    call spaces ! call getchr
-    cmp al,']' ! jne order_bad
-    call spaces
-    cmp si,di ! jne order_bad
-    jmp apply
-order_bad:
-    jmp syntax_error
-apply:
-    call api
-    jmp display
-syntax_error:
-    mov dx,offset usage ! jmp print_exit
-api:
-    mov cl,165 ! mov dx,offset packet ! int bdos
-    cmp bx,0 ! jne not_supported
-    cmp entry_count,1 ! jb not_supported
-    cmp entry_count,4 ! ja not_supported
-    cmp type_order,3 ! ja not_supported
-    ret
-not_supported:
-    mov dx,offset unavailable ! jmp print_exit
-getchr:
-    cmp si,di ! jb have_chr
-    jmp syntax_error
-have_chr:
-    lodsb
-    cmp al,'a' ! jb got_chr
-    cmp al,'z' ! ja got_chr
-    sub al,020h
-got_chr:
-    ret
-match:
-    cmp cs:byte ptr [bx],0 ! je matched
-    call getchr
-    cmp al,cs:[bx] ! je match_next
-    jmp syntax_error
-match_next:
-    inc bx ! jmps match
-matched:
-    ret
-display:
-    mov dx,offset path_message ! call print
-    xor bp,bp
-print_entry:
-    mov bx,bp ! shl bx,1
-    mov dx,row_labels[bx] ! call print
-    mov al,entries[bp]
-    cmp al,0ffh ! jne letter
-    mov dx,offset default_text ! call print
-    jmps printed
-letter:
-    add al,'A' ! mov dl,al ! call put
-    mov dl,':' ! call put
-printed:
-    mov dx,offset newline ! call print
-    inc bp
-    xor ax,ax ! mov al,entry_count
-    cmp bp,ax ! jb print_entry
-    mov bx,bp ! shl bx,1
-    mov dx,row_labels[bx] ! call print
-    mov dx,offset system_text ! call print
-    mov dl,system_drive ! add dl,'A' ! call put
-    mov dx,offset system_end ! call print
-    mov dx,offset newline ! call print
-    mov dx,offset type_message ! call print
-    test type_order,1 ! jz display_dos
-    mov dx,offset sub_message ! call print
-display_dos:
-    test type_order,2 ! jnz end_settings
-    mov dx,offset dos_message ! call print
-end_settings:
-    mov dx,offset newline
-print_exit:
-    call print
-exit:
-    mov cl,0 ! int bdos ! jmps exit
-spaces:
-    cmp si,di ! jae spaces_done
-    cmp byte ptr [si],' ' ! je space
-    cmp byte ptr [si],9 ! jne spaces_done
-space:
-    inc si ! jmps spaces
-spaces_done:
-    ret
-print:
-    mov cl,9 ! int bdos ! ret
-put:
-    mov cl,2 ! int bdos ! ret
-order_prefix db '[ORDER=(CMD',0
-sub_text db 'SUB',0
-dos_text db 'DOS',0
+;*****************************************************************************
+;
+;	SETDEF - Concurrent CP/M-86 per-console command search settings
+;	Project command; uses the local BDOS 240/F0h search API, packet version 3.
+;
+;	Display settings, or update up to four drives and CMD with optional SUB and DOS.
+;	DOS expands to COM, EXE, BAT in PCTMP; native TMP ignores the DOS group.
+;	Parse the complete command tail before publishing an update.
+;
+;	The loader supplies DS and the command tail at DATA:0080h. A private
+;	128-byte stack shares DATA. Keep the v3 packet layout defined in API.md.
+;	Build: make -C commands/setdef
+;
+;*****************************************************************************
+	title	'SETDEF - per-console command search settings'
 
-dseg
-org 080h
-command_length rb 1
-org 100h
-packet db 'SD',3
-operation db 0
-entry_count db 0
-entries db 0,0,0,0
-system_drive db 0
-type_order db 0
-path_message db 13,10,'Drive Search Path:',13,10,'$'
-row_labels dw first_row,second_row,third_row,fourth_row,fifth_row
-first_row db '1st Drive            - $'
-second_row db '2nd Drive            - $'
-third_row db '3rd Drive            - $'
-fourth_row db '4th Drive            - $'
-fifth_row db '5th Drive            - $'
-default_text db 'Default$'
-newline db 13,10,'$'
-type_message db 'Search Order         - CMD$'
-sub_message db ', SUB$'
-dos_message db ', DOS$'
-system_text db 'Sys Disk ($'
-system_end db ':)',13,10,'$'
-usage db 'Usage: SETDEF [drive-list] [ORDER=(CMD[,SUB][,DOS])]',13,10
-      db 'DOS searches COM, EXE, BAT in that fixed order.',13,10
-      db 'Drive list: up to four entries, for example *,A:,C:',13,10
-      db 'SETDEF displays settings. CMD,DOS is the default.',13,10,'$'
-unavailable db 'SETDEF requires a kernel with v3 command search support.',13,10,'$'
-rb 128
-stack_top equ offset $
-end
+; Native BDOS entry and functions used by this command.
+os_interrupt			equ	0e0h
+p_term				equ	0
+c_write				equ	2
+c_writebuf			equ	9
+f_search_settings		equ	240
+
+	cseg
+	org	0
+
+;-----------------------------------------------------------------------------
+; Install the private stack, query current settings, then parse DATA:0081h tail.
+;-----------------------------------------------------------------------------
+entry:
+	pushf
+	pop	bx
+	cli
+	mov	ax,ds
+	mov	ss,ax
+	mov	sp,offset stack_top
+	push	bx
+	popf
+	cld
+	call	search_api
+	mov	si,081h
+	xor	ax,ax
+	mov	al,command_length
+	mov	di,si
+	add	di,ax
+	call	skip_spaces
+	cmp	si,di
+	jb	parse_arguments
+	jmp	display_settings
+parse_arguments:
+	cmp	byte ptr [si],'['
+	jne	parse_path
+	jmp	parse_order
+
+;-----------------------------------------------------------------------------
+; Parse one to four path entries: * or A: through P:, separated by commas.
+;-----------------------------------------------------------------------------
+parse_path:
+	or	operation,1
+	xor	bp,bp
+next_entry:
+	cmp	bp,4
+	jb	parse_path_entry
+	jmp	syntax_error
+parse_path_entry:
+	call	read_uppercase
+	cmp	al,'*'
+	je	path_current_drive
+	cmp	al,'A'
+	jb	invalid_path
+	cmp	al,'P'
+	ja	invalid_path
+	sub	al,'A'
+	mov	dl,al
+	call	read_uppercase
+	cmp	al,':'
+	jne	invalid_path
+	mov	al,dl
+	jmps	store_path_entry
+invalid_path:
+	jmp	syntax_error
+path_current_drive:
+	mov	al,0ffh
+store_path_entry:
+	mov	entries[bp],al
+	inc	bp
+	mov	ax,bp
+	mov	entry_count,al
+	call	skip_spaces
+	cmp	si,di
+	jb	path_more
+	jmp	apply_settings
+path_more:
+	cmp	byte ptr [si],'['
+	je	parse_order
+	call	read_uppercase
+	cmp	al,','
+	jne	invalid_path
+	call	skip_spaces
+	jmps	next_entry
+
+;-----------------------------------------------------------------------------
+; Accept ORDER=(CMD), (CMD,SUB), (CMD,DOS), or (CMD,SUB,DOS).
+;-----------------------------------------------------------------------------
+parse_order:
+	or	operation,2
+	mov	bx,offset order_prefix
+	call	match_keyword
+	mov	type_order,2				; CMD alone disables automatic DOS search
+	call	skip_spaces
+	call	read_uppercase
+	cmp	al,')'
+	je	close_order
+	cmp	al,','
+	jne	invalid_order
+	call	skip_spaces
+	call	read_uppercase
+	cmp	al,'D'
+	je	order_dos
+	cmp	al,'S'
+	jne	invalid_order
+	dec	si
+	mov	bx,offset sub_text
+	call	match_keyword
+	or	type_order,1
+	call	skip_spaces
+	call	read_uppercase
+	cmp	al,')'
+	je	close_order
+	cmp	al,','
+	jne	invalid_order
+	call	skip_spaces
+	call	read_uppercase
+	cmp	al,'D'
+	jne	invalid_order
+order_dos:
+	dec	si
+	mov	bx,offset dos_text
+	call	match_keyword
+	and	type_order,0fdh
+	call	skip_spaces
+	call	read_uppercase
+	cmp	al,')'
+	jne	invalid_order
+close_order:
+	call	skip_spaces
+	call	read_uppercase
+	cmp	al,']'
+	jne	invalid_order
+	call	skip_spaces
+	cmp	si,di
+	jne	invalid_order
+	jmp	apply_settings
+invalid_order:
+	jmp	syntax_error
+
+;-----------------------------------------------------------------------------
+; Publish the validated packet in one API call, then display returned settings.
+;-----------------------------------------------------------------------------
+apply_settings:
+	call	search_api
+	jmp	display_settings
+syntax_error:
+	mov	dx,offset usage
+	jmp	write_message_exit
+
+;-----------------------------------------------------------------------------
+; DS:DX addresses the v3 packet. Require success and bounded returned fields.
+;-----------------------------------------------------------------------------
+search_api:
+	mov	cl,f_search_settings
+	mov	dx,offset packet
+	int	byte ptr os_interrupt
+	cmp	bx,0
+	jne	not_supported
+	cmp	entry_count,1
+	jb	not_supported
+	cmp	entry_count,4
+	ja	not_supported
+	cmp	type_order,3
+	ja	not_supported
+	ret
+not_supported:
+	mov	dx,offset unavailable
+	jmp	write_message_exit
+
+;-----------------------------------------------------------------------------
+; Return the next tail character in AL, folded to uppercase; reject end of tail.
+;-----------------------------------------------------------------------------
+read_uppercase:
+	cmp	si,di
+	jb	read_character
+	jmp	syntax_error
+read_character:
+	lodsb
+	cmp	al,'a'
+	jb	character_ready
+	cmp	al,'z'
+	ja	character_ready
+	sub	al,020h
+character_ready:
+	ret
+
+;-----------------------------------------------------------------------------
+; Match a zero-terminated CS:BX keyword against the bounded command tail.
+;-----------------------------------------------------------------------------
+match_keyword:
+	cmp	cs:byte ptr [bx],0
+	je	keyword_matched
+	call	read_uppercase
+	cmp	al,cs:[bx]
+	je	match_next_character
+	jmp	syntax_error
+match_next_character:
+	inc	bx
+	jmps	match_keyword
+keyword_matched:
+	ret
+
+;-----------------------------------------------------------------------------
+; Display explicit path entries, the system-disk fallback and effective order.
+;-----------------------------------------------------------------------------
+display_settings:
+	mov	dx,offset path_message
+	call	write_string
+	xor	bp,bp
+print_entry:
+	mov	bx,bp
+	shl	bx,1
+	mov	dx,row_labels[bx]
+	call	write_string
+	mov	al,entries[bp]
+	cmp	al,0ffh
+	jne	display_drive_letter
+	mov	dx,offset default_text
+	call	write_string
+	jmps	display_entry_done
+display_drive_letter:
+	add	al,'A'
+	mov	dl,al
+	call	write_character
+	mov	dl,':'
+	call	write_character
+display_entry_done:
+	mov	dx,offset newline
+	call	write_string
+	inc	bp
+	xor	ax,ax
+	mov	al,entry_count
+	cmp	bp,ax
+	jb	print_entry
+	mov	bx,bp
+	shl	bx,1
+	mov	dx,row_labels[bx]
+	call	write_string
+	mov	dx,offset system_text
+	call	write_string
+	mov	dl,system_drive
+	add	dl,'A'
+	call	write_character
+	mov	dx,offset system_end
+	call	write_string
+	mov	dx,offset newline
+	call	write_string
+	mov	dx,offset type_message
+	call	write_string
+	test	type_order,1
+	jz	display_dos
+	mov	dx,offset sub_message
+	call	write_string
+display_dos:
+	test	type_order,2
+	jnz	end_settings
+	mov	dx,offset dos_message
+	call	write_string
+end_settings:
+	mov	dx,offset newline
+write_message_exit:
+	call	write_string
+
+;-----------------------------------------------------------------------------
+; Terminate through native BDOS; retry only if the termination call returns.
+;-----------------------------------------------------------------------------
+exit_program:
+	mov	cl,p_term
+	int	byte ptr os_interrupt
+	jmps	exit_program
+
+;-----------------------------------------------------------------------------
+; Advance SI over spaces and tabs without reading beyond the DI tail limit.
+;-----------------------------------------------------------------------------
+skip_spaces:
+	cmp	si,di
+	jae	skip_spaces_done
+	cmp	byte ptr [si],' '
+	je	skip_one_space
+	cmp	byte ptr [si],9
+	jne	skip_spaces_done
+skip_one_space:
+	inc	si
+	jmps	skip_spaces
+skip_spaces_done:
+	ret
+
+;-----------------------------------------------------------------------------
+; Console wrappers: DS:DX dollar-terminated string, or DL character.
+;-----------------------------------------------------------------------------
+write_string:
+	mov	cl,c_writebuf
+	int	byte ptr os_interrupt
+	ret
+write_character:
+	mov	cl,c_write
+	int	byte ptr os_interrupt
+	ret
+
+;-----------------------------------------------------------------------------
+; Read-only keyword strings in CODE.
+;-----------------------------------------------------------------------------
+order_prefix			db	'[ORDER=(CMD',0
+sub_text			db	'SUB',0
+dos_text			db	'DOS',0
+
+;-----------------------------------------------------------------------------
+; Loader command tail and writable API packet, messages and private stack.
+;-----------------------------------------------------------------------------
+	dseg
+	org	080h
+command_length			rb	1
+	org	100h
+packet				db	'SD',3
+operation			db	0
+entry_count			db	0
+entries				db	0,0,0,0
+system_drive			db	0
+type_order			db	0
+path_message			db	13,10,'Drive Search Path:',13,10,'$'
+row_labels			dw	first_row,second_row,third_row,fourth_row,fifth_row
+first_row			db	'1st Drive            - $'
+second_row			db	'2nd Drive            - $'
+third_row			db	'3rd Drive            - $'
+fourth_row			db	'4th Drive            - $'
+fifth_row			db	'5th Drive            - $'
+default_text			db	'Default$'
+newline				db	13,10,'$'
+type_message			db	'Search Order         - CMD$'
+sub_message			db	', SUB$'
+dos_message			db	', DOS$'
+system_text			db	'Sys Disk ($'
+system_end			db	':)',13,10,'$'
+usage				db	'Usage: SETDEF [drive-list] [ORDER=(CMD[,SUB][,DOS])]',13,10
+	db	'DOS searches COM, EXE, BAT in that fixed order.',13,10
+	db	'Drive list: up to four entries, for example *,A:,C:',13,10
+	db	'SETDEF displays settings. CMD,DOS is the default.',13,10,'$'
+unavailable			db	'SETDEF requires a kernel with v3 command search support.',13,10,'$'
+	rb	128
+stack_top			equ	offset $
+	end

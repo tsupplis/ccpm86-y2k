@@ -1,11 +1,15 @@
-# Local command search API (BDOS 165)
+# Local command search API (BDOS 240 / F0h)
 
 SETDEF and both command processors share settings stored by CON's supervisor.
 The API is local to this kernel; the v3 SETDEF utility requires matching CON.
+Function 165 is reserved for the later DR AUX attach API; no old-number alias
+is provided. Rebuild SETDEF, PCTMP and the kernel together. F0h is project-local,
+not a universally assigned CP/M extension number.
+
 Native TMP's source is unchanged: its BDOS 150 CLI uses CMD/SUB and ignores DOS.
 PC-MODE's pre-search uses the same policy before its existing DOS loader.
 
-Call INT E0h with CL=165 and DS:DX pointing to the packet. BX=0 means success;
+Call INT E0h with CL=240 (F0h) and DS:DX pointing to the packet. BX=0 means success;
 BX=FFFFh indicates failure, with the kernel error in CX. A query returns the
 current console's effective path, system disk and applicable order bits.
 
@@ -39,5 +43,4 @@ Path/order updates preserve the other setting. Search uses drives as the outer
 loop and types as the inner loop. Explicit types bypass ORDER; explicit drives
 bypass the path and system fallback. DOS execution exists only in PC-MODE.
 SUB execution uses the source-built SUBMIT and existing tail/password rules.
-See `tools/pcpathcheck.py` and `kernel/pcmode/tests/probes/sdapi.a86` for behavioral and API
-compatibility probes.
+Sandbox probes live under `private/pcmode`; they are not build dependencies.
