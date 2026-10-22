@@ -191,3 +191,31 @@ F0h is unused in the reviewed historical tables, not a universal reservation.
 SETDEF source follows the command-module layout: module header, routine sections,
 aligned ASM86 instructions, one instruction per line and descriptive helper labels.
 This source-only cleanup preserves SETDEF.CMD byte for byte.
+
+
+## PCTMP source reconstruction — 23 October 2026
+
+RSP3 executable blocks are decoded with descriptive labels and comments; DATA
+has explicit fields, buffers and tables. All eight source/include files use a
+consistent layout. Annotated instruction bytes retain encodings ASM86 would
+otherwise change. No runtime behaviour changes were made in this pass.
+
+## PCTMP review repairs — 23 October 2026
+
+- D1/D2: reuse the original decimal printer, error-table scanner and diagnostic
+  renderer. Retain the improved messages, unknown error numbers and silent error 31.
+- PCT-04: compare both words correctly before extending the DOS FCB file size.
+- PCT-03: check the write source pointer for segment wrap and return error 2.
+- PCT-01/PCT-02: reject private services above 7 and parsed drives beyond P:.
+- PCT-05: return success on a matching cache entry, including high record numbers.
+- PCT-06 (formerly PCT-C2): retain dirty cached data after a failed write; propagate
+  failure before close/truncate/reopen/create or cache invalidation can discard it.
+  Native disk-full code 2 confirms this return path is reachable.
+
+All PCTMP fixes are mandatory. Historical build branches and binary-comparison
+requirements have been removed. Native TMP and XIOS are unchanged.
+
+During repair validation, moving CODE exposed two remaining literal table-end
+addresses. EXE launch hung; the device-name scan had the same dependency. Both
+now use labels (PCT-07). This was a repair-pass regression, caught and corrected
+before completion, not a failure observed before the repairs.
