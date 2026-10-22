@@ -2,7 +2,7 @@
 
 **Disk Images are now available as part of the project releases, ready to use !**
 
-This project preserves Digital Research's Concurrent CP/M-86 3.1 as a usable,
+This project preserves Digital Research's Concurrent CP/M-86 3.1 multitask OS as a usable,
 rebuildable system for running and exploring classic 16-bit software. Runnable
 disks and development tools accompany the sources and patch notes, making the
 system more consumable (CP/M-Plus style) and accessible to anyone interested in its history.
