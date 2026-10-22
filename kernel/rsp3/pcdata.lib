@@ -1,19 +1,21 @@
 ;*****************************************************************************
 ;
-;	PCDATA - recovered PCTMP per-console DATA; reconstruction incomplete.
+;	PCDATA - recovered PCTMP per-console DATA layout.
 ;	Concurrent CP/M-86 3.1, project PC-MODE personality.
 ;
 ;*****************************************************************************
 
-; Recovered normalized DATA, not a complete semantic reconstruction.
+; Recovered normalized DATA; fields follow their observed uses.
 ; Explicit initialization preserves all 0AF0h bytes, including per-console
 ; links, process/UDA fields, command/FCB buffers and initial private stack.
-; Verified against the DATA group of inputs/pctmp.rsp; never resized.
+; Verified against the original RSP DATA group; never resized.
+; *_image labels describe storage; numeric EQU offsets in pctmp.a86 avoid
+; ASM86 typed-label changes to immediate versus memory operand selection.
 ; Original normalized PCTMP DATA, 2,800 bytes. No layout changes.
 ; Resident-system-process prefix, following the TMP/GENCCPM layout.
 ; This normalized DATA is copied once per console; GENCCPM fixes segment links.
 rsp_system_link			dw	0
-rsp_console_count_offset		dw	047h
+rsp_console_count_offset	dw	047h
 rsp_console_slot		db	0,0
 rsp_link_reserved		dw	0,0,0,0,0
 
@@ -39,24 +41,55 @@ resident_process:
 
 ; UDA at 0040h. The initial private stack begins at DATA:00AAh.
 resident_uda:
-	dw	00000h,00000h,00000h,00000h		; UDA +00h
-	dw	00000h,00000h,00000h,00000h		; UDA +08h
-	dw	00000h,00000h,00000h,00000h		; UDA +10h
-	dw	00000h,00000h,00000h,00000h		; UDA +18h
-	dw	00000h,00000h,00000h,00000h		; UDA +20h
-	dw	00000h,00000h,00000h,00000h		; UDA +28h
-	dw	00000h,00000h,00172h,00000h		; UDA +30h
-	dw	00000h,00000h,00000h,00000h		; UDA +38h
-	dw	00000h,00000h,00000h,00000h		; UDA +40h
-	dw	00000h,00000h,00000h,00000h		; UDA +48h
-	dw	00000h,00000h,00000h,00000h		; UDA +50h
-	dw	00000h,00000h,00000h,00000h		; UDA +58h
-	db	1					; UDA +60h: INSYS
-	db	0					; UDA +61h
-	dw	0,0					; UDA +62h..65h
-	db	0					; UDA +66h
-	dw	0					; UDA +67h: extended error
-	db	0					; UDA +69h
+rsp_u_dparam			dw	00h		; UDA +00h, u_dparam
+rsp_u_dma_ofst			dw	00h		; UDA +02h, u_dma_ofst
+rsp_u_dma_seg			dw	00h		; UDA +04h, u_dma_seg
+rsp_u_func			db	00h		; UDA +06h, u_func
+rsp_u_searchl			db	00h		; UDA +07h, u_searchl
+rsp_u_searcha			dw	00h		; UDA +08h, u_searcha
+rsp_u_searchabase		dw	00h		; UDA +0Ah, u_searchabase
+rsp_u_dcnt			dw	00h		; UDA +0Ch, u_dcnt
+rsp_u_dblk			dw	00h		; UDA +0Eh, u_dblk
+rsp_u_error_mode		db	00h		; UDA +10h, u_error_mode
+rsp_u_mult_cnt			db	00h		; UDA +11h, u_mult_cnt
+rsp_u_df_password		db	00h,00h,00h,00h,00h,00h,00h,00h	; UDA +12h, u_df_password
+rsp_u_pd_cnt			db	00h		; UDA +1Ah, u_pd_cnt
+rsp_u_in_int			db	00h		; UDA +1Bh, u_in_int
+rsp_u_sp			dw	00h		; UDA +1Ch, u_sp
+rsp_u_ss			dw	00h		; UDA +1Eh, u_ss
+rsp_u_ax			dw	00h		; UDA +20h, u_ax
+rsp_u_bx			dw	00h		; UDA +22h, u_bx
+rsp_u_cx			dw	00h		; UDA +24h, u_cx
+rsp_u_dx			dw	00h		; UDA +26h, u_dx
+rsp_u_di			dw	00h		; UDA +28h, u_di
+rsp_u_si			dw	00h		; UDA +2Ah, u_si
+rsp_u_bp			dw	00h		; UDA +2Ch, u_bp
+rsp_u_wrkseg			dw	00h		; UDA +2Eh, u_wrkseg
+rsp_u_retseg			dw	00h		; UDA +30h, u_retseg
+rsp_u_ds_sav			dw	00h		; UDA +32h, u_ds_sav
+rsp_u_stack_sp			dw	0172h		; UDA +34h, u_stack_sp
+rsp_u_stack_ss			dw	00h		; UDA +36h, u_stack_ss
+rsp_u_ivectors			dw	00h,00h,00h,00h	; UDA +38h, u_ivectors
+rsp_u_ivec87_of			dw	00h		; UDA +40h, u_ivec87_of
+rsp_u_ivec87_sg			dw	00h		; UDA +42h, u_ivec87_sg
+rsp_u_ivectors2			dw	00h,00h,00h,00h	; UDA +44h, u_ivectors2
+rsp_u_es_sav			dw	00h		; UDA +4Ch, u_es_sav
+rsp_u_flag_sav			dw	00h		; UDA +4Eh, u_flag_sav
+rsp_u_initcs			dw	00h		; UDA +50h, u_initcs
+rsp_u_initds			dw	00h		; UDA +52h, u_initds
+rsp_u_inites			dw	00h		; UDA +54h, u_inites
+rsp_u_initss			dw	00h		; UDA +56h, u_initss
+rsp_u_os_ip			dw	00h		; UDA +58h, u_os_ip
+rsp_u_os_cs			dw	00h		; UDA +5Ah, u_os_cs
+rsp_u_debug_ip			dw	00h		; UDA +5Ch, u_debug_ip
+rsp_u_debug_cs			dw	00h		; UDA +5Eh, u_debug_cs
+rsp_u_insys			db	01h		; UDA +60h, u_insys
+rsp_u_stat_sav			db	00h		; UDA +61h, u_stat_sav
+rsp_u_conccb			dw	00h		; UDA +62h, u_conccb
+rsp_u_lstccb			dw	00h		; UDA +64h, u_lstccb
+rsp_u_delim			db	00h		; UDA +66h, u_delim
+rsp_u_ioexerr			db	00h		; UDA +67h, u_ioexerr
+	db	0,0					; Original UDA tail at +68h..69h.
 
 resident_stack:
 	dw	0cccch,0cccch,0cccch,0cccch

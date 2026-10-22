@@ -5,10 +5,10 @@
 ;
 ;*****************************************************************************
 
-; Experimental PCTMP MZ checks. Included only with PCMODE_SAFE_LOADER.
+; PCTMP MZ checks. Included only with PCMODE_SAFE_LOADER.
 ; DS is the current console's DATA. Per-console lengths live in shared CODE
 ; because the recovered DATA stride is an ABI and must not be enlarged.
-; The experimental build has exactly four PCTMP instances (checked by builder).
+; Four console slots are available; the guard rejects any larger index.
 validate_exe_file:
 	push	ax
 	push	bx

@@ -145,7 +145,7 @@ dos_nested_stack		equ	0444h
 printer_bios_function		equ	051fh
 printer_bios_character		equ	0520h
 printer_bios_device		equ	0522h
-printer_saved_ah		equ	043ah
+dos_saved_function		equ	043ah
 raw_disk_operation		equ	05b7h
 raw_disk_drive			equ	05b8h
 raw_disk_count			equ	05b9h
@@ -1263,17 +1263,43 @@ find_command_error:
 command_error_found:
 	db	02eh					; CS override
 	mov	dx,2[si]
+	if	PCMODE_SHELL
+	or	dx,dx
+	endif
+	if	not PCMODE_SHELL
 	cmp	dx,00h
+	endif
 	jnz	print_command_error
+	if	PCMODE_SHELL
+	mov	byte ptr .command_sent,dl
+	endif
+	if	not PCMODE_SHELL
 	mov	byte ptr .0208h,00h
+	endif
 	jmp	command_prompt_resume
 print_command_error:
+; Preserve the error number across BDOS output for the numeric fallback.
+; Two shorter instructions above pay for PUSH/POP without moving the tail.
+	if	PCMODE_SHELL
+	push	cx
+	endif
 	push	dx
 	call	print_code_newline
+	if	PCMODE_SHELL
+	mov	dx,offset error_prefix
+	endif
+	if	not PCMODE_SHELL
 	mov	dx,offset original_msg_error_prefix
+	endif
 	call	print_code_string
 	pop	dx
+	if	PCMODE_SHELL
+	pop	ax
+	call	error_print_message
+	endif
+	if	not PCMODE_SHELL
 	call	print_code_string
+	endif
 	call	print_code_newline
 	mov	dx,offset original_msg_command_prefix
 	call	print_code_string
@@ -1608,8 +1634,7 @@ pcmode_service:
 
 ; Private far-call entry, selected by CL; not the DOS interrupt dispatcher.
 ; Preserve caller FLAGS/ES/DS; return AX copied to BX. Save caller DS for packets.
-; REVIEW: the original limit admits CL=8..15 although only eight table words
-; precede service_load. Retained unchanged to honour the frozen RSP contract.
+; The supported build rejects selectors beyond the eight-word service table.
 	pushf
 	push	es
 	push	ds
@@ -1622,7 +1647,12 @@ pcmode_service:
 	xor	bh,bh
 	shl	bx,1
 	mov	ax,0ffffh
+	if	PCMODE_BUILD
+	cmp	cl,8
+	endif
+	if	not PCMODE_BUILD
 	cmp	cl,16
+	endif
 	jnc	service_return
 	call	cs:word ptr service_table[bx]
 service_return:
@@ -2033,7 +2063,7 @@ exe_special_compared:
 	db	08bh,0c3h				; mov ax,bx (original encoding)
 	jz	exe_allocate_memory
 	add	di,08h
-	cmp	di,037cbh
+	cmp	di,offset dos_command_names_end
 	jnz	exe_special_name
 	cmp	ax,.service_memory_paragraphs
 	jnc	exe_allocate_memory
@@ -2207,7 +2237,7 @@ exe_image_chunk_done:
 ; actual load base in paragraphs. exe_header still holds file record zero.
 ; Each MZ relocation is an offset:segment pair relative to the image base.
 ; Resolve that pair and add the load base to the target WORD, not its address.
-; The default is byte-exact recovery; the experimental helper validates both
+; The original branch is byte-exact recovery; the extended helper validates both
 ; target bytes before rebasing. See pcguard.lib for its error-stack contract.
 ; The original reader assumes the initial table offset is in record zero and
 ; entries fit the record layout. The checked pass handles arbitrary byte starts
@@ -3326,7 +3356,7 @@ bios_printer_handler:
 	or	al,al
 	pop	ax
 	jz	printer_attached
-	mov	byte ptr .printer_saved_ah,1
+	mov	byte ptr .dos_saved_function,1
 	jmps	printer_return
 printer_attached:
 	or	ah,ah
@@ -3346,7 +3376,7 @@ printer_wait_ready:
 	db	08bh,0c3h				; mov ax,bx, original encoding
 	loop	printer_wait_ready
 	or	ah,1
-	mov	byte ptr .printer_saved_ah,ah
+	mov	byte ptr .dos_saved_function,ah
 	jmps	printer_return
 printer_write:
 	mov	byte ptr .printer_bios_function,5	; direct BIOS list output
@@ -3354,7 +3384,7 @@ printer_write:
 	mov	dx,051fh
 	mov	cl,50
 	call	loader_bdos_call
-	mov	byte ptr .printer_saved_ah,010h
+	mov	byte ptr .dos_saved_function,010h
 	jmps	printer_return
 printer_try_detach:
 	cmp	ah,1
@@ -3362,7 +3392,7 @@ printer_try_detach:
 	mov	cl,159					; native list detach
 	call	loader_bdos_call
 	xor	ah,ah
-	mov	byte ptr .printer_saved_ah,ah
+	mov	byte ptr .dos_saved_function,ah
 	jmps	printer_return
 printer_try_status:
 	cmp	ah,2
@@ -3374,11 +3404,11 @@ printer_try_status:
 	test	ah,080h
 	jnz	printer_ready
 	or	ah,010h
-	mov	byte ptr .printer_saved_ah,ah
+	mov	byte ptr .dos_saved_function,ah
 	jmps	printer_return
 printer_ready:
 	or	ah,090h
-	mov	byte ptr .printer_saved_ah,ah
+	mov	byte ptr .dos_saved_function,ah
 printer_return:
 	pop	di
 	pop	es
@@ -3886,8 +3916,9 @@ dos_fn_raw_input:
 
 
 ; DOS AH=08h: read without echo, with Ctrl-C checking. The recovered INT 23h
-; instruction runs on PCTMP's private service stack. The experimental reader
+; instruction runs on PCTMP's private service stack. The extended reader
 ; restores the user frame before invoking a custom handler, as AH=01h does.
+dos_fn_checked_input:
 	if	PCMODE_CHECKED_INPUT
 	call	dos_read_checked
 	mov	byte ptr .dos_saved_ax,al		; saved DOS return AL
@@ -3956,7 +3987,7 @@ dos_input_return:
 ; dos_read_echo (1E04h), used by INT 21h/AH=01h.
 ; Read a byte, classify it for echo, then return AL. The recovered original
 ; omitted Ctrl-C detection here although its AH=08h handler already checks it.
-; The experimental variant uses the common INT 23h stack-unwind path. BIOS
+; The extended variant uses the common INT 23h stack-unwind path. BIOS
 ; reads and DOS raw input (AH=06h/07h) continue using the original raw reader.
 ;------------------------------------------------------------------------------
 dos_read_echo:
@@ -4332,7 +4363,7 @@ dos_line_accept:
 
 ; Ctrl-C unwind (207Dh). Discard the private DOS service stack and restore
 ; the saved application register frame, SS:SP and DS before calling INT 23h.
-; The original terminates even when a custom handler returns. The experimental
+; The original terminates even when a custom handler returns. The extended
 ; variant retries INT 21h with the restored application registers and untouched
 ; original interrupt frame, matching the DOS 1.x continuation convention.
 unwind_dos_break:
@@ -4482,7 +4513,7 @@ device_name_compared:
 	jz	device_name_matched
 	pop	di
 	add	di,09h
-	cmp	di,03773h
+	cmp	di,offset dos_device_names_end
 	jnz	compare_device_name
 	dec	si
 	db	08bh,0feh				; mov di,si (original encoding)
@@ -4526,13 +4557,23 @@ dos_fn_open_fcb:
 ; Create first deletes an existing file. Open reuses a matching private slot
 ; after closing it, or allocates a new slot. Cache state is invalidated on reuse.
 open_regular_file:
-	cmp	byte ptr .printer_saved_ah,016h
+	cmp	byte ptr .dos_saved_function,016h
 	jnz	open_find_existing_slot
 	push	word ptr .bios_frame_ax
 	push	word ptr .dos_saved_ax
 	call	dos_fn_delete_fcb
 	pop	word ptr .dos_saved_ax
 	pop	word ptr .bios_frame_ax
+	if	PCMODE_BUILD
+; A missing target is allowed, but a failed dirty-cache flush is not.
+	cmp	byte ptr .record_cache_dirty,0ffh
+	jne	open_create_ready
+	cmp	byte ptr .record_cache_result,0
+	je	open_create_ready
+	mov	byte ptr .dos_saved_ax,0ffh
+	ret
+open_create_ready:
+	endif
 	jmps	open_allocate_slot
 open_find_existing_slot:
 	call	find_fcb_slot
@@ -4540,6 +4581,20 @@ open_find_existing_slot:
 	mov	bx,.dos_fcb_slot
 	cmp	bx,.cached_fcb_slot
 	jnz	open_close_existing_slot
+	if	PCMODE_BUILD
+	push	bx
+	push	di
+	push	es
+	call	flush_record_cache
+	pop	es
+	pop	di
+	pop	bx
+	or	al,al
+	jz	open_cache_flushed
+	mov	byte ptr .dos_saved_ax,0ffh
+	ret
+open_cache_flushed:
+	endif
 	mov	byte ptr .record_cache_valid,00h
 	mov	byte ptr .record_cache_dirty,00h
 open_close_existing_slot:
@@ -4563,7 +4618,7 @@ open_allocate_slot:
 ; mode in private FCB current-record byte, then issue the checked request.
 open_issue_request:
 	mov	bx,.dos_fcb_slot
-	mov	cl,.printer_saved_ah
+	mov	cl,.dos_saved_function
 	mov	byte ptr 020h[bx],00h
 	mov	ah,05h
 	cmp	cl,016h
@@ -4644,9 +4699,9 @@ native_file_size_bytes:
 	call	records_to_bytes
 	pop	si
 	mov	cl,020h[si]
-	cmp	byte ptr .printer_saved_ah,011h
+	cmp	byte ptr .dos_saved_function,011h
 	jz	file_size_search_tail
-	cmp	byte ptr .printer_saved_ah,012h
+	cmp	byte ptr .dos_saved_function,012h
 	jnz	file_size_adjust_tail
 file_size_search_tail:
 	mov	cl,0dh[si]
@@ -4674,7 +4729,7 @@ native_file_timestamp:
 	db	08bh,0deh				; mov bx,si (original encoding)
 	call	check_device_fcb
 	jnz	file_timestamp_device
-	cmp	byte ptr .printer_saved_ah,012h
+	cmp	byte ptr .dos_saved_function,012h
 	jz	file_timestamp_read
 	mov	dl,.06aah
 	dec	dl
@@ -4809,6 +4864,12 @@ close_check_cache:
 	pop	es
 	pop	di
 	pop	bx
+	if	PCMODE_BUILD
+	or	al,al
+	jz	close_check_modified
+	mov	byte ptr .dos_saved_ax,0ffh
+	ret
+	endif
 close_check_modified:
 	test	byte ptr 0eh[bx],040h
 	jz	close_unmodified_file
@@ -4845,6 +4906,12 @@ close_flush_final_record:
 	call	flush_record_cache
 	pop	cx
 	pop	bx
+	if	PCMODE_BUILD
+	or	al,al
+	jz	close_update_attributes
+	mov	byte ptr .dos_saved_ax,0ffh
+	ret
+	endif
 close_update_attributes:
 	push	cx
 	call	close_native_slot
@@ -4892,7 +4959,7 @@ dos_fn_find_first:
 	call	select_dos_fcb
 	call	prepare_directory_search
 	jnz	find_failed
-	cmp	byte ptr .printer_saved_ah,012h
+	cmp	byte ptr .dos_saved_function,012h
 	jnz	find_dispatch_device
 	call	restore_find_position
 find_dispatch_device:
@@ -4928,7 +4995,7 @@ find_dispatch_device:
 
 ; Named device search succeeds only for find-first, with zero date/time.
 find_named_device:
-	cmp	byte ptr .printer_saved_ah,011h
+	cmp	byte ptr .dos_saved_function,011h
 	jnz	find_failed
 	mov	byte ptr .directory_dos_attributes,00h
 	call	build_find_result
@@ -4988,10 +5055,15 @@ prepare_directory_search:
 	mov	si,06aah
 	call	resolve_default_fcb_drive
 	call	flush_record_cache
+	if	not PCMODE_BUILD
 	mov	byte ptr .record_cache_valid,00h
+	endif
 	mov	al,.record_cache_result
 	test	al,0ffh
 	jnz	directory_prepare_result
+	if	PCMODE_BUILD
+	mov	byte ptr .record_cache_valid,00h
+	endif
 	mov	dx,0455h
 	call	set_loader_dma
 	xor	al,al
@@ -5008,7 +5080,7 @@ search_matching_attributes:
 	jz	search_attribute_first
 	jmp	search_volume_label
 search_attribute_first:
-	mov	cl,.printer_saved_ah
+	mov	cl,.dos_saved_function
 search_attribute_next:
 	call	native_directory_search
 	cmp	al,0ffh
@@ -5345,11 +5417,16 @@ dos_fn_rename_fcb:
 	ret
 rename_flush:
 	call	flush_record_cache
+	if	not PCMODE_BUILD
 	mov	byte ptr .record_cache_valid,00h
+	endif
 	test	byte ptr .record_cache_result,0ffh
 	jz	rename_prepare
 	jmp	rename_failed
 rename_prepare:
+	if	PCMODE_BUILD
+	mov	byte ptr .record_cache_valid,00h
+	endif
 	mov	ax,ds
 	mov	es,ax
 	mov	dx,0455h
@@ -5396,6 +5473,12 @@ rename_source_found:
 	pop	es
 	pop	word ptr .dos_fcb_offset
 	pop	word ptr .dos_fcb_segment
+	if	PCMODE_BUILD
+	cmp	byte ptr .dos_saved_ax,0ffh
+	jne	rename_close_ready
+	jmp	rename_failed
+rename_close_ready:
+	endif
 	lds	si,dword ptr .bios_frame_dx
 	add	si,011h
 	mov	di,06abh
@@ -5566,6 +5649,9 @@ read_record_cache:
 	jnz	cache_read_native
 	call	cache_record_matches
 	jnz	cache_replace
+	if	PCMODE_BUILD
+	xor	ax,ax
+	endif
 	ret
 cache_replace:
 	call	flush_record_cache
@@ -5626,11 +5712,14 @@ cache_compare_record_high:
 	ret
 
 ; Flush dirty cache under its recorded user number, restoring the caller user
-; and FCB random record. Save native result and clear dirty state afterward.
+; and FCB random record. Clear dirty state only after a successful supported write.
 flush_record_cache:
 	mov	byte ptr .record_cache_result,00h
 	cmp	byte ptr .record_cache_dirty,0ffh
 	jz	cache_write_dirty
+	if	PCMODE_BUILD
+	xor	ax,ax
+	endif
 	ret
 cache_write_dirty:
 	mov	dl,0ffh
@@ -5659,7 +5748,12 @@ cache_write_dirty:
 	push	ax
 	call	file_user_select
 	pop	ax
+	if	PCMODE_BUILD
+	or	al,al
+	jnz	cache_flush_result
+	endif
 	mov	byte ptr .record_cache_dirty,00h
+cache_flush_result:
 	mov	.record_cache_result,al
 	ret
 
@@ -6215,6 +6309,13 @@ truncate_at_random_position:
 	cmp	di,.cached_fcb_slot
 	jnz	truncate_update_size
 	call	flush_record_cache
+	if	PCMODE_BUILD
+	or	al,al
+	jz	truncate_update_size
+	pop	di
+	mov	byte ptr .dos_saved_ax,01h
+	ret
+	endif
 truncate_update_size:
 	pop	di
 	les	si,dword ptr .dos_fcb_offset
@@ -6365,6 +6466,9 @@ block_write_update_size:
 	db	026h					; ES override; original addressing
 	cmp	dx,012h[si]
 	ja	block_write_store_size
+	if	PCMODE_BUILD
+	jb	block_write_success
+	endif
 	db	026h					; ES override; original addressing
 	cmp	ax,010h[si]
 	jc	block_write_success
@@ -6384,7 +6488,7 @@ block_write_advance:
 
 ; Read/modify initial partial CP/M record in cache. Accept native read
 ; statuses 0/1/4, mark cache dirty, copy bytes and advance private record.
-; REVIEW: original wrap check tests destination DI (cache), not source SI (DTA).
+; PCMODE_BUILD checks source SI for segment wrap; the original tested cache DI.
 write_first_partial_record:
 	les	ax,dword ptr .transfer_first_record
 	mov	si,.dos_fcb_slot
@@ -6424,7 +6528,12 @@ write_first_mark_dirty:
 	cld
 write_first_copy_byte:
 	movsb
+	if	PCMODE_BUILD
+	or	si,si
+	endif
+	if	not PCMODE_BUILD
 	or	di,di
+	endif
 	jnz	write_first_copy_next
 	pop	ds
 	mov	.transfer_buffer_offset,si
@@ -6554,7 +6663,7 @@ open_fcb_on_demand:
 	push	word ptr .dos_saved_ax
 	db	026h					; ES override; original addressing
 	push	word ptr 0eh[si]
-	mov	byte ptr .printer_saved_ah,0fh
+	mov	byte ptr .dos_saved_function,0fh
 	db	08bh,0d6h				; mov dx,si (original encoding)
 	call	dos_fn_open_fcb
 	les	si,dword ptr .dos_fcb_offset
@@ -6636,10 +6745,14 @@ parse_invalid_drive:
 	inc	di
 	jmps	parse_name_begin
 
-; REVIEW: original upper limit is 70h after folding and subtracting 60h.
-; This accepts Q: and other values beyond the native A..P drive range.
+; A..P becomes 1..16. Original mode retains its erroneous 70h upper limit.
 parse_drive_upper_bound:
+	if	PCMODE_BUILD
+	cmp	al,010h
+	endif
+	if	not PCMODE_BUILD
 	cmp	al,070h
+	endif
 	ja	parse_invalid_drive
 	stosb
 parse_name_begin:
@@ -6979,6 +7092,7 @@ dos_fn_get_dta:
 	ret
 
 ; INT 21h/AH=30h at 3453h. Keep the six-byte slot and original table offsets.
+dos_fn_get_version:
 	if	PCMODE_BUILD
 	jmp	dos_version_query
 	nop
@@ -7376,18 +7490,16 @@ original_bdos_reserve:
 
 
 ; AH indexes this near-offset table; index 31h is the catch-all fallback.
-dos_fn_terminate_unused		equ	code_origin+01a95h
-dos_fn_checked_input		equ	code_origin+01dabh
+dos_fn_terminate_unused		equ	dos_no_service
 dos_fn_find_next		equ	dos_fn_find_first
-dos_fn_create_fcb		equ	code_origin+02176h
-dos_fn_inuse_stub		equ	code_origin+01a95h
-dos_fn_alloc_selected_stub	equ	code_origin+01a95h
-dos_fn_readonly_stub		equ	code_origin+01a95h
-dos_fn_attributes_stub		equ	code_origin+01a95h
-dos_fn_dpb_stub			equ	code_origin+01a95h
-dos_fn_usercode_stub		equ	code_origin+01a95h
-dos_fn_get_version		equ	code_origin+03453h
-dos_fn_unsupported		equ	code_origin+01a95h
+dos_fn_create_fcb		equ	dos_fn_open_fcb
+dos_fn_inuse_stub		equ	dos_no_service
+dos_fn_alloc_selected_stub	equ	dos_no_service
+dos_fn_readonly_stub		equ	dos_no_service
+dos_fn_attributes_stub		equ	dos_no_service
+dos_fn_dpb_stub			equ	dos_no_service
+dos_fn_usercode_stub		equ	dos_no_service
+dos_fn_unsupported		equ	dos_no_service
 dos_function_table:
 	dw	dos_fn_terminate_unused			; AH=00h
 	dw	dos_fn_console_input			; AH=01h
@@ -7492,6 +7604,7 @@ dos_device_names:
 	db	'NUL     ',0fdh
 	db	'LPT1    ',0fch
 	db	'PRN     ',0fch
+dos_device_names_end:
 ; Private service 7 returns this table's offset. Eleven eight-byte slots,
 ; of which six contain names; the remaining five are blank in the reference.
 dos_command_names:
@@ -7506,6 +7619,7 @@ dos_command_names:
 	db	'        '
 	db	'        '
 	db	'        '
+dos_command_names_end:
 ; Launch banner suffix; callers choose all 19 bytes or skip the first nine.
 dos_launch_suffix:
 	db	' (User 0) PC-MODE',13,10

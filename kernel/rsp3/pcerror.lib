@@ -13,65 +13,34 @@
 shell_native_error:
 	mov	dx,offset error_cmd_load
 	cmp	cx,28
-	je	error_show
+	jne	error_native_read
+	jmp	print_command_error
+error_native_read:
 	mov	dx,offset error_cmd_read
 	cmp	cx,29
-	je	error_show
+	jne	shell_command_error
+	jmp	print_command_error
+
+; Use the original four-byte table scanner and common diagnostic renderer.
+; A null message suppresses error 31; the sentinel supplies numeric fallback.
 shell_command_error:
-	cmp	cx,31
-	jne	error_find
-	mov	byte ptr .command_sent,0
-	jmp	command_prompt_resume
-error_find:
-	mov	si,offset error_table
-error_scan:
-	cmp	cs:word ptr [si],0ffffh
-	je	error_unknown
-	cmp	cx,cs:word ptr [si]
-	je	error_known
-	add	si,4
-	jmps	error_scan
-error_known:
-	mov	dx,cs:word ptr 2[si]
-error_show:
-	push	dx
-	call	print_code_newline
-	mov	dx,offset error_prefix
-	call	print_code_string
-	pop	dx
-	call	print_code_string
-	jmps	error_command
-error_unknown:
-	push	cx
-	call	print_code_newline
-	mov	dx,offset error_prefix
-	call	print_code_string
-	mov	dx,offset error_unknown_text
+	mov	si,offset error_table-4
+	jmp	find_command_error
+
+; AX=original error number, CS:DX=message. Print the number only for fallback.
+; The original renderer owns the prefix, command context and prompt return.
+error_print_message:
+	cmp	dx,offset error_unknown_text
+	je	error_print_unknown
+	jmp	print_code_string
+error_print_unknown:
+	push	ax
 	call	print_code_string
 	pop	ax
-	call	error_number
-error_command:
-	call	print_code_newline
-	mov	dx,offset error_command_text
-	call	print_code_string
-	mov	dx,0245h
-	call	print_data_string
-	call	print_code_newline
-	jmp	command_prompt_resume
-; Native TMP's unsigned decimal conversion, including zero and 65535.
-error_number:
-	xor	dx,dx
-	mov	bx,10
-	div	bx
-	push	dx
-	or	ax,ax
-	jz	error_digit
-	call	error_number
-error_digit:
-	pop	dx
-	add	dl,'0'
-	jmp	print_console_character
+	jmp	print_unsigned_decimal
+
 error_table:
+	dw	31,0
 	dw	3,offset error_memory
 	dw	12,offset error_pd
 	dw	23,offset error_drive
@@ -97,9 +66,8 @@ error_table:
 	dw	36,offset error_console
 	dw	60,offset error_unsupported
 	dw	61,offset error_batch
-	dw	0ffffh,0
+	dw	0ffffh,offset error_unknown_text
 error_prefix			db	'Command error: $'
-error_command_text		db	'Command = $'
 error_unknown_text		db	'Unknown command error, code $'
 error_cmd_load			db	'Invalid or empty CMD file$'
 error_cmd_read			db	'Disk error while reading CMD file$'
