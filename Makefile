@@ -5,7 +5,6 @@ DIST_DISKS=ccpm86.img ccpmtools.img ccpmdev.img ccpmmaint.img
 SOURCEDIST=$(DISTDIR)/ccpm86-source.tar.gz
 
 .PHONY: all commands kernel boot media check check-qemu test dist source-dist clean
-
 all: media
 
 commands:
