@@ -34,7 +34,7 @@ def search_checks(hmp, wait, type_command, prompt, output, native=False):
             run('onlysub red blue', 'SEARCH SUB B red blue'.upper(),
                 'sub-enabled-' + order.replace(',', '-'))
         else:
-            run('onlysub red blue', "Can't Find Command" if not native else 'Command not found',
+            run('onlysub red blue', 'Command not found',
                 'sub-disabled-' + order.replace(',', '-'))
         # Explicit SUB bypasses ORDER and still uses the configured drive path.
         run('onlysub.sub red blue', 'SEARCH SUB B red blue'.upper(),
@@ -43,7 +43,7 @@ def search_checks(hmp, wait, type_command, prompt, output, native=False):
             if 'dos' in order:
                 run('dosonly', 'SEARCH COM B DEFAULT A', 'dos-enabled-' + order.replace(',', '-'))
             else:
-                run('dosonly', "Can't Find Command", 'dos-disabled-' + order.replace(',', '-'))
+                run('dosonly', 'Command not found', 'dos-disabled-' + order.replace(',', '-'))
             run('b:dosonly.com', 'SEARCH COM B DEFAULT A', 'explicit-dos-' + order.replace(',', '-'))
     settings('cmd,sub,dos')
     run('pick', 'SEARCH CMD B DEFAULT A', 'cmd-before-sub-and-dos-on-one-drive')
@@ -60,7 +60,7 @@ def search_checks(hmp, wait, type_command, prompt, output, native=False):
         run('exeonly token', 'PCMODE EXE TEST OK', 'untyped-exe-from-path')
         run('b:batonly.bat', 'SEARCH CMD A DEFAULT A', 'explicit-bat-keeps-batch-route')
         run('batonly', 'SEARCH CMD A DEFAULT A', 'untyped-bat-keeps-batch-route')
-        result = run('badn', 'Load Error', 'bad-native-does-not-fall-through-to-sub-or-com')
+        result = run('badn', 'Invalid or empty CMD file', 'bad-native-does-not-fall-through-to-sub-or-com')
         if 'SEARCH COM' in result:
             raise AssertionError(result)
     # Skip an unavailable configured drive, deduplicate paths, then SYS fallback.

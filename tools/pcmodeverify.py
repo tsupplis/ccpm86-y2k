@@ -18,13 +18,19 @@ def verify():
         if len(data) != record['bytes'] or hashlib.sha256(data).hexdigest() != record['sha256']:
             raise ValueError('recovered input differs: ' + name)
     with tempfile.TemporaryDirectory(prefix='pcmode-verify-') as temporary:
-        for source, original, folder in [('pctmp', 'inputs/pctmp', BASE), ('xvideo', 'xios', REFERENCE), ('oslabel', 'oslabel', REFERENCE)]:
+        rsp_output = Path(temporary) / 'rsp3'
+        subprocess.run(['make', '-C', str(BASE), 'PCMODE=0',
+                        'OUTPUT=' + str(rsp_output)], check=True,
+                       stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        from pctmpcheck import check as check_pctmp
+        check_pctmp(rsp_output / 'pctmp.rsp', original=True)
+        for source, original, folder in [('xvideo', 'xios', REFERENCE), ('oslabel', 'oslabel', REFERENCE)]:
             target = Path(temporary) / (source + '.bin')
             subprocess.run(['nasm', '-f', 'bin', source + '.asm', '-o', str(target)],
                            cwd=folder, check=True)
             if target.read_bytes() != (folder / (original + '.bin')).read_bytes():
                 raise ValueError('default reconstruction differs: ' + source)
-    print('PC-MODE inputs and three default reconstructions verified')
+    print('Native PCTMP RSP and historical XIOS/label reconstructions verified')
 
 
 if __name__ == '__main__':

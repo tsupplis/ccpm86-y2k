@@ -58,7 +58,7 @@ def help_commands(hmp, screen, wait, type_command, prompt, output, tail_fixture=
         results.append('PASS: quick help whitespace case ' + str(index))
 
     result = run('? xyzmissing', 'help-missing')
-    if "CP/M Error: Can't Find Command" not in result or not re.search(r'^Command = HELP\s*$', result, re.M):
+    if "Command error: Command not found. Use ? for help" not in result or not re.search(r'^Command = HELP\s*$', result, re.M):
         raise AssertionError(result)
     results.append('PASS: missing HELP uses the normal command error for HELP')
 
@@ -87,7 +87,7 @@ def help_commands(hmp, screen, wait, type_command, prompt, output, tail_fixture=
             results.append('PASS: exact HELP tail matches direct invocation, case ' + str(index))
         for size in (126, 128):
             result = run('?' + ' ' + 'x' * (size - 2), 'help-overlong-' + str(size))
-            if 'Help request too long (maximum 125 characters including ?)' not in result:
+            if 'Help request too long (max 125 characters)' not in result:
                 raise AssertionError(result)
             results.append('PASS: reject help input length ' + str(size))
     else:
@@ -117,6 +117,9 @@ def help_commands(hmp, screen, wait, type_command, prompt, output, tail_fixture=
 def native_help(hmp, wait, type_command, prompt, output):
     """Compare native TMP help boundaries without changing its source/media."""
     results = []
+    # The native search fixture keeps HELP.CMD/HLP on the B: companion.
+    type_command('sysdisk b:\n')
+    wait(prompt)
     for index, text in enumerate(['?', '?   ', '?\t', '   ?  \t  ']):
         type_command('cls\n')
         wait(prompt)
@@ -142,4 +145,6 @@ def native_help(hmp, wait, type_command, prompt, output):
         result = wait(lambda s: prompt(s) and 'Help request too long' in s)
         (output / f'native-overlong-{size}.txt').write_text(result)
         results.append('PASS: native TMP rejects help input length ' + str(size))
+    type_command('sysdisk a:\n')
+    wait(prompt)
     return results

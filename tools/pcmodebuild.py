@@ -34,7 +34,8 @@ def record_build(output, enhanced_keyboard, extras):
     sources = sorted(path for folder in (BASE, SOURCE) for path in folder.rglob('*') if path.is_file())
     sources += sorted((ROOT / 'tools').glob('pc*.py'))
     sources += [ROOT / 'tools/sysmodules.py', ROOT / 'commands/setdef/setdef.a86',
-                ROOT / 'commands/help/help.dat']
+                ROOT / 'commands/help/help.dat', ROOT / 'kernel/rsp1/tmp.a86',
+                ROOT / 'kernel/rsp1/Makefile']
     sources += sorted(path for path in (output / 'con').iterdir()
                       if path.suffix.lower() in ('.a86', '.lib', '.bdo', '.def',
                          '.dat', '.fmt', '.sup', '.rtm', '.mem', '.cio', '.cic', '.cod'))
@@ -101,7 +102,9 @@ def build(output, audit, enhanced_keyboard=True, extras=None):
     # loader variant. Replace only CODE; DATA layout/console stride is unchanged.
     rsp = output / 'rsp3'
     run(['make', '-C', str(ROOT / 'kernel/rsp3'),
-         'OUTPUT=' + str(rsp), 'all'], ROOT, output / 'pctmp-build.log')
+         'OUTPUT=' + str(rsp), 'PCMODE=1', 'all'], ROOT, output / 'pctmp-build.log')
+    from pctmpcheck import check as check_pctmp
+    check_pctmp(rsp / 'pctmp.rsp')
     shutil.copy2(rsp / 'pctmp.rsp', gen / 'pctmp.rsp')
     data = (ROOT / 'kernel/sysgen/genccpm.in').read_bytes().replace(
         b'CP/M-Plus Personality', b'PCMODE text-console experiment')

@@ -89,13 +89,21 @@ ending db 13,10,'$'
         cmd(['cpmchattr', '-f', 'ccpm86-320', str(logical), 's', '0:sysfall.cmd', '0:sysbatch.sub'])
         run(['python3', str(root / 'tools/cpm86twist.py'), 'twist', str(logical),
              str(output / ('pc-search' + ('b' if letter == 'B' else '') + '.img'))], root)
-    # The same new SUP/SETDEF policy with the unchanged native TMP personality.
+    # Build native TMP from matching sources; repository binaries may be older.
+    native = work / 'native-rsp'
+    native.mkdir()
+    for name in ('tmp.a86', 'Makefile'):
+        shutil.copy2(root / 'kernel/rsp1' / name, native / name)
+    log = run(['make', 'tmp.rsp'], native, work / 'native-tmp-build.log')
+    if b'NUMBER OF ERRORS:   0' not in log:
+        raise RuntimeError('inspect native-tmp-build.log')
+    # The same new SUP/SETDEF policy with the native TMP personality.
     gen = work / 'native-gen'
     gen.mkdir()
     for source in (output / 'sysgen').iterdir():
         if source.suffix in ('.con', '.rsp') and source.name != 'pctmp.rsp':
             shutil.copy2(source, gen / source.name)
-    shutil.copy2(root / 'kernel/rsp1/tmp.rsp', gen / 'tmp.rsp')
+    shutil.copy2(native / 'tmp.rsp', gen / 'tmp.rsp')
     data = (output / 'sysgen/genccpm.in').read_bytes()
     run(['emu2', str(root / 'commands/genccpm/genccpm.cmd')], gen, work / 'native-gen.log', data)
     native_disk = work / 'native-logical.img'
