@@ -1,0 +1,2 @@
+; Supported PCTMP extensions; set to 0 only in reconstruction checks.
+PCMODE_BUILD equ 0ffffh

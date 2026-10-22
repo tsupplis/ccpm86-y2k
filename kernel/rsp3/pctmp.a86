@@ -1,0 +1,2022 @@
+; Native ASM86 PCTMP; pcdefs.lib selects the supported extensions.
+include pcdefs.lib
+PCMODE_SAFE_LOADER equ PCMODE_BUILD
+PCMODE_CHECKED_INPUT equ PCMODE_BUILD
+PCMODE_PIXEL_READ equ PCMODE_BUILD
+PCMODE_SHELL equ PCMODE_BUILD
+PCMODE_HELP equ PCMODE_BUILD
+PCMODE_SEARCH equ PCMODE_BUILD
+cseg
+org 0
+code_origin:
+;******************************************************************************
+; PCTMP - PC-MODE terminal message processor, Concurrent CP/M-86 3.1
+;
+; Provenance: inputs/pctmp.bin, recovered from a.sys.
+; This is a PARTIAL reconstruction of the shared CODE group. All undecoded
+; ranges are explicitly retained as DB data; they are not decoded instructions.
+; pcdata.lib declares the original normalized DATA bytes; the reference remains
+; in inputs/pctmp.rsp. GENCMD generates both group headers and record padding.
+;
+; Build through the native ASM86 -> H86 -> GENCMD rules in this directory.
+; PCMODE_BUILD=0 in pcdefs.lib reconstructs the original RSP byte for byte.
+; Normal builds use the standard local RSP rules. Sandbox tools copy sources
+; to their chosen build directory before invoking Make.
+;
+; Original mode is byte-exact. PCMODE_SAFE_LOADER adds the documented header
+; guard; PCMODE_CHECKED_INPUT fixes DOS function 01h Ctrl-C dispatch.
+; PCMODE_PIXEL_READ returns a successful XIOS pixel color through saved AL.
+; PCMODE_SHELL adds native TMP CLS/SYSDISK and drive-command parity.
+; PCMODE_HELP adds native TMP quick-help/topic expansion before FCB parsing.
+; Original input files remain untouched.
+; Original instruction encodings are kept,
+; including explicit alternate encodings in decoded historical routines.
+;
+; Residency model:
+;   GENCCPM allocates one 0AF0h-byte DATA group per virtual console, followed
+;   by one shared CODE group. INIT writes the SYSDAT segment into the RSP link
+;   word at DATA:0000. DATA:0004 identifies the console instance.
+;   Interrupt handlers use the running PD's console to locate that DATA group.
+;   Consequently, resizing DATA requires changing the selection code as well.
+;******************************************************************************
+
+; Per-instance DATA fields used by decoded routines.
+rsp_sysdat_segment       equ 0000h  ; startup link replaced by kernel INIT
+rsp_console_instance     equ 0004h  ; zero-based instance set by GENCCPM
+service_entry_segment    equ 017ah  ; segment half of private service far pointer
+console_data_bytes       equ 0af0h
+
+; EXE loader state, in this instance's DATA group. The first 128-byte
+; header record is read into exe_header and subsequently reused for fixups.
+program_fcb             equ 0220h
+fcb_random_record       equ 0021h  ; 24-bit CP/M random record number
+loader_memory_base      equ 03cch  ; BDOS 55 allocation descriptor, segment
+loader_memory_size      equ 03ceh  ; allocated paragraphs returned by BDOS 55
+child_psp_segment       equ 03d3h  ; allocation base + 1Bh private paragraphs
+child_memory_size       equ 03d5h  ; allocation size minus those private paragraphs
+exe_header              equ 0455h
+exe_relocation_count    equ exe_header+6
+exe_header_paragraphs   equ exe_header+8
+exe_initial_ss          equ exe_header+0eh
+exe_initial_sp          equ exe_header+10h
+exe_initial_ip          equ exe_header+14h
+exe_initial_cs          equ exe_header+16h
+dos_saved_ax            equ 043bh  ; return AX in private INT 21h frame
+child_stack_offset      equ 0448h
+child_stack_segment     equ 044ah
+child_entry_segment     equ 044ch
+child_entry_offset      equ 044eh
+child_is_com            equ 02f8h
+exe_records_left        equ 04d8h
+exe_dma_segment         equ 04dah
+exe_image_paragraphs    equ 04dch
+construct_psp equ code_origin+137fh
+
+exe_relocation_offset   equ exe_header+18h
+exe_load_segment        equ 04deh
+exe_next_record         equ 04e0h  ; low word followed by high byte
+exe_relocation_cursor   equ 04ebh  ; byte offset into current header record
+
+loader_read_error equ code_origin+0f87h  ; CX=1Dh then common load failure
+loader_failure equ code_origin+136eh  ; AX=BX=FFFFh; restore user and return
+prepare_dos_execution equ code_origin+126fh  ; common COM/EXE continuation
+set_multi_record_count equ code_origin+154ah  ; DX=count, BDOS 44
+set_loader_dma equ code_origin+28dah  ; ES:DX=buffer, BDOS 26 and 51
+loader_bdos_call equ code_origin+3653h  ; internal BDOS gateway
+exe_aligned_record_index equ code_origin+10a4h  ; aligned image-start calculation
+exe_size_arithmetic equ code_origin+0f91h  ; resume after guarded header access
+raw_console_input equ code_origin+1dceh
+classify_echo_byte equ code_origin+1e14h
+control_echo_return equ code_origin+1e26h
+console_echo_byte equ code_origin+1eb4h
+unwind_dos_break equ code_origin+207dh  ; restore user frame then INT 23h
+
+
+
+command_buffer           equ 0181h
+command_length           equ 0182h
+command_text             equ 0183h
+command_buffer_end       equ 0207h
+bios_keyboard_pending    equ 02f0h
+command_sent             equ 0208h
+native_cli_success equ code_origin+07d5h
+
+; Stable SYSDAT/PD fields. DS must select SYSDAT before using sd_* fields.
+sd_supervisor_segment    equ 0040h
+sd_system_disk           equ 004bh
+sd_running_process       equ 0068h
+sd_banner_offset         equ 0078h
+pd_console_number        equ 0020h
+
+; Shared CODE variables initialized by PC-MODE startup.
+shared_first_data_segment equ 01a03h
+shared_sysdat_segment     equ 01a0fh
+
+
+; Saved INT 10h register-frame slots and packet ABI, selected per console.
+shared_xios_entry             equ 01a0dh
+pd_uda_segment                equ 010h
+bios_frame_ax                 equ 0439h
+bios_frame_bx                 equ 0437h
+bios_frame_bh                 equ 0438h
+bios_frame_cx                 equ 0435h
+bios_frame_dx                 equ 0431h
+bios_packet_ax                equ 05aeh
+bios_packet_bx                equ 05b0h
+bios_packet_cx                equ 05b2h
+bios_packet_dx                equ 05b4h
+bios_packet_console           equ 05b6h
+
+; Named entry points inside regions still awaiting full reconstruction.
+console_set equ code_origin+08e3h  ; DL=console, BDOS 148
+current_disk_set equ code_origin+08e7h  ; DL=drive, BDOS 14
+current_user_set equ code_origin+08d2h  ; DL=user, BDOS 32
+console_attach equ code_origin+08f7h  ; BDOS 146
+print_data_string equ code_origin+0754h  ; DS:DX points to '$'-terminated text
+initialize_pc_mode equ code_origin+0c5bh  ; shared state and per-console initialization
+
+; Two public entry jumps precede the vendor/version identification bytes.
+        jmp process_start
+        jmp pcmode_service
+; Preserved original CODE bytes 0006h..0043h (undecoded/data).
+        db 043h,04fh,050h,059h,052h,049h,047h,048h,054h,028h,043h,029h,031h,039h,038h,033h
+        db 02ch,038h,034h,02ch,044h,049h,047h,049h,054h,041h,04ch,020h,052h,045h,053h,045h
+        db 041h,052h,043h,048h,028h,030h,035h,02fh,031h,037h,02fh,038h,034h,029h,032h,030h
+        db 030h,034h,02dh,030h,030h,030h,030h,02dh,036h,035h,034h,033h,032h,031h
+
+;------------------------------------------------------------------------------
+; process_start (0044h)
+; Entry: CS=shared CODE, DS=this console's DATA, stack supplied by GENCCPM.
+; Select this instance's console, the configured system disk and user zero.
+; Attach the console before printing the supervisor's generated OS label.
+; DS is restored after each access to another segment.
+;------------------------------------------------------------------------------
+process_start:
+        mov word ptr .service_entry_segment,cs
+        mov dl,byte ptr .rsp_console_instance
+        call console_set
+        push ds
+        mov ds,word ptr .rsp_sysdat_segment
+        mov dl,byte ptr .sd_system_disk
+        pop ds
+        call current_disk_set
+        db 032h,0d2h              ; xor dl,dl: original register/register encoding
+        call current_user_set
+        call console_attach
+        push ds
+        mov ds,word ptr .rsp_sysdat_segment
+        mov dx,word ptr .sd_banner_offset
+        mov ds,word ptr .sd_supervisor_segment
+        call print_data_string
+        pop ds
+        call initialize_pc_mode
+
+; UNDECODED 0078h..0690h: startup file processing, prompt/command parser,
+; built-in commands and external command pre-search.
+; These bytes must stay at their original offsets until their internal
+; absolute references and data/code boundaries have been fully identified.
+; Preserved original CODE bytes 0078h..0170h (undecoded/data).
+        db 0e8h,080h,008h,01eh,007h,0beh,01dh,000h,0bfh,029h,002h,0b9h,003h,000h,0f3h,0a4h
+        db 0bah,020h,002h,0b1h,00fh,0e8h,071h,008h,03ch,0ffh,074h,04ch,0bah,083h,001h,0b1h
+        db 01ah,0e8h,065h,008h,0bah,020h,002h,0b1h,014h,0e8h,05dh,008h,050h,0bah,020h,002h
+        db 0b1h,010h,0e8h,054h,008h,058h,084h,0c0h,075h,02eh,08ch,0d8h,08eh,0c0h,0b0h,00dh
+        db 0b9h,080h,000h,0bfh,083h,001h,0f2h,0aeh,075h,01eh,047h,0c6h,005h,024h,081h,0efh
+        db 083h,001h,08bh,0c7h,02dh,002h,000h,0a2h,082h,001h,0bah,00ch,00ch,0e8h,026h,006h
+        db 0bah,083h,001h,0e8h,076h,006h,0ebh,056h,0bah,0ffh,0ffh,0e8h,019h,008h,0e8h,00eh
+        db 008h,0b1h,000h,0ffh,01eh,078h,001h,080h,03eh,0eeh,002h,0ffh,075h,005h,0c6h,006h
+        db 0eeh,002h,000h,080h,03eh,008h,002h,000h,074h,008h,0c6h,006h,008h,002h,000h,0e8h
+        db 0cdh,007h,0b2h,00dh,0e8h,0f9h,005h,0e8h,0beh,007h,088h,01eh,023h,000h,084h,0dbh
+        db 074h,005h,08ah,0d3h,0e8h,09ch,007h,0e8h,0c9h,007h,088h,01eh,022h,000h,0b2h,041h
+        db 002h,0d3h,0e8h,0dbh,005h,0bah,060h,009h,0e8h,0cbh,005h,0e8h,05bh,005h,0b2h,00ah
+        db 0e8h,0cdh,005h,08dh,01eh,083h,001h,080h,03eh,082h,001h,000h,074h,05fh,08bh,0fbh
+        db 04fh,0e8h,0d6h,006h,08bh,0dfh,080h,03fh,000h,074h,052h,08dh,006h,083h,001h,03bh
+        db 0c3h,074h,011h,01eh,007h,032h,0edh,08ah,00eh,082h,001h,08bh,0f8h,08bh,0f3h,0fch
+        db 0f3h,0a4h,08bh,0d8h,080h,03fh,03bh,074h,034h
+; Intercept compact/spaced drive commands before the recovered direct select.
+if PCMODE_SHELL
+        jmp shell_drive_command
+        db 090h,090h,090h,090h
+endif
+if not PCMODE_SHELL
+        db 080h,03eh,085h,001h,000h,075h,030h
+endif
+; Preserved original CODE bytes 0178h..01A7h (undecoded/data).
+        db 080h,07fh,001h,03ah,075h,02ah,08ah,017h,080h,0e2h,05fh,080h,0eah,041h,080h,0fah
+        db 000h,072h,00bh,080h,0fah,00fh,077h,006h,0e8h,054h,007h,0e9h,00fh,000h,0bah,065h
+        db 009h,0e8h,062h,005h,0bah,0ddh,009h,0e8h,05ch,005h,0e8h,032h,007h,0e9h,038h,0ffh
+; Help must intercept '?' before BDOS 152 interprets it as a wildcard.
+if PCMODE_HELP
+        jmp shell_help_command
+endif
+if not PCMODE_HELP
+        mov bx,command_text
+endif
+; Preserved original CODE bytes 01ABh..0207h (undecoded/data).
+        db 0a0h,082h,001h,0b4h,000h,003h,0d8h,0c6h,007h,000h,0b9h,040h,000h,0beh,083h,001h
+        db 0bfh,045h,002h,01eh,007h,0f3h,0a5h,0beh,020h,002h,0bfh,045h,002h,0e8h,07eh,006h
+        db 0e3h,010h,02bh,0dbh,08ah,01eh,082h,001h,081h,0c3h,045h,002h,0c6h,007h,024h,0e9h
+        db 000h,006h,089h,01eh,009h,002h,083h,0fbh,000h,075h,008h,08ah,01eh,082h,001h,081h
+        db 0c3h,045h,002h,0c6h,007h,024h,043h,080h,03eh,020h,002h,000h,074h,00fh,0e9h,0c5h
+        db 002h,0beh,020h,002h,046h,00eh,007h,0b9h,009h,000h,0f3h,0a6h,0c3h
+; The original unqualified-built-in dispatch starts with MOV DI,0BA0h.
+; Qualified commands already bypass this point. Retain every original offset.
+if PCMODE_SHELL
+        jmp shell_extensions
+endif
+if not PCMODE_SHELL
+        mov di,0ba0h
+endif
+; Preserved original CODE bytes 020Bh..04C0h (undecoded/data).
+        db 0e8h,0eeh,0ffh,075h,04dh,0beh,020h,002h,08bh,03eh,009h,002h,083h,0ffh,000h,074h
+        db 027h,047h,0e8h,029h,006h,083h,0f9h,000h,075h,01eh,0beh,020h,002h,046h,08bh,014h
+        db 0b5h,030h,0e8h,029h,006h,080h,0fbh,00fh,077h,008h,08ah,0d3h,0e8h,098h,006h,0e9h
+        db 006h,000h,0bah,02dh,00ah,0e8h,0bbh,004h,0bah,04eh,00ah,0e8h,0b5h,004h,0e8h,084h
+        db 006h,08ah,0d3h,0e8h,06ah,006h,0e8h,083h,006h,0bah,05fh,00ah,0e8h,0a4h,004h,0e9h
+        db 083h,0feh,0bfh,0a9h,00bh,0e8h,099h,0ffh,075h,05ch,0beh,020h,002h,08bh,03eh,009h
+        db 002h,083h,0ffh,000h,074h,02fh,047h,0e8h,0d4h,005h,083h,0f9h,000h,075h,026h,0beh
+        db 020h,002h,046h,08ah,02ch,046h,08bh,014h,0e8h,0d3h,005h,083h,0fbh,0ffh,074h,00fh
+        db 0b1h,006h,0d3h,0e3h,08bh,0d3h,0b1h,002h,0ffh,01eh,078h,001h,0e9h,006h,000h,0bah
+        db 091h,00ah,0e8h,05eh,004h,0bah,0bdh,00ah,0e8h,058h,004h,0b1h,002h,0bah,0ffh,0ffh
+        db 0ffh,01eh,078h,001h,0b1h,006h,0d3h,0e8h,0e8h,076h,004h,0b2h,04bh,0e8h,04dh,004h
+        db 0e8h,019h,006h,0e9h,01fh,0feh,0bfh,0bbh,00bh,0e8h,035h,0ffh,074h,003h,0e9h,085h
+        db 000h,0beh,020h,002h,08bh,03eh,009h,002h,083h,0ffh,000h,074h,059h,0e8h,047h,005h
+        db 0e8h,06bh,005h,083h,0f9h,000h,075h,04eh,0beh,021h,002h,0bfh,008h,00ch,0b9h,002h
+        db 000h,0e8h,051h,005h,075h,00ah,0b1h,003h,032h,0d2h,0ffh,01eh,078h,001h,0ebh,036h
+        db 0beh,020h,002h,046h,0bfh,004h,00ch,0b9h,002h,000h,0e8h,038h,005h,075h,021h,006h
+        db 08eh,006h,000h,000h,0bbh,08ch,000h,026h,083h,03fh,0ffh,007h,075h,008h,0bah,011h
+        db 00bh,0e8h,0dfh,003h,0ebh,010h,0b1h,003h,0b2h,001h,0ffh,01eh,078h,001h,0ebh,006h
+        db 0bah,028h,00bh,0e8h,0cdh,003h,0bah,048h,00bh,0e8h,0c7h,003h,0b1h,003h,0b2h,0ffh
+        db 0ffh,01eh,078h,001h,00ah,0c0h,074h,005h,0e8h,060h,001h,0ebh,003h,0e8h,066h,001h
+        db 0e8h,089h,005h,0e9h,08fh,0fdh,0bfh,0e8h,00bh,0e8h,0a5h,0feh,075h,027h,006h,01eh
+        db 01eh,007h,0fdh,0beh,007h,002h,0bfh,00dh,002h,0b9h,084h,000h,0f3h,0a4h,04eh,080h
+        db 004h,006h,0fch,00eh,01fh,0beh,0fah,00bh,0bfh,083h,001h,0b9h,00ah,000h,0f3h,0a4h
+        db 01fh,007h,0e9h,0bbh,0fdh,0bfh,0f1h,00bh,0e8h,076h,0feh,075h,02dh,006h,01eh,01eh
+        db 007h,033h,0c0h,0a0h,082h,001h,0feh,006h,082h,001h,0beh,082h,001h,003h,0f0h,08bh
+        db 0feh,047h,08bh,0c8h,083h,0e9h,006h,0fdh,0f3h,0a4h,0fch,0c7h,004h,058h,045h,04eh
+        db 04eh,0c7h,004h,02eh,045h,01fh,007h,0e9h,086h,0fdh,0bfh,0cdh,00bh,0e8h,041h,0feh
+        db 075h,003h,0e9h,020h,0fdh,0bfh,0d6h,00bh,0e8h,036h,0feh,075h,003h,0e9h,015h,0fdh
+        db 0bfh,0dfh,00bh,0e8h,02bh,0feh,075h,00fh,0bah,082h,00bh,0e8h,025h,003h,0e8h,001h
+        db 005h,0e8h,0f8h,004h,0e9h,0feh,0fch,0bfh,0c4h,00bh,0e8h,014h,0feh,075h,06eh,0beh
+        db 020h,002h,08bh,03eh,009h,002h,083h,0ffh,000h,074h,042h,0e8h,029h,004h,0e8h,04dh
+        db 004h,083h,0f9h,000h,075h,037h,0beh,021h,002h,0bfh,008h,00ch,0b9h,002h,000h,0e8h
+        db 033h,004h,075h,00ah,0b1h,004h,032h,0d2h,0ffh,01eh,078h,001h,0ebh,01fh,0beh,020h
+        db 002h,046h,0bfh,004h,00ch,0b9h,002h,000h,0e8h,01ah,004h,075h,00ah,0b1h,004h,0b2h
+        db 001h,0ffh,01eh,078h,001h,0ebh,006h,0bah,052h,00bh,0e8h,0c6h,002h,0bah,075h,00bh
+        db 0e8h,0c0h,002h,0b1h,004h,0b2h,0ffh,0ffh,01eh,078h,001h,00ah,0c0h,074h,005h,0e8h
+        db 059h,000h,0ebh,003h,0e8h,05fh,000h,0e8h,082h,004h,0e9h,088h,0fch,0bfh,0b2h,00bh
+        db 0e8h,09eh,0fdh,075h,061h,0beh,020h,002h,08bh,03eh,009h,002h,083h,0ffh,000h,074h
+        db 026h,047h,0e8h,0d9h,003h,083h,0f9h,000h,075h,01dh,0beh,020h,002h,046h,08bh,014h
+        db 0b5h,030h,0e8h,0d9h,003h,080h,0fbh,0ffh,074h,007h,08ah,0d3h,0e8h,065h,004h,0e3h
+        db 006h,0bah,0d9h,00ah,0e8h,06ch,002h,0bah,0fdh,00ah,0e8h,066h,002h,0e8h,058h,004h
+        db 08ah,0d3h,0e8h,01bh,004h,0e8h,034h,004h,0e9h,03ah,0fch,0b2h,04fh,0e8h,05dh,002h
+        db 0b2h,04eh,0e8h,058h,002h,0c3h,0b2h,04fh,0e8h,052h,002h,0b2h,046h,0e8h,04dh,002h
+        db 0b2h,046h,0e8h,048h,002h,0c3h
+if PCMODE_SEARCH
+; Replace the original external pre-search prologue, keeping all offsets.
+        jmp search_command
+        nop
+        nop
+        nop
+        nop
+endif
+if not PCMODE_SEARCH
+        push ds
+        pop es
+        mov byte ptr .02dbh,1
+endif
+; Preserved original CODE bytes 04C8h..0690h (undecoded/data).
+        db 0c6h,006h,0d5h,002h,0ffh,080h,03eh,020h,002h,000h,075h,005h,0c6h,006h,0d5h,002h
+        db 000h,0e8h,00fh,004h,0feh,0c0h,0a2h,0d7h,002h,0e8h,03fh,001h,00ah,0c0h,075h,038h
+        db 080h,03eh,0d5h,002h,0ffh,074h,014h,0b1h,087h,0bah,019h,002h,0e8h,00ah,004h,0feh
+        db 0c0h,074h,008h,0c6h,006h,0d5h,002h,0ffh,0e9h,094h,002h,0b1h,006h,0bah,0e1h,002h
+        db 0ffh,01eh,078h,001h,0c6h,006h,0dbh,002h,004h,0b1h,02dh,0b2h,0feh,0e8h,0e9h,003h
+        db 0c6h,006h,017h,002h,000h,0e8h,042h,001h,0bah,020h,002h,0e8h,0ach,001h,0feh,0c0h
+        db 074h,003h,0e9h,091h,000h,00ah,0e4h,075h,07bh,080h,03eh,0d5h,002h,0ffh,074h,067h
+        db 006h,08eh,006h,000h,000h,026h,0a0h,04bh,000h,007h,0feh,0c0h,0a2h,020h,002h,0bah
+        db 020h,002h,0e8h,085h,001h,0feh,0c0h,074h,049h,0a0h,02ah,002h,0a8h,080h,075h,03ah
+        db 0bah,020h,002h,0e8h,06ch,001h,0e8h,06fh,003h,050h,0b2h,000h,0e8h,06bh,003h,0bah
+        db 020h,002h,0e8h,065h,001h,0feh,0c0h,074h,018h,0f6h,006h,02ah,002h,080h,074h,00bh
+        db 05ah,0e8h,056h,003h,0c6h,006h,017h,002h,0ffh,0ebh,00fh,0bah,020h,002h,0e8h,041h
+        db 001h,05ah,050h,0e8h,044h,003h,058h,0e9h,008h,000h,0a0h,020h,002h,0a2h,0d7h,002h
+        db 0ebh,024h,0c6h,006h,020h,002h,000h,00ah,0e4h,075h,009h,0feh,00eh,0dbh,002h,074h
+        db 003h,0e9h,071h,0ffh,0b1h,02dh,032h,0d2h,0e8h,04eh,003h,0c6h,006h,0d5h,002h,0ffh
+        db 0b9h,01eh,000h,0e9h,01fh,002h,0b1h,02dh,032h,0d2h,0e8h,03ch,003h,0bbh,02bh,002h
+        db 08ah,007h,024h,07fh,03ch,044h,075h,008h,0c6h,006h,0d5h,002h,0ffh,0e9h,0bfh,001h
+        db 0bbh,029h,002h,08ah,007h,024h,07fh,03ch,042h,075h,003h,0e9h,073h,001h,0c6h,006h
+        db 082h,001h,000h,0bah,082h,001h,0c6h,006h,008h,002h,0ffh,0c6h,006h,0eeh,002h,0ffh
+        db 0c6h,006h,0c7h,002h,000h,0c7h,006h,00fh,002h,020h,002h,08ch,01eh,011h,002h,089h
+        db 016h,013h,002h,08ch,01eh,015h,002h,0bah,00fh,002h,0b1h,001h,0ffh,01eh,078h,001h
+        db 083h,0fbh,000h,074h,003h,0e9h,0bdh,001h,0e9h,0bdh,0fah,0bbh,029h,002h,080h,03fh
+        db 020h,075h,003h,0b0h,000h,0c3h,0b9h,004h,000h,083h,0c3h,002h,0beh,0e4h,002h,08ah
+        db 007h,03ah,004h,074h,008h,083h,0c6h,003h,0e2h,0f5h,0e9h,011h,000h,04eh,04bh,08ah
+        db 007h,03ah,004h,075h,009h,04eh,04bh,08ah,007h,03ah,004h,075h,001h,0c3h,058h,0c6h
+        db 006h,0d5h,002h,0ffh,0b9h,03ch,000h,0e9h,07bh,001h,0bfh,029h,002h,080h,03eh,0dbh
+        db 002h,004h,075h,005h,0beh,0e2h,002h,0ebh,01bh,080h,03eh,0dbh,002h,003h,075h,005h
+        db 0beh,0e5h,002h,0ebh,00fh,080h,03eh,0dbh,002h,002h,075h,005h,0beh,0e8h,002h,0ebh
+        db 003h,0beh,0ebh,002h,0b1h,003h,0f3h,0a4h,0c3h
+
+;------------------------------------------------------------------------------
+; read_command_line (0691h), called by the prompt loop at 0133h.
+; DS selects this PCTMP instance. BDOS 10 supplies the kernel line editor,
+; including editing/recall extensions in our source-built chario.cio.
+; The buffer has maximum length at 0181h, returned length at 0182h and text
+; at 0183h. Clear the unused tail through 0206h for subsequent parsing.
+; ES remains equal to DS. No separate PCTMP keystroke editor is used here.
+; DATA:02C7h is also tested by the CLI error path; its broader role is pending.
+;------------------------------------------------------------------------------
+read_command_line:
+        push ds
+        pop es
+        mov byte ptr .02c7h,0
+        mov byte ptr .command_buffer,80h
+        mov cl,10
+        mov dx,command_buffer
+        call ccpm_call
+        db 032h,0ffh              ; xor bh,bh, original encoding
+        mov bl,byte ptr .command_length
+        add bx,command_text
+        db 08bh,0fbh              ; mov di,bx, original encoding
+        mov cx,command_buffer_end
+        db 02bh,0cbh              ; sub cx,bx, original encoding
+        db 032h,0c0h              ; xor al,al, original encoding
+        rep stosb
+        ret
+
+; Preserved original CODE bytes 06BBh..07B3h (undecoded/data).
+        db 0b1h,01ah,052h,0e8h,040h,002h,0b1h,033h,08ch,0dah,0e8h,039h,002h,05ah,0c3h,053h
+        db 0b1h,010h,0e8h,031h,002h,05bh,0c3h,053h,08bh,0dah,083h,0c3h,006h,080h,00fh,080h
+        db 0b1h,00fh,0e8h,021h,002h,05bh,0c3h,057h,051h,053h,0b5h,000h,08ah,00eh,0d8h,002h
+        db 08bh,0d9h,08bh,03eh,0d3h,002h,0f2h,0aeh,05bh,059h,05fh,0c3h,08ah,007h,03ah,006h
+        db 0e0h,002h,0c3h,01eh,08ch,0c8h,08eh,0d8h,0e8h,04eh,000h,01fh,0c3h,0b1h,002h,0e9h
+        db 0f4h,001h,0f7h,0f1h,052h,080h,03eh,0efh,002h,0ffh,074h,004h,00bh,0c0h,074h,00dh
+        db 0c6h,006h,0efh,002h,0ffh,08ah,0d0h,080h,0c2h,030h,0e8h,0e0h,0ffh,058h,033h,0d2h
+        db 0c3h,0c6h,006h,0efh,002h,000h,033h,0d2h,0b9h,010h,027h,0e8h,0d4h,0ffh,0b9h,0e8h
+        db 003h,0e8h,0ceh,0ffh,0b9h,064h,000h,0e8h,0c8h,0ffh,0b9h,00ah,000h,0e8h,0c2h,0ffh
+        db 08ah,0d0h,080h,0c2h,030h,0e8h,0b5h,0ffh,0c3h,0b1h,009h,0e9h,0a8h,001h,0c6h,006h
+        db 080h,001h,043h,0c6h,006h,081h,001h,048h,0c6h,006h,082h,001h,020h,080h,03eh,0d5h
+        db 002h,000h,075h,01dh,01eh,007h,0b9h,084h,000h,0bfh,007h,002h,08bh,0f7h,04eh,04eh
+        db 0fdh,0f3h,0a4h,0fch,0a0h,0d7h,002h,004h,040h,0a2h,083h,001h,0c6h,006h,084h,001h
+        db 03ah,08dh,016h,07ch,001h,0c6h,006h,0c7h,002h,0ffh,0ebh,01dh,0bah,0ffh,0ffh,0e8h
+        db 062h,001h,0c6h,006h,080h,001h,000h,08dh,016h,080h,001h,080h,03eh,0d5h,002h,000h
+        db 074h,007h,042h,042h,0c6h,006h,082h,001h,000h
+
+;------------------------------------------------------------------------------
+; submit_native_command (07B4h), shared by the CLI launch setup paths.
+; DS:DX already addresses their CLI control block. Mark a command sent so
+; the next prompt adds a newline, then use supervisor CLI function 150.
+; A zero BX result branches to the original success path at 07D5h;
+; errors continue at 07C3h. Native lookup therefore reaches our supervisor's
+; SETDEF policy after PCTMP has already found a candidate file. Its earlier
+; fixed CMD/COM/EXE/BAT pre-search can prevent reaching CLI at all, as the
+; bare SUB regression demonstrates. DOS lookup also needs separate review.
+;------------------------------------------------------------------------------
+submit_native_command:
+        mov byte ptr .command_sent,0ffh
+        mov cl,150
+        call ccpm_call
+        cmp bx,0
+        je native_cli_success
+; Preserved original CODE bytes 07C3h..07DCh (undecoded/data).
+        db 080h,03eh,0c7h,002h,0ffh,075h,013h,0c6h,006h,0c7h,002h,000h,0b9h,03dh,000h,0e9h
+        db 008h,000h,0c6h,006h,0d5h,002h,0ffh,0e9h,003h,0f9h
+; Replace the common error dispatcher, preserving the original entry address.
+if PCMODE_SHELL
+        jmp shell_command_error
+endif
+if not PCMODE_SHELL
+        db 0beh,000h,009h
+endif
+; Preserved original CODE bytes 07E0h..0900h (undecoded/data).
+        db 083h,0c6h,004h,02eh,083h,03ch,0ffh,074h,005h,02eh,03bh,00ch,075h,0f2h,02eh,08bh
+        db 054h,002h,083h,0fah,000h,075h,008h,0c6h,006h,008h,002h,000h,0e9h,0e1h,0f8h,052h
+        db 0e8h,0d4h,000h,0bah,065h,009h,0e8h,0f5h,0feh,05ah,0e8h,0f1h,0feh,0e8h,0c7h,000h
+        db 0bah,022h,00ah,0e8h,0e8h,0feh,0bah,045h,002h,0e8h,038h,0ffh,0e8h,0b8h,000h,0e9h
+        db 0beh,0f8h,047h,080h,03dh,020h,074h,0fah,080h,03dh,009h,074h,0f5h,080h,03dh,03dh
+        db 074h,0f0h,0c3h,08ch,0c8h,01eh,006h,08eh,0d8h,08eh,0c0h,0f3h,0a5h,007h,01fh,0c3h
+        db 006h,08ch,0c8h,08eh,0c0h,0f3h,0a7h,007h,0c3h,0b9h,098h,000h,0bbh,00bh,002h,089h
+        db 03fh,089h,077h,002h,08bh,0d3h,0e9h,0a8h,000h,051h,052h,080h,0feh,020h,075h,00fh
+        db 08ah,0f2h,08ah,0d5h,0b5h,030h,080h,0feh,020h,075h,004h,08ah,0f2h,08ah,0d5h,080h
+        db 0feh,030h,072h,041h,080h,0feh,039h,077h,03ch,080h,0fah,030h,072h,037h,080h,0fah
+        db 039h,077h,032h,080h,0fdh,030h,072h,02dh,080h,0fdh,039h,077h,028h,080h,0eeh,030h
+        db 080h,0eah,030h,080h,0edh,030h,0b8h,000h,000h,08ah,0c2h,052h,0b1h,00ah,0f6h,0e1h
+        db 08bh,0f0h,0b1h,064h,08ah,0c5h,0f6h,0e1h,003h,0c6h,05ah,08ah,0d6h,0b6h,000h,003h
+        db 0c2h,08bh,0d8h,0ebh,003h,0bbh,0ffh,0ffh,05ah,059h,0c3h,080h,0fah,00ah,072h,00ah
+        db 052h,0b2h,031h,0e8h,042h,0feh,05ah,080h,0eah,00ah,080h,0c2h,030h,0e9h,038h,0feh
+        db 0b2h,0ffh,0b1h,020h,0e9h,02ah,000h,0bah,062h,009h,0e9h,021h,0feh,0b2h,0fdh,0b1h
+        db 006h,0ebh,01eh,0b1h,094h,0ebh,01ah,0b1h,00eh,0ebh,016h,0b1h,019h,0ebh,012h,0b1h
+        db 0a0h,0ebh,00eh,0b1h,0a4h,0ebh,00ah,0b1h,092h,0ebh,006h,0b1h,093h,0ebh,002h,0b1h
+        db 027h
+
+
+;------------------------------------------------------------------------------
+; ccpm_call (0901h)
+; Thin gateway used by the command processor. CL selects the BDOS function;
+; arguments and results follow that function's CP/M-86 convention.
+; No register preservation is added here beyond what the OS supplies.
+;------------------------------------------------------------------------------
+ccpm_call:
+        int 0e0h
+        ret
+
+; UNDECODED 0904h..0CBEh: strings/tables and PC-MODE initialization code.
+; In particular, 0C5Bh records SYSDAT and waits for console zero to establish
+; the shared base DATA segment before the other console instances continue.
+; Preserved original CODE bytes 0904h..0CBEh (undecoded/data).
+        db 01fh,000h,000h,000h,003h,000h,072h,009h,00ch,000h,084h,009h,018h,000h,092h,009h
+        db 017h,000h,092h,009h,026h,000h,092h,009h,019h,000h,092h,009h,01ch,000h,0a0h,009h
+        db 01dh,000h,0a0h,009h,01eh,000h,0abh,009h,00fh,000h,0beh,009h,028h,000h,0d3h,009h
+        db 013h,000h,0ebh,009h,014h,000h,0ebh,009h,015h,000h,0ebh,009h,020h,000h,0ebh,009h
+        db 024h,000h,0ebh,009h,03ch,000h,000h,00ah,03dh,000h,00dh,00ah,0ffh,0ffh,0a0h,009h
+        db 0ffh,0ffh,0a0h,009h,0ffh,0ffh,0a0h,009h,0ffh,0ffh,0a0h,009h,03eh,024h,00dh,00ah
+        db 024h,043h,050h,02fh,04dh,020h,045h,072h,072h,06fh,072h,03ah,020h,024h,04eh,06fh
+        db 074h,020h,045h,06eh,06fh,075h,067h,068h,020h,04dh,065h,06dh,06fh,072h,079h,024h
+        db 050h,044h,020h,054h,061h,062h,06ch,065h,020h,046h,075h,06ch,06ch,024h,042h,061h
+        db 064h,020h,046h,069h,06ch,065h,020h,053h,070h,065h,063h,024h,04ch,06fh,061h,064h
+        db 020h,045h,072h,072h,06fh,072h,024h,043h,061h,06eh,027h,074h,020h,046h,069h,06eh
+        db 064h,020h,043h,06fh,06dh,06dh,061h,06eh,064h,024h,052h,053h,050h,020h,043h,06fh
+        db 06dh,06dh,061h,06eh,064h,020h,051h,075h,065h,020h,046h,075h,06ch,06ch,024h,043h
+        db 04ch,049h,020h,041h,062h,06fh,072h,074h,024h,049h,06eh,076h,061h,06ch,069h,064h
+        db 020h,044h,072h,069h,076h,065h,024h,043h,061h,06eh,027h,074h,020h,041h,073h,073h
+        db 069h,067h,06eh,020h,043h,06fh,06eh,073h,06fh,06ch,065h,024h,042h,061h,064h,020h
+        db 046h,069h,06ch,065h,074h,079h,070h,065h,024h,043h,061h,06eh,027h,074h,020h,046h
+        db 069h,06eh,064h,020h,042h,041h,054h,043h,048h,02eh,043h,04dh,044h,024h,043h,06fh
+        db 06dh,06dh,061h,06eh,064h,020h,03dh,020h,024h,00dh,00ah,049h,06eh,076h,061h,06ch
+        db 069h,064h,020h,055h,073h,065h,072h,020h,04eh,075h,06dh,062h,065h,072h,02ch,020h
+        db 049h,047h,04eh,04fh,052h,045h,044h,00dh,00ah,024h,00dh,00ah,055h,073h,065h,072h
+        db 020h,04eh,075h,06dh,062h,065h,072h,020h,03dh,020h,024h,00dh,00ah,04eh,06fh,074h
+        db 065h,03ah,020h,020h,055h,073h,065h,072h,020h,06eh,075h,06dh,062h,065h,072h,073h
+        db 020h,06fh,06eh,06ch,079h,020h,061h,070h,070h,06ch,079h,020h,074h,06fh,020h,043h
+        db 050h,02fh,04dh,020h,06dh,065h,064h,069h,061h,02eh,00dh,00ah,024h,00dh,00ah,049h
+        db 06eh,076h,061h,06ch,069h,064h,020h,04dh,065h,06dh,06fh,072h,079h,020h,041h,06ch
+        db 06ch,06fh,063h,061h,074h,069h,06fh,06eh,020h,053h,069h,07ah,065h,02ch,020h,049h
+        db 047h,04eh,04fh,052h,045h,044h,00dh,00ah,024h,00dh,00ah,04dh,065h,06dh,06fh,072h
+        db 079h,020h,041h,06ch,06ch,06fh,063h,061h,074h,069h,06fh,06eh,020h,053h,069h,07ah
+        db 065h,020h,03dh,020h,024h,00dh,00ah,049h,06eh,076h,061h,06ch,069h,064h,020h,050h
+        db 072h,069h,06eh,074h,065h,072h,020h,04eh,075h,06dh,062h,065h,072h,02ch,020h,049h
+        db 047h,04eh,04fh,052h,045h,044h,00dh,00ah,024h,00dh,00ah,050h,072h,069h,06eh,074h
+        db 065h,072h,020h,04eh,075h,06dh,062h,065h,072h,020h,03dh,020h,024h,00dh,00ah,038h
+        db 030h,038h,037h,020h,06eh,06fh,074h,020h,069h,06eh,073h,074h,061h,06ch,06ch,065h
+        db 064h,00dh,00ah,024h,00dh,00ah,049h,06eh,076h,061h,06ch,069h,064h,020h,038h,030h
+        db 038h,037h,020h,053h,074h,061h,074h,065h,02ch,020h,049h,047h,04eh,04fh,052h,045h
+        db 044h,00dh,00ah,024h,00dh,00ah,038h,030h,038h,037h,020h,03dh,020h,024h,00dh,00ah
+        db 049h,06eh,076h,061h,06ch,069h,064h,020h,053h,075h,073h,070h,065h,06eh,064h,020h
+        db 053h,074h,061h,074h,065h,02ch,020h,049h,047h,04eh,04fh,052h,045h,044h,00dh,00ah
+        db 024h,00dh,00ah,053h,075h,073h,070h,065h,06eh,064h,020h,03dh,020h,024h,053h,074h
+        db 072h,069h,06bh,065h,020h,061h,020h,06bh,065h,079h,020h,077h,068h,065h,06eh,020h
+        db 072h,065h,061h,064h,079h,020h,02eh,020h,02eh,020h,02eh,024h,055h,053h,045h,052h
+        db 020h,020h,020h,020h,020h,04dh,045h,04dh,020h,020h,020h,020h,020h,020h,050h,052h
+        db 049h,04eh,054h,045h,052h,020h,020h,038h,030h,038h,037h,020h,020h,020h,020h,020h
+        db 053h,055h,053h,050h,045h,04eh,044h,020h,020h,052h,045h,04dh,020h,020h,020h,020h
+        db 020h,020h,053h,059h,053h,020h,020h,020h,020h,020h,020h,050h,041h,055h,053h,045h
+        db 020h,020h,020h,020h,044h,045h,04ch,020h,020h,020h,020h,020h,020h,052h,045h,04eh
+        db 041h,04dh,045h,020h,020h,020h,045h,052h,041h,053h,045h,02eh,045h,058h,045h,020h
+        db 04fh,04eh,020h,020h,04fh,046h,046h,020h,053h,074h,061h,072h,074h,020h,075h,070h
+        db 020h,063h,06fh,06dh,06dh,061h,06eh,064h,03ah,020h,024h,000h,043h,04fh,050h,059h
+        db 052h,049h,047h,048h,054h,028h,043h,029h,031h,039h,038h,034h,02ch,044h,049h,047h
+        db 049h,054h,041h,04ch,020h,052h,045h,053h,045h,041h,052h,043h,048h,028h,030h,035h
+        db 02fh,031h,037h,02fh,038h,034h,029h,032h,030h,030h,034h,02dh,030h,030h,030h,030h
+        db 02dh,036h,035h,034h,033h,032h,031h,08eh,006h,000h,000h,08ch,006h,0f3h,004h,02eh
+        db 08ch,006h,00fh,01ah,08ch,0d8h,0a3h,0e5h,004h,0a3h,0efh,004h,0a3h,0e9h,004h,026h
+        db 08bh,036h,068h,000h,026h,08ah,05ch,020h,088h,01eh,0f7h,004h,00ah,0dbh,075h,011h
+        db 02eh,0a3h,003h,01ah,08ch,0c8h,02eh,0a3h,001h,01ah,0b8h,011h,01ah,02eh,0a3h,0ffh
+        db 019h,01eh,0b8h,000h,000h,08eh,0d8h,0a1h,080h,003h,02eh,0a3h,005h,01ah,0a1h,082h
+        db 003h,02eh,0a3h,007h,01ah,01fh,02eh,083h,03eh,003h,01ah,000h,075h,00ah,0b1h,08dh
+        db 0bah,01eh,000h,0e8h,099h,029h,0ebh,0eeh,0e9h,0f9h,000h
+
+; UNDECODED 0CBFh..105Eh: private service dispatch, cleanup, header read,
+; memory allocation and EXE load placement.
+; The entry at CODE:0003 jumps here. Do not confuse it with INT 21h dispatch.
+pcmode_service:
+; Preserved original CODE bytes 0CBFh..0F8Ch (undecoded/data).
+        db 09ch,006h,01eh,01eh,0e8h,0e1h,008h,08fh,006h,050h,004h,08ch,0d8h,08eh,0c0h,08ah
+        db 0d9h,032h,0ffh,0d1h,0e3h,0b8h,0ffh,0ffh,080h,0f9h,010h,073h,005h,02eh,0ffh,097h
+        db 0e7h,00ch,08bh,0d8h,01fh,007h,09dh,0cbh,0b8h,00dh,0f7h,00ch,02ah,00dh,038h,00dh
+        db 05ch,00dh,080h,00dh,08eh,00dh,0b4h,00dh,01eh,08eh,01eh,050h,004h,08bh,0f2h,0adh
+        db 08bh,0d8h,0adh,08bh,0d0h,0adh,050h,0adh,050h,0ach,026h,0a2h,052h,004h,0bfh,020h
+        db 002h,0b9h,012h,000h,08bh,0f3h,08eh,0dah,0f3h,0a5h,01fh,05eh,0bfh,082h,001h,0b9h
+        db 043h,000h,0f3h,0a5h,01fh,0bah,082h,001h,0e9h,0c5h,001h,083h,0fah,0ffh,075h,004h
+        db 0a1h,0a8h,006h,0c3h,089h,016h,0a8h,006h,0c3h,080h,0fah,0ffh,075h,00fh,0b8h,0ffh
+        db 000h,08ah,01eh,0a5h,006h,080h,0e3h,002h,075h,002h,033h,0c0h,0c3h,00ah,0d2h,075h
+        db 006h,080h,026h,0a5h,006h,0fdh,0c3h,080h,00eh,0a5h,006h,002h,0c3h,080h,0fah,0ffh
+        db 075h,00fh,0b8h,0ffh,000h,08ah,01eh,0a5h,006h,080h,0e3h,001h,075h,002h,033h,0c0h
+        db 0c3h,00ah,0d2h,075h,006h,080h,026h,0a5h,006h,0feh,0c3h,080h,00eh,0a5h,006h,001h
+        db 0c3h,083h,0fah,0ffh,075h,004h,0a1h,0a6h,006h,0c3h,089h,016h,0a6h,006h,0c3h,08eh
+        db 006h,050h,004h,08bh,0dah,026h,0f6h,007h,0ffh,074h,008h,08dh,07fh,001h,0beh,01eh
+        db 007h,0ebh,00ah,08dh,077h,001h,0bfh,01eh,007h,01eh,006h,01fh,007h,0b9h,006h,000h
+        db 0f3h,0a5h,033h,0c0h,0c3h,0bah,073h,037h,0c3h,0a1h,0ceh,003h,00bh,0c0h,074h,00eh
+        db 0bah,0cch,003h,0b1h,039h,0e8h,08ch,028h,0c7h,006h,0ceh,003h,000h,000h,080h,03eh
+        db 0f5h,004h,0ffh,075h,01bh,0fch,033h,0c9h,08eh,0c1h,0bfh,040h,000h,0beh,03bh,006h
+        db 0b9h,02fh,000h,0f3h,0a5h,0b8h,020h,000h,0e8h,0e7h,007h,0c6h,006h,0f5h,004h,000h
+        db 01eh,007h,0bfh,02ah,007h,0b9h,0e0h,001h,033h,0c0h,0fch,0f3h,0abh,0bfh,02ah,007h
+        db 0b9h,018h,000h,0c6h,005h,0ffh,083h,0c7h,028h,0e2h,0f8h,0c6h,006h,026h,005h,000h
+        db 0c7h,006h,024h,005h,000h,000h,0c6h,006h,0b7h,003h,000h,0c6h,006h,0b3h,003h,000h
+        db 0c6h,006h,0b6h,003h,000h,0c6h,006h,0f5h,002h,000h,0c6h,006h,03dh,004h,000h,0c7h
+        db 006h,0f0h,002h,000h,000h,033h,0c0h,0c3h,006h,02eh,08eh,006h,00fh,01ah,026h,0f6h
+        db 006h,04fh,000h,0ffh,074h,06fh,0c4h,036h,0f1h,004h,046h,046h,0e8h,088h,000h,0b2h
+        db 03ah,0e8h,074h,000h,0e8h,080h,000h,0b2h,03ah,0e8h,06ch,000h,0e8h,078h,000h,0b2h
+        db 020h,0e8h,064h,000h,0beh,020h,002h,0ach,00ah,0c0h,075h,005h,0a0h,0a8h,003h,0feh
+        db 0c0h,004h,040h,08ah,0d0h,0e8h,050h,000h,0b2h,03ah,0e8h,04bh,000h,0b9h,008h,000h
+        db 0e8h,034h,000h,003h,0f1h,0b2h,02eh,0e8h,03eh,000h,0b9h,003h,000h,0e8h,027h,000h
+        db 0bfh,020h,002h,0beh,0cbh,037h,0b9h,013h,000h,0f6h,045h,008h,080h,075h,00dh,080h
+        db 03eh,052h,004h,0ffh,074h,006h,083h,0e9h,009h,083h,0c6h,009h,02eh,0ach,08ah,0d0h
+        db 0e8h,015h,000h,0e2h,0f7h,007h,0c3h,0ach,024h,07fh,03ch,020h,074h,008h,08ah,0d0h
+        db 0e8h,005h,000h,0e2h,0f2h,0c3h,049h,0c3h,051h,0b1h,002h,0e8h,086h,027h,0b1h,006h
+        db 0b2h,0ffh,0e8h,07fh,027h,059h,0c3h,026h,0ach,050h,0b1h,004h,0d2h,0e8h,004h,030h
+        db 08ah,0d0h,0e8h,0e3h,0ffh,058h,024h,00fh,004h,030h,08ah,0d0h,0e8h,0d9h,0ffh,0c3h
+        db 08ch,0d8h,08eh,0c0h,042h,089h,016h,0abh,005h,0b1h,019h,0e8h,056h,027h,0a2h,0a8h
+        db 003h,0a2h,0a9h,003h,0e8h,031h,0ffh,0beh,020h,002h,0c6h,006h,053h,004h,000h,0f6h
+        db 044h,001h,080h,074h,005h,080h,00eh,053h,004h,080h,0f6h,044h,002h,080h,074h,005h
+        db 080h,00eh,053h,004h,040h,0f6h,044h,003h,080h,074h,005h,080h,00eh,053h,004h,020h
+        db 0f6h,044h,004h,080h,074h,005h,080h,00eh,053h,004h,070h,080h,03eh,052h,004h,0ffh
+        db 0b1h,020h,0b2h,0ffh,0e8h,00dh,027h,0a2h,054h,004h,080h,03eh,052h,004h,0ffh,075h
+        db 007h,032h,0d2h,0b1h,020h,0e8h,0fch,026h,0a0h,029h,002h,024h,07fh,03ch,043h,075h
+        db 003h,0e9h,040h,002h,01eh,007h,0bah,055h,004h,0e8h,06fh,019h,0b2h,001h,0e8h,0dah
+        db 005h,0beh,020h,002h,08bh,0d6h,0c7h,044h,021h,000h,000h,0c6h,044h,023h,000h,0b1h
+        db 021h,0e8h,0d0h,026h,00ah,0c0h,074h,006h,0b9h,01dh,000h,0e9h,0e1h,003h
+if PCMODE_SAFE_LOADER
+; After the first header read, validate before size arithmetic/allocation.
+; Replace exactly the original four-byte MOV BX,[0457h]; the out-of-line
+; guard executes that instruction on success. All existing offsets stay fixed.
+        jmp validate_exe_file
+        nop
+endif
+if not PCMODE_SAFE_LOADER
+        mov bx,word ptr .exe_header+2
+endif
+; Preserved original CODE bytes 0F91h..0FA2h (undecoded/data).
+        db 081h,0e3h,0ffh,001h,0a1h,059h,004h,00bh,0dbh,074h,001h,048h,0b1h,005h,0d3h,0e0h
+        db 0feh,0c9h
+if PCMODE_SAFE_LOADER
+        add bx,15               ; ceil(last-page bytes / 16), not nearest
+endif
+if not PCMODE_SAFE_LOADER
+        add bx,7                ; original under-rounding retained for audit
+endif
+; Preserved original CODE bytes 0FA6h..1023h (undecoded/data).
+        db 0d3h,0ebh,003h,0c3h,02bh,006h,05dh,004h,0a3h,0dch,004h,005h,02bh,000h,003h,006h
+        db 05fh,004h,08bh,0d8h,0beh,021h,002h,0bfh,073h,037h,057h,056h,0b9h,004h,000h,0adh
+        db 025h,07fh,07fh,02eh,039h,005h,075h,004h,047h,047h,0e2h,0f3h,05eh,05fh,00bh,0c9h
+        db 08bh,0c3h,074h,012h,083h,0c7h,008h,081h,0ffh,0cbh,037h,075h,0ddh,03bh,006h,0a8h
+        db 006h,073h,003h,0a1h,0a8h,006h,006h,02eh,08eh,006h,00fh,01ah,026h,0ffh,036h,04ch
+        db 000h,026h,039h,006h,04ch,000h,073h,00bh,026h,0a3h,04ch,000h,026h,081h,006h,04ch
+        db 000h,000h,006h,0a3h,0ceh,003h,0b1h,037h,0bah,0cch,003h,0e8h,03fh,026h,026h,08fh
+        db 006h,04ch,000h,007h,00ah,0c0h,074h,006h,0b9h,003h,000h,0e9h,04ah,003h
+
+; Successful BDOS 55 allocation (1024h). Its descriptor contains the actual
+; base and size, not merely the EXE minimum request. Reserve 1Bh paragraphs
+; for private loader state, followed by the 10h-paragraph PSP. MAXALLOC=FFFFh
+; leaves the image immediately after that PSP. Otherwise the recovered policy
+; positions the image near the allocation's upper end, subject to MAXALLOC.
+; Initial-stack validation must use this final placement and actual extent;
+; checking SS:SP against image bytes alone would reject legitimate BSS stacks.
+        mov ax,word ptr .loader_memory_size
+        sub ax,1bh
+        mov word ptr .child_memory_size,ax
+        mov ax,word ptr .loader_memory_base
+        add ax,1bh
+        mov word ptr .child_psp_segment,ax
+        add ax,10h
+        mov word ptr .exe_load_segment,ax
+        cmp word ptr .exe_header+0ch,-1
+        je prepare_exe_entry
+        mov ax,word ptr .child_psp_segment
+        add ax,word ptr .child_memory_size
+        sub ax,word ptr .exe_image_paragraphs
+        mov word ptr .exe_load_segment,ax
+        sub ax,word ptr .exe_header+0ch
+        jc prepare_exe_entry
+        sub ax,10h
+        jc prepare_exe_entry
+        mov word ptr .exe_load_segment,ax
+
+;------------------------------------------------------------------------------
+; prepare_exe_entry (105Fh)
+; Memory allocation and load placement have selected exe_load_segment.
+; Rebase MZ CS/SS, retain header IP/SP, and build the child's PSP. The common
+; launch path consumes these four child_* fields after image relocation.
+;------------------------------------------------------------------------------
+prepare_exe_entry:
+if PCMODE_SAFE_LOADER
+        call validate_exe_stack
+        nop
+        nop
+        nop
+        nop
+endif
+if not PCMODE_SAFE_LOADER
+        mov ax,word ptr .exe_load_segment
+        add ax,word ptr .exe_initial_ss
+endif
+        mov word ptr .child_stack_segment,ax
+        mov ax,word ptr .exe_initial_sp
+        mov word ptr .child_stack_offset,ax
+        mov ax,word ptr .exe_initial_cs
+        add ax,word ptr .exe_load_segment
+        mov word ptr .child_entry_segment,ax
+        mov ax,word ptr .exe_initial_ip
+        mov word ptr .child_entry_offset,ax
+        mov byte ptr .child_is_com,0
+        call construct_psp
+        db 033h,0d2h                 ; xor dx,dx: DMA begins at offset zero
+        mov cl,26
+        call loader_bdos_call
+        mov ax,word ptr .exe_load_segment
+        mov word ptr .exe_dma_segment,ax
+        mov ax,word ptr .exe_image_paragraphs
+        add ax,7         ; retain original accumulator encoding
+        mov cl,3
+        shr ax,cl                    ; round paragraphs to 128-byte records
+        mov word ptr .exe_records_left,ax
+
+; The original calculation discards a partial 512-byte header page. The
+; experimental path selects bulk record reads or a header-tail copy reader.
+if PCMODE_SAFE_LOADER
+        jmp load_exe_header_tail  ; choose record-aligned or byte-shifting path
+endif
+if not PCMODE_SAFE_LOADER
+        mov ax,word ptr .exe_header_paragraphs
+endif
+if PCMODE_SAFE_LOADER
+        mov cl,3
+        shr ax,cl                    ; header paragraphs / 8 = CP/M records
+        nop
+        nop
+        nop
+        nop
+        nop
+        nop
+        nop
+        nop
+        nop
+        nop
+        nop
+endif
+if not PCMODE_SAFE_LOADER
+        mov dx,16
+        mul dx
+        mov cx,512
+        div cx
+        mov cx,4
+        mul cx                       ; file's first image record (128-byte units)
+endif
+        mov word ptr .exe_next_record,ax
+        mov byte ptr .exe_next_record+2,0
+        mov dx,128
+        call set_multi_record_count
+read_exe_image_chunk:
+        mov cl,51                    ; DMA segment; offset remains zero
+        mov dx,word ptr .exe_dma_segment
+        call loader_bdos_call
+        mov ax,400h                  ; 16 KiB in paragraphs
+        mov di,128                   ; 16 KiB in CP/M records
+        cmp word ptr .exe_records_left,di
+        jae read_exe_image_records
+        mov di,word ptr .exe_records_left
+        db 08bh,0d7h                 ; mov dx,di: final shorter multi-read
+        call set_multi_record_count
+        db 08bh,0c7h                 ; mov ax,di
+        shl ax,1
+        shl ax,1
+        shl ax,1                     ; records to paragraphs
+read_exe_image_records:
+        mov dx,program_fcb
+        db 08bh,0f2h                 ; mov si,dx
+        add word ptr .exe_dma_segment,ax
+        mov ax,word ptr .exe_next_record
+        mov word ptr fcb_random_record[si],ax
+        mov al,byte ptr .exe_next_record+2
+        mov byte ptr fcb_random_record+2[si],al
+        add word ptr .exe_next_record,di
+        adc byte ptr .exe_next_record+2,0
+        mov cl,33                    ; random read with current multi-count
+        call loader_bdos_call
+        db 00ah,0c0h                 ; or al,al
+        jz exe_image_chunk_done
+        cmp al,1                     ; EOF is accepted by the original loader
+        jz exe_image_chunk_done
+        mov cx,1dh
+        jmp loader_failure
+exe_image_chunk_done:
+        sub word ptr .exe_records_left,di
+        jnz read_exe_image_chunk
+
+
+;------------------------------------------------------------------------------
+; relocate_exe (111Eh)
+; Image loading is complete. DS selects PCTMP DATA; exe_load_segment is the
+; actual load base in paragraphs. exe_header still holds file record zero.
+; Each MZ relocation is an offset:segment pair relative to the image base.
+; Resolve that pair and add the load base to the target WORD, not its address.
+; The default is byte-exact recovery; the experimental helper validates both
+; target bytes before rebasing. See pcguard.lib for its error-stack contract.
+; The original reader assumes the initial table offset is in record zero and
+; entries fit the record layout. The checked pass handles arbitrary byte starts
+; and split entries while preserving these original offsets for reconstruction.
+;------------------------------------------------------------------------------
+relocate_exe:
+if PCMODE_SAFE_LOADER
+        jmp relocate_exe_checked
+        nop
+        nop
+        nop
+endif
+if not PCMODE_SAFE_LOADER
+        mov dx,1
+        call set_multi_record_count
+endif
+        mov word ptr .exe_next_record,1
+        mov byte ptr .exe_next_record+2,0
+        mov ax,word ptr .exe_relocation_offset
+        mov word ptr .exe_relocation_cursor,ax
+        mov cx,word ptr .exe_relocation_count
+        jcxz exe_relocations_done
+exe_relocation_loop:
+        push cx
+        call read_exe_relocation
+        pop cx
+if PCMODE_SAFE_LOADER
+        call validate_exe_relocation
+        nop
+        nop
+        nop
+endif
+if not PCMODE_SAFE_LOADER
+        mov ax,es                    ; entry's relative segment
+        add ax,word ptr .exe_load_segment
+endif
+        mov es,ax                    ; ES:SI now addresses the loaded target
+        mov ax,word ptr .exe_load_segment
+        add es:word ptr [si],ax
+        loop exe_relocation_loop
+exe_relocations_done:
+        jmp prepare_dos_execution
+
+;------------------------------------------------------------------------------
+; read_exe_relocation (1153h)
+; Return ES:SI = relative segment:offset from the next relocation entry.
+; Advance the cursor by four bytes; at the record boundary refill the header
+; scratch buffer through CP/M random read. Preserve the just-fetched pair
+; across refill. The enclosing loop saves CX because BDOS uses CL.
+; Refill happens immediately, even when the fetched entry was the last one.
+; A failed refill jumps to the common loader error path; it does not return.
+;------------------------------------------------------------------------------
+read_exe_relocation:
+        mov bx,word ptr .exe_relocation_cursor
+        les si,dword ptr exe_header[bx]
+        add bx,4
+        cmp bx,128
+        jae refill_exe_relocations
+        mov word ptr .exe_relocation_cursor,bx
+        ret
+refill_exe_relocations:
+        push es
+        push si
+        mov word ptr .exe_relocation_cursor,0
+        push ds
+        pop es
+        mov dx,exe_header
+        call set_loader_dma
+        mov dx,program_fcb
+        db 08bh,0f2h                 ; mov si,dx: original encoding
+        mov ax,word ptr .exe_next_record
+        mov word ptr fcb_random_record[si],ax
+        mov al,byte ptr .exe_next_record+2
+        mov byte ptr fcb_random_record+2[si],al
+        add word ptr .exe_next_record,1
+        adc byte ptr .exe_next_record+2,0
+        mov cl,33                    ; CP/M random record read
+        call loader_bdos_call
+        pop si
+        pop es
+        db 00ah,0c0h                 ; or al,al: original encoding
+        jz exe_relocation_ready
+        jmp loader_read_error
+exe_relocation_ready:
+        ret
+
+; UNDECODED 11A3h..147Bh: COM load path and shared launch/PSP construction.
+; Preserved original CODE bytes 11A3h..147Bh (undecoded/data).
+        db 0c6h,006h,0f8h,002h,0ffh,0a1h,0a8h,006h,0a3h,0ceh,003h,006h,02eh,08eh,006h,00fh
+        db 01ah,026h,0ffh,036h,04ch,000h,026h,039h,006h,04ch,000h,073h,00bh,026h,0a3h,04ch
+        db 000h,026h,081h,006h,04ch,000h,000h,006h,0b1h,037h,0bah,0cch,003h,0e8h,080h,024h
+        db 026h,08fh,006h,04ch,000h,007h,00ah,0c0h,074h,006h,0b9h,003h,000h,0e9h,08bh,001h
+        db 0a1h,0ceh,003h,02dh,01bh,000h,0a3h,0d5h,003h,0a1h,0cch,003h,005h,01bh,000h,0a3h
+        db 0d3h,003h,0a3h,04ch,004h,0c7h,006h,04eh,004h,000h,001h,0a3h,04ah,004h,0e8h,04bh
+        db 003h,0a3h,048h,004h,0e8h,075h,001h,026h,081h,02eh,006h,000h,000h,001h,026h,083h
+        db 006h,008h,000h,010h,08ch,0c2h,0b1h,033h,0e8h,035h,024h,0c7h,006h,0d7h,003h,000h
+        db 001h,0bfh,020h,002h,0c6h,045h,020h,000h,0b2h,080h,0e8h,01ah,003h,0bfh,000h,040h
+        db 0a1h,0d7h,003h,003h,0c7h,026h,03bh,006h,006h,000h,076h,006h,0b9h,003h,000h,0e9h
+        db 029h,001h,08bh,016h,0d7h,003h,0b1h,01ah,0e8h,005h,024h,001h,03eh,0d7h,003h,0bah
+        db 020h,002h,0b1h,014h,0e8h,0f9h,023h,00ah,0c0h,074h,0d5h,050h,0b2h,001h,0e8h,0e6h
+        db 002h,058h,03ch,001h,074h,006h,0b9h,01dh,000h,0e9h,0ffh,000h,0b1h,027h,0bah,0ffh
+        db 0ffh,0e8h,0dch,023h,0e8h,002h,002h,08eh,006h,0d3h,003h,0b0h,020h,0bfh,05dh,000h
+        db 0b9h,00bh,000h,051h,0f3h,0aah,059h,0bfh,06dh,000h,0f3h,0aah,08ch,0d8h,08eh,0c0h
+        db 08bh,036h,0abh,005h,0b9h,080h,000h,033h,0c0h,08bh,0feh,0f2h,0aeh,0b8h,080h,000h
+        db 02bh,0c1h,08bh,0c8h,049h,088h,00eh,0adh,005h,00ah,0c9h,074h,041h,051h,0bfh,0aah
+        db 006h,0b0h,001h,0e8h,0ech,01eh,059h,080h,03ch,000h,074h,032h,08bh,0c6h,02bh,006h
+        db 0abh,005h,02ah,0c8h,074h,028h,08eh,006h,0d3h,003h,0bfh,080h,000h,026h,088h,00dh
+        db 056h,047h,0f3h,0a4h,026h,0c6h,005h,00dh,0b0h,001h,05eh,0bfh,05ch,000h,0e8h,0c1h
+        db 01eh,080h,03ch,000h,074h,008h,0b0h,001h,0bfh,06ch,000h,0e8h,0b4h,01eh,0c7h,006h
+        db 0a6h,006h,0feh,0ffh,033h,0c9h,08bh,0d1h,08ah,00eh,0f7h,004h,0b8h,02ch,000h,0f6h
+        db 0e1h,006h,0beh,014h,00ch,02eh,08eh,006h,00fh,01ah,026h,08bh,034h,003h,0f0h,026h
+        db 0f7h,044h,00eh,000h,002h,074h,00ch,0c6h,006h,0f5h,002h,0ffh,026h,08ah,044h,008h
+        db 0a2h,0f8h,004h,08eh,006h,0d3h,003h,0bah,080h,000h,0e8h,0a2h,015h,007h,01eh,007h
+        db 033h,0c0h,08eh,0d8h,0beh,040h,000h,0bfh,03bh,006h,0b9h,02fh,000h,0f3h,0a5h,006h
+        db 01fh,0c6h,006h,0f5h,004h,0ffh,0b9h,001h,000h,0b8h,020h,000h,0e8h,07fh,002h,01eh
+        db 08eh,01eh,0cch,003h,0b1h,090h,0bah,080h,001h,0e8h,0f4h,022h,01fh,00bh,0c0h,075h
+        db 00ah,0b1h,095h,0bah,099h,006h,0e8h,0e7h,022h,0ebh,005h,0b8h,0ffh,0ffh,08bh,0d8h
+        db 051h,08ah,016h,054h,004h,0b1h,020h,0e8h,0eah,022h,059h,0c3h,0a1h,0cch,003h,08eh
+        db 0c0h,005h,018h,000h,0a3h,0d1h,003h,033h,0c0h,08bh,0f8h,0b9h,058h,001h,0f3h,0abh
+        db 0a1h,000h,000h,026h,0a3h,020h,000h,08ch,0c0h,005h,01bh,000h,026h,0a3h,054h,000h
+        db 026h,0a3h,052h,000h,0a1h,04ah,004h,026h,0a3h,056h,000h,026h,0c7h,006h,002h,000h
+        db 080h,000h,08ch,0c8h,026h,0a3h,050h,000h,0a1h,048h,004h,02dh,00ah,000h,080h,03eh
+        db 0f8h,002h,0ffh,075h,002h,048h,048h,026h,0a3h,034h,000h,026h,0c7h,006h,000h,001h
+        db 0ffh,003h,08eh,006h,0d1h,003h,026h,0c6h,006h,005h,000h,0c8h,0f6h,006h,0a5h,006h
+        db 001h,074h,007h,026h,0c7h,006h,026h,000h,001h,000h,026h,0c7h,006h,006h,000h,040h
+        db 020h,0f6h,006h,0a5h,006h,002h,074h,007h,026h,081h,00eh,006h,000h,000h,080h,01eh
+        db 02eh,08eh,01eh,00fh,01ah,08bh,036h,068h,000h,08ah,044h,024h,026h,0a2h,024h,000h
+        db 08ah,044h,020h,026h,0a2h,020h,000h,08bh,04ch,012h,01fh,0a2h,099h,006h,08ah,02eh
+        db 054h,004h,026h,089h,00eh,012h,000h,0a0h,053h,004h,026h,0a2h,018h,000h,033h,0ffh
+        db 0beh,021h,002h,0b9h,004h,000h,0adh,025h,07fh,07fh,026h,089h,045h,008h,089h,085h
+        db 09dh,006h,047h,047h,0e2h,0f0h,08eh,006h,0d3h,003h,033h,0ffh,0b8h,0cdh,020h,0abh
+        db 0a1h,0ceh,003h,003h,006h,0cch,003h,0abh,0b4h,09ah,0abh,0e8h,0eeh,000h,0abh,0e8h
+        db 0bch,000h,0abh,0b8h,032h,015h,0abh,08ch,0c8h,0abh,0b8h,09bh,01ah,0abh,08ch,0c8h
+        db 0abh,0b8h,0d1h,01bh,0abh,08ch,0c8h,0abh,0c3h
+
+;------------------------------------------------------------------------------
+; build_child_launch_frame (147Ch)
+; The EXE guard validates these five WORD destinations before this code runs.
+; COM adds a zero return address first, for RET-to-PSP termination. SI arithmetic
+; deliberately wraps at 16 bits: SP=0 builds the frame at the segment's top.
+; Final frame: PCTMP launch IP:CS, FLAGS, child IP:CS. The launch continuation
+; eventually consumes it and leaves the application's specified initial SP.
+;------------------------------------------------------------------------------
+build_child_launch_frame:
+        push es
+        mov es,word ptr .child_stack_segment
+        mov si,word ptr .child_stack_offset
+        cmp byte ptr .child_is_com,0ffh
+        jne child_frame_exe
+        dec si
+        dec si
+        mov es:word ptr [si],0
+child_frame_exe:
+        dec si
+        dec si
+        mov ax,word ptr .child_entry_segment
+        mov es:word ptr [si],ax
+        dec si
+        dec si
+        mov ax,word ptr .child_entry_offset
+        mov es:word ptr [si],ax
+        dec si
+        dec si
+        mov es:word ptr [si],200h        ; enable interrupts on child entry
+        dec si
+        dec si
+        mov ax,cs
+        mov es:word ptr [si],ax
+        dec si
+        dec si
+        mov ax,offset child_launch_entry    ; recovered PCTMP launch continuation
+        mov es:word ptr [si],ax
+        pop es
+        ret
+
+; UNDECODED 14BBh..15A6h: child entry, interrupt installation and dispatch.
+child_launch_entry:
+; Preserved original CODE bytes 14BBh..15A6h (undecoded/data).
+        db 08ch,0c3h,08eh,0c0h,026h,08bh,036h,068h,000h,09ch,0fah,026h,08ch,04ch,02ah,026h
+        db 0c7h,044h,028h,060h,015h,026h,08eh,044h,010h,026h,0c6h,006h,010h,000h,0ffh,09dh
+        db 08eh,0c1h,026h,08bh,00eh,080h,003h,02eh,089h,00eh,009h,01ah,026h,08bh,00eh,082h
+        db 003h,02eh,089h,00eh,00bh,01ah,0b9h,08dh,015h,026h,089h,00eh,080h,003h,026h,08ch
+        db 00eh,082h,003h,0beh,013h,037h,0b9h,00eh,000h,02eh,0ach,032h,0e4h,0d1h,0e0h,0d1h
+        db 0e0h,097h,02eh,0a5h,026h,08ch,00dh,0e2h,0f0h,08eh,0c3h,033h,0c0h,08bh,0d8h,08bh
+        db 0c8h,08bh,0f0h,08bh,0f8h,0cbh,08ch,0cah,0bbh,0f0h,019h,0b1h,004h,0d3h,0ebh,0d3h
+        db 0e8h,003h,0dah,02bh,0d8h,093h,0c3h,0e8h,072h,000h,0c7h,006h,0a6h,006h,000h,000h
+        db 0e8h,08fh,0f8h,0b1h,08fh,0b2h,0ffh,0e9h,00eh,021h,0e8h,05fh,000h,0ebh,0f1h,0b1h
+        db 02ch,0e9h,004h,021h,0a1h,0ceh,003h,03dh,000h,010h,072h,004h,0b8h,0f0h,0ffh,0c3h
+        db 0b1h,004h,0d3h,0e0h,0c3h,01eh,0e8h,043h,000h,006h,051h,0b9h,02fh,000h,00bh,0c0h
+        db 075h,010h,0beh,040h,000h,0bfh,0ddh,005h,08ch,0d8h,08eh,0c0h,033h,0c0h,08eh,0d8h
+        db 0ebh,00ah,0beh,0ddh,005h,0bfh,040h,000h,033h,0c0h,08eh,0c0h,0f3h,0a5h,059h,007h
+        db 01fh,0cbh,080h,0f9h,000h,074h,005h,02eh,0ffh,02eh,009h,01ah,01eh,0e8h,00ch,000h
+        db 0c7h,006h,0a6h,006h,000h,000h,01fh,02eh,0ffh,02eh,009h,01ah
+
+;------------------------------------------------------------------------------
+; select_console_data (15A7h)
+; Used on intercepted interrupts, where the caller's DS belongs to a DOS app.
+; Result: DS=this console's PCTMP DATA; AX, DX and BX preserved; DF cleared.
+; Flags are not preserved. The running PD comes from SYSDAT:0068h.
+;
+; The DATA stride is an embedded ABI constraint, not a guessed buffer size.
+; Four shifts convert 0AF0h bytes to paragraphs; console zero's DATA segment
+; is then added. Shared CODE state is addressed explicitly with CS overrides.
+;------------------------------------------------------------------------------
+select_console_data:
+        cld
+        push ax
+        push dx
+        push bx
+        mov ds,cs:word ptr .shared_sysdat_segment
+        mov bx,word ptr .sd_running_process
+        mov bl,byte ptr pd_console_number[bx]
+        db 032h,0ffh              ; xor bh,bh: original register/register encoding
+        mov ax,console_data_bytes
+        shr ax,1
+        shr ax,1
+        shr ax,1
+        shr ax,1
+        mul bx
+        add ax,cs:word ptr .shared_first_data_segment
+        mov ds,ax
+        pop bx
+        pop dx
+        pop ax
+        ret
+
+
+;------------------------------------------------------------------------------
+; xios_gateway (15D1h): AL=function, BL=BIOS operation when AL=31.
+; Select kernel DS and the running process UDA in ES. For packet operations
+; preserve CX:DX; simple calls get DL=current PD console. AX/BX/CX are results.
+; XIOS itself exchanges AX/BX on entry; its return also copies AX into BX.
+;------------------------------------------------------------------------------
+xios_gateway:
+        push dx
+        push si
+        push es
+        push ds
+        mov ds,cs:word ptr .shared_sysdat_segment
+        mov si,word ptr .sd_running_process
+        mov es,word ptr pd_uda_segment[si]
+        cmp al,01fh
+        jnz xios_supply_console
+        cmp bl,06h
+        jz xios_call_entry
+        cmp bl,07h
+        jz xios_call_entry
+        cmp bl,09h
+        jz xios_call_entry
+        cmp bl,0ah
+        jz xios_call_entry
+        cmp bl,0bh
+        jz xios_call_entry
+        cmp bl,0ch
+        jz xios_call_entry
+        cmp bl,0dh
+        jz xios_call_entry
+xios_supply_console:
+        mov dl,byte ptr pd_console_number[si]
+xios_call_entry:
+        callf cs:dword ptr .shared_xios_entry
+        pop ds
+        pop es
+        pop si
+        pop dx
+        ret
+
+; UNDECODED 1615h..1637h: XIOS console-output wrapper.
+; Preserved original CODE bytes 1615h..1637h (undecoded/data).
+        db 050h,052h,056h,006h,01eh,0b8h,004h,000h,08ah,016h,0f8h,004h,02eh,08eh,01eh,00fh
+        db 01ah,08bh,036h,068h,000h,08eh,044h,010h,02eh,0ffh,01eh,00dh,01ah,01fh,007h,05eh
+        db 05ah,058h,0c3h
+
+;------------------------------------------------------------------------------
+; INT 10h: save application DS/SI, select this console DATA, switch to private
+; SS:SP, then save AX/BX/CX/DS/DX/BP/ES/DI at DATA:0439h down to 042Bh.
+; Changing a result requires writing that saved frame before the shared exit.
+; This is the original reconstruction. No new BIOS functionality is enabled.
+;------------------------------------------------------------------------------
+bios_video_handler:
+        sti
+        push ds
+        push si
+        call select_console_data
+        cli
+        mov word ptr .child_stack_segment,ss
+        mov word ptr .child_stack_offset,sp
+        mov si,ds
+        mov ss,si
+        mov sp,bios_frame_ax+2
+        sti
+        push ax
+        push bx
+        push cx
+        push ds
+        push dx
+        push bp
+        push es
+        push di
+        db 00ah,0e4h  ; or ah,ah: original encoding
+        jnz bios_video_try_cursor_shape
+        cmp al,07h
+        jz bios_mode_text_number
+        cmp al,04h
+        jnc bios_mode_graphics_number
+
+;------------------------------------------------------------------------------
+; Native text modes are BIOS mode +2; native graphics modes use a high nibble.
+;------------------------------------------------------------------------------
+bios_mode_text_number:
+        inc al
+        inc al
+        db 08ah,0c8h  ; mov cl,al: original encoding
+        jmps bios_mode_set
+bios_mode_graphics_number:
+        dec al
+        dec al
+        shl al,1
+        shl al,1
+        shl al,1
+        shl al,1
+        db 08ah,0c8h  ; mov cl,al: original encoding
+bios_mode_set:
+        mov ax,01eh
+        db 032h,0edh  ; xor ch,ch: original encoding
+        call xios_gateway
+        jmp bios_video_restore_frame
+bios_video_try_cursor_shape:
+        cmp ah,01h
+        jnz bios_video_try_cursor_set
+        mov al,01fh
+        mov bl,01h
+        call xios_gateway
+        jmp bios_video_restore_frame
+bios_video_try_cursor_set:
+        cmp ah,02h
+        jnz bios_video_try_cursor_get
+        db 08bh,0cah  ; mov cx,dx: original encoding
+        mov al,01fh
+        mov bl,02h
+        call xios_gateway
+        jmp bios_video_restore_frame
+
+;------------------------------------------------------------------------------
+; Cursor query copies XIOS AX into the saved DOS DX, and returns CX=0.
+; The recovered handler does not supply the cursor shape in CX.
+;------------------------------------------------------------------------------
+bios_video_try_cursor_get:
+        cmp ah,03h
+        jnz bios_video_try_page
+        mov al,01fh
+        mov bl,03h
+        call xios_gateway
+        mov word ptr .bios_frame_dx,ax
+        db 033h,0c9h  ; xor cx,cx: original encoding
+        mov word ptr .bios_frame_cx,cx
+        jmp bios_video_restore_frame
+
+;------------------------------------------------------------------------------
+; AH=04/05 have no implemented branch. Preserve the original caller registers.
+;------------------------------------------------------------------------------
+bios_video_try_page:
+        cmp ah,05h
+        jnc bios_video_try_scroll_up
+        jmp bios_video_restore_frame
+bios_video_try_scroll_up:
+        cmp ah,06h
+        jnz bios_video_try_scroll_down
+        mov si,061fh
+        mov bl,00h
+        jmps bios_video_packet
+bios_video_try_scroll_down:
+        cmp ah,07h
+        jnz bios_video_try_read_cell
+        mov si,071fh
+        mov bl,00h
+
+;------------------------------------------------------------------------------
+; Build the nine-byte XIOS packet in console-private DATA. AH is cleared:
+; AX carries color/count, BX page/attribute/palette, CX/DX coordinates.
+; SI holds packed BIOS operation:XIOS function. Gateway returns AX, but this
+; shared path does not copy it into bios_frame_ax before restoring the caller.
+; In particular the AH=0Dh pixel-read result is discarded in the recovered code.
+;------------------------------------------------------------------------------
+bios_video_packet:
+        db 032h,0e4h  ; xor ah,ah: original encoding
+        mov word ptr .bios_packet_ax,ax
+        mov word ptr .bios_packet_bx,bx
+        mov word ptr .bios_packet_cx,cx
+        mov word ptr .bios_packet_dx,dx
+        push ds
+        mov ds,cs:word ptr .shared_sysdat_segment
+        mov bx,word ptr .sd_running_process
+        mov al,byte ptr pd_console_number[bx]
+        pop ds
+        mov byte ptr .bios_packet_console,al
+        db 08bh,0c6h  ; mov ax,si: original encoding
+        db 08ah,0dch  ; mov bl,ah: original encoding
+        mov cx,ds
+        mov dx,bios_packet_ax
+if PCMODE_PIXEL_READ
+        call bios_video_packet_result
+endif
+if not PCMODE_PIXEL_READ
+        call xios_gateway
+endif
+        jmp bios_video_restore_frame
+
+;------------------------------------------------------------------------------
+; Character readback explicitly updates saved AX; unlike generic packet return.
+;------------------------------------------------------------------------------
+bios_video_try_read_cell:
+        cmp ah,08h
+        jnz bios_video_try_write_cell
+        mov al,01fh
+        mov bl,08h
+        call xios_gateway
+        mov word ptr .bios_frame_ax,ax
+        jmp bios_video_restore_frame
+bios_video_try_write_cell:
+        cmp ah,09h
+        jnz bios_video_try_write_character
+        mov si,091fh
+        mov bh,00h
+        jmps bios_video_packet
+bios_video_try_write_character:
+        cmp ah,0ah
+        jnz bios_video_try_palette
+        mov si,0a1fh
+        mov bh,00h
+        jmps bios_video_packet
+bios_video_try_palette:
+        cmp ah,0bh
+        jnz bios_video_try_pixel_write
+        mov si,0b1fh
+        jmps bios_video_packet
+bios_video_try_pixel_write:
+        cmp ah,0ch
+        jnz bios_video_try_pixel_read
+        mov si,0c1fh
+        jmps bios_video_packet
+
+;------------------------------------------------------------------------------
+; Original AH=0Dh routes to XIOS 31/13, whose CGA helper returns a pixel color.
+; The shared packet path restores original AX, so this branch cannot return
+; that color through AL. Fixing/adding readback requires both sides reviewed.
+;------------------------------------------------------------------------------
+bios_video_try_pixel_read:
+        cmp ah,0dh
+        jnz bios_video_try_teletype
+        mov si,0d1fh
+        jmps bios_video_packet
+bios_video_try_teletype:
+        cmp ah,0eh
+        jnz bios_video_try_mode_query
+        db 08ah,0c8h  ; mov cl,al: original encoding
+        mov al,01fh
+        mov bl,0eh
+        call xios_gateway
+        jmp bios_video_restore_frame
+
+;------------------------------------------------------------------------------
+; Mode query uses native XIOS 30, translates its numbering and writes saved AX.
+; Saved BH=0: the supported view exposes one BIOS video page.
+;------------------------------------------------------------------------------
+bios_video_try_mode_query:
+        cmp ah,0fh
+        jnz bios_video_restore_frame
+        mov al,01eh
+        mov ch,01h
+        call xios_gateway
+        db 032h,0ffh  ; xor bh,bh: original encoding
+        cmp al,010h
+        jc bios_mode_query_text_number
+        shr al,1
+        shr al,1
+        shr al,1
+        shr al,1
+        add al,04h
+bios_mode_query_text_number:
+        dec al
+        dec al
+        mov word ptr .bios_frame_ax,ax
+        mov byte ptr .bios_frame_bh,00h
+
+;------------------------------------------------------------------------------
+; Restore the complete private frame, then switch back to the application
+; stack with interrupts disabled. The original INT frame is consumed by IRET.
+;------------------------------------------------------------------------------
+bios_video_restore_frame:
+        pop di
+        pop es
+        pop bp
+        pop dx
+        pop ds
+        pop cx
+        pop bx
+        pop ax
+        cli
+        mov ss,word ptr .child_stack_segment
+        mov sp,word ptr .child_stack_offset
+        pop si
+        pop ds
+        iret
+
+;------------------------------------------------------------------------------
+; INT 11h equipment: no AX slot is pushed, so returned XIOS AX survives.
+; Other listed registers and DS/application stack are restored before IRET.
+; This contrasts with the INT 10h packet result path above.
+;------------------------------------------------------------------------------
+bios_equipment_handler:
+        sti
+        push ds
+        call select_console_data
+        cli
+        mov word ptr .child_stack_segment,ss
+        mov word ptr .child_stack_offset,sp
+        mov ax,ds
+        mov ss,ax
+        mov sp,bios_frame_ax+2
+        sti
+        push bx
+        push cx
+        push dx
+        push di
+        mov ax,022h
+        call xios_gateway
+        pop di
+        pop dx
+        pop cx
+        pop bx
+        cli
+        mov ss,word ptr .child_stack_segment
+        mov sp,word ptr .child_stack_offset
+        pop ds
+        iret
+
+; UNDECODED 17CFh..1862h: memory and disk BIOS handlers.
+; Preserved original CODE bytes 17CFh..1862h (undecoded/data).
+        db 01eh,051h,0e8h,0d3h,0fdh,0a1h,0ceh,003h,003h,006h,0cch,003h,0b1h,006h,0d3h,0e8h
+        db 059h,01fh,0cfh,0fbh,053h,051h,01eh,056h,057h,055h,052h,006h,0e8h,0b9h,0fdh,080h
+        db 0fch,002h,075h,004h,0b4h,000h,0ebh,018h,080h,0fch,003h,075h,004h,0b4h,001h,0ebh
+        db 00fh,080h,0fch,004h,075h,004h,0b4h,002h,0ebh,006h,0b8h,000h,000h,0f8h,0ebh,049h
+        db 088h,026h,0b7h,005h,088h,016h,0b8h,005h,0a2h,0b9h,005h,088h,036h,0bah,005h,0feh
+        db 0c9h,088h,00eh,0bbh,005h,088h,02eh,0bch,005h,089h,01eh,0bdh,005h,08ch,006h,0bfh
+        db 005h,0bah,0b7h,005h,01eh,08eh,006h,000h,000h,026h,08bh,036h,068h,000h,026h,08bh
+        db 044h,010h,08eh,0c0h,026h,08ch,01eh,02eh,000h,08eh,01eh,000h,000h,0b1h,02fh,0ffh
+        db 01eh,020h,000h,01fh,00ah,0c0h,074h,001h,0f9h,007h,05ah,05dh,05fh,05eh,01fh,059h
+        db 05bh,0cah,002h,000h
+
+;------------------------------------------------------------------------------
+; INT 16h (1863h..18E7h), byte-exact recovered legacy keyboard handler.
+; Select the running console DATA, then use its private service stack. Return
+; AX through the saved frame. RETF 2 discards the caller FLAGS: current ZF from
+; the input word test is the AH=01h result. This is not an enhanced BIOS API:
+; every selector other than 00h/01h falls through to XIOS 33 shift status.
+; Native BDOS 6 returns an input word, not necessarily IBM AH=scan/AL=ASCII.
+; The per-console one-word lookahead is consumed exactly once by AH=00h.
+;------------------------------------------------------------------------------
+bios_keyboard_handler:
+        push ds
+        push bx
+        call select_console_data
+        mov word ptr .child_stack_segment,ss
+        mov word ptr .child_stack_offset,sp
+        mov bx,ds
+        mov ss,bx
+        mov sp,043bh
+        sti
+        push ax
+        push cx
+        push dx
+        push si
+        push es
+        push di
+        db 00ah,0e4h                ; or ah,ah, recovered encoding
+        jz bios_keyboard_read
+        dec ah
+        jz bios_keyboard_poll
+        mov ax,33
+        pushf
+        call xios_gateway
+        popf
+        mov word ptr .bios_frame_ax,ax
+        jmps bios_keyboard_return
+bios_keyboard_poll:
+        mov ax,word ptr .bios_keyboard_pending
+        db 00bh,0c0h                ; or ax,ax, recovered encoding
+        jnz bios_keyboard_result
+        mov word ptr .bios_frame_ax,0
+        mov cl,6
+        mov dl,0ffh                 ; nonblocking BDOS 6 consumes queue word
+        pushf
+        call loader_bdos_call
+        popf
+        db 00bh,0c0h                ; zero means no queued input
+        jz bios_keyboard_return
+        mov word ptr .bios_keyboard_pending,ax
+        jmps bios_keyboard_result
+bios_keyboard_read:
+        mov ax,word ptr .bios_keyboard_pending
+        mov word ptr .bios_keyboard_pending,0
+        db 00bh,0c0h
+        jnz bios_keyboard_result
+        pushf
+        call bios_keyboard_wait
+        popf
+bios_keyboard_result:
+        db 00bh,0c0h                ; supply AH=01h ZF without changing AX
+        mov word ptr .bios_frame_ax,ax
+bios_keyboard_return:
+        pop di
+        pop es
+        pop si
+        pop dx
+        pop cx
+        pop ax
+        cli
+        mov ss,word ptr .child_stack_segment
+        mov sp,word ptr .child_stack_offset
+        pop bx
+        pop ds
+        sti
+        retf 2
+bios_keyboard_wait:
+        push cx
+        mov cl,6
+        mov dl,0fdh                 ; blocking raw BDOS console input
+        call loader_bdos_call
+        pop cx
+        ret
+
+; UNDECODED 18E8h..1DAAh: printer and initial DOS handlers.
+; Preserved original CODE bytes 18E8h..1DAAh (undecoded/data).
+        db 01eh,053h,0e8h,0bah,0fch,08ch,016h,04ah,004h,089h,026h,048h,004h,08ch,0dbh,08eh
+        db 0d3h,0bch,03bh,004h,050h,051h,052h,056h,006h,057h,050h,02eh,08eh,006h,00fh,01ah
+        db 026h,08bh,03eh,068h,000h,026h,08ah,045h,024h,0a2h,022h,005h,0b1h,0a1h,0e8h,03ah
+        db 01dh,00ah,0c0h,058h,074h,007h,0c6h,006h,03ah,004h,001h,0ebh,07bh,00ah,0e4h,075h
+        db 03eh,0b9h,000h,080h,051h,0c6h,006h,01fh,005h,00fh,0bah,01fh,005h,0b1h,032h,050h
+        db 0e8h,018h,01dh,05bh,059h,0f6h,0c4h,080h,075h,00dh,08bh,0c3h,0e2h,0e6h,080h,0cch
+        db 001h,088h,026h,03ah,004h,0ebh,051h,0c6h,006h,01fh,005h,005h,088h,01eh,020h,005h
+        db 0bah,01fh,005h,0b1h,032h,0e8h,0f3h,01ch,0c6h,006h,03ah,004h,010h,0ebh,039h,080h
+        db 0fch,001h,075h,00dh,0b1h,09fh,0e8h,0e2h,01ch,032h,0e4h,088h,026h,03ah,004h,0ebh
+        db 027h,080h,0fch,002h,075h,022h,0c6h,006h,01fh,005h,00fh,0bah,01fh,005h,0b1h,032h
+        db 0e8h,0c8h,01ch,0f6h,0c4h,080h,075h,009h,080h,0cch,010h,088h,026h,03ah,004h,0ebh
+        db 007h,080h,0cch,090h,088h,026h,03ah,004h,05fh,007h,05eh,05ah,059h,058h,0fah,08eh
+        db 016h,04ah,004h,08bh,026h,048h,004h,05bh,01fh,0cfh,01eh,0e8h,0f1h,0fbh,0c6h,006h
+        db 03dh,004h,000h,01fh,055h,08bh,0ech,01eh,006h,056h,057h,051h,033h,0f6h,08eh,0c6h
+        db 0bfh,088h,000h,0beh,00ah,000h,08eh,05eh,004h,057h,0fch,0b9h,006h,000h,0f3h,0a5h
+        db 05fh,026h,08bh,035h,089h,076h,002h,026h,08bh,075h,002h,089h,076h,004h,059h,05fh
+        db 05eh,007h,01fh,05dh,0cfh,000h,000h,000h,055h,08bh,0ech,09ch,058h,087h,046h,006h
+        db 089h,046h,002h,05dh,08ah,0e1h,0eah,000h,000h,000h,000h,000h,000h,000h,000h,000h
+        db 000h,000h,000h,000h,000h,003h,00ch,000h,000h,00ah,0e4h,075h,003h,0e9h,09ah,0ffh
+        db 01eh,01eh,0e8h,08ah,0fbh,08ch,016h,04ah,004h,089h,026h,048h,004h,083h,006h,048h
+        db 004h,002h,08fh,006h,033h,004h,0a3h,029h,004h,08ch,0d8h,08eh,0d0h,0bch,03bh,004h
+        db 0a1h,029h,004h,080h,03eh,03dh,004h,0ffh,075h,010h,080h,0fch,00ch,077h,006h,08bh
+        db 026h,044h,004h,0ebh,005h,0c6h,006h,03dh,004h,000h,08eh,01eh,033h,004h,0fbh,050h
+        db 053h,051h,01eh,052h,056h,006h,057h,055h,08ch,0d3h,08eh,0dbh,0a3h,03bh,004h,08ah
+        db 0dch,032h,0ffh,0d1h,0e3h,083h,0fbh,062h,072h,003h,0bbh,062h,000h,08eh,006h,033h
+        db 004h,02eh,0ffh,097h,0afh,036h,05dh,05fh,007h,05eh,05ah,059h,059h,05bh,058h,0a1h
+        db 03bh,004h,0fah,08eh,016h,04ah,004h,08bh,026h,048h,004h,01fh,0cfh,0c6h,006h,03bh
+        db 004h,000h,0c3h,0e8h,009h,0fbh,0b1h,00dh,0e8h,0c0h,003h,0b1h,00ah,0e8h,0bbh,003h
+        db 0e9h,09ah,0fah,0a3h,046h,004h,057h,0e8h,0a1h,01bh,03ch,0ffh,075h,046h,080h,0fch
+        db 001h,074h,00ch,080h,0fch,002h,075h,03ch,056h,053h,051h,0b4h,000h,0ebh,026h,056h
+        db 053h,051h,006h,02eh,08eh,006h,00fh,01ah,026h,08bh,036h,068h,000h,026h,08eh,044h
+        db 010h,026h,08ah,01eh,067h,000h,007h,0beh,0feh,01ah,0b9h,00ah,000h,02eh,0adh,03ah
+        db 0d8h,074h,002h,0e2h,0f8h,059h,05bh,05eh,08ah,0c4h,032h,0e4h,08bh,0f8h,0a1h,046h
+        db 004h,0e9h,016h,000h,05fh,0c3h,003h,000h,080h,001h,020h,002h,001h,003h,010h,004h
+        db 040h,006h,002h,008h,004h,008h,008h,00ch,009h,00ch,055h,056h,053h,01eh,006h,0e8h
+        db 08dh,0fah,0ffh,036h,03bh,004h,0fah,08ch,016h,042h,004h,089h,026h,044h,004h,08eh
+        db 016h,04ah,004h,08bh,026h,048h,004h,0fbh,08bh,01eh,04ah,004h,089h,01eh,03eh,004h
+        db 08bh,01eh,048h,004h,089h,01eh,040h,004h,05bh,0ffh,036h,02dh,004h,0ffh,036h,033h
+        db 004h,0ffh,036h,029h,004h,0ffh,036h,02bh,004h,0ffh,036h,02fh,004h,0ffh,036h,031h
+        db 004h,0ffh,036h,035h,004h,0ffh,036h,037h,004h,0ffh,036h,039h,004h,0c6h,006h,03dh
+        db 004h,0ffh,0cdh,024h,0e8h,038h,0fah,0c6h,006h,03dh,004h,000h,08fh,006h,039h,004h
+        db 08fh,006h,037h,004h,08fh,006h,035h,004h,08fh,006h,031h,004h,08fh,006h,02fh,004h
+        db 08fh,006h,02bh,004h,08fh,006h,029h,004h,08fh,006h,033h,004h,08bh,01eh,03eh,004h
+        db 089h,01eh,04ah,004h,08bh,01eh,040h,004h,089h,01eh,048h,004h,0fah,08eh,016h,04ah
+        db 004h,08bh,026h,048h,004h,05bh,0ffh,036h,033h,004h,08eh,016h,042h,004h,08bh,026h
+        db 044h,004h,0fbh,08fh,006h,03bh,004h,007h,01fh,05bh,05eh,05dh,03ch,002h,074h,004h
+        db 05fh,0e9h,0e2h,0feh,0cdh,023h,0e9h,040h,0feh,01eh,053h,051h,052h,050h,0e8h,07dh
+        db 000h,08bh,0dfh,032h,0ffh,0d1h,0e3h,0beh,068h,01ch,003h,0f3h,02eh,08bh,014h,01eh
+        db 08ch,0c8h,08eh,0d8h,0e8h,074h,000h,01fh,058h,0f6h,0c4h,080h,074h,006h,0e8h,05dh
+        db 000h,0e9h,028h,000h,050h,0f6h,0c4h,001h,075h,005h,0bah,0e6h,01ch,0ebh,003h,0bah
+        db 0efh,01ch,01eh,08ch,0c8h,08eh,0d8h,0e8h,051h,000h,0bah,0f8h,01ch,0e8h,04bh,000h
+        db 01fh,05ah,080h,0c2h,041h,0b4h,002h,0cdh,021h,0e8h,032h,000h,0bah,000h,01dh,01eh
+        db 08ch,0c8h,08eh,0d8h,0e8h,034h,000h,01fh,0b4h,001h,0cdh,021h,03ch,060h,072h,002h
+        db 02ch,020h,08ah,0d0h,080h,0fah,041h,075h,004h,0b0h,002h,0ebh,00ch,052h,0e8h,00dh
+        db 000h,05ah,080h,0fah,052h,075h,0d5h,0b0h,001h,05ah,059h,05bh,01fh,0cfh,0b2h,00dh
+        db 0b4h,002h,0cdh,021h,0b2h,00ah,0b4h,002h,0cdh,021h,0c3h,0b4h,009h,0cdh,021h,0c3h
+        db 082h,01ch,0a6h,01ch,096h,01ch,0a6h,01ch,0b0h,01ch,0a6h,01ch,0bbh,01ch,0c6h,01ch
+        db 0d5h,01ch,0a6h,01ch,0a6h,01ch,0a6h,01ch,0a6h,01ch,057h,072h,069h,074h,065h,020h
+        db 070h,072h,06fh,074h,065h,063h,074h,020h,065h,072h,072h,06fh,072h,024h,04eh,06fh
+        db 074h,020h,072h,065h,061h,064h,079h,020h,065h,072h,072h,06fh,072h,024h,049h,02fh
+        db 04fh,020h,065h,072h,072h,06fh,072h,024h,044h,061h,074h,061h,020h,065h,072h,072h
+        db 06fh,072h,024h,053h,065h,065h,06bh,020h,065h,072h,072h,06fh,072h,024h,042h,061h
+        db 064h,020h,06dh,065h,064h,069h,061h,020h,074h,079h,070h,065h,024h,053h,065h,063h
+        db 074h,06fh,072h,020h,06eh,06fh,074h,020h,066h,06fh,075h,06eh,064h,024h,020h,072h
+        db 065h,061h,064h,069h,06eh,067h,024h,020h,077h,072h,069h,074h,069h,06eh,067h,024h
+        db 020h,064h,072h,069h,076h,065h,020h,024h,041h,062h,06fh,072h,074h,020h,06fh,072h
+        db 020h,052h,065h,074h,072h,079h,03fh,020h,024h,0fbh,01eh,006h,08ch,0deh,0e8h,08eh
+        db 0f8h,0c6h,006h,0b7h,005h,003h,0a2h,0b8h,005h,089h,00eh,0b9h,005h,089h,016h,0bbh
+        db 005h,089h,01eh,0bdh,005h,089h,036h,0bfh,005h,0bah,0b7h,005h,01eh,08eh,006h,000h
+        db 000h,026h,08bh,036h,068h,000h,026h,08bh,044h,010h,08eh,0c0h,026h,08ch,01eh,02eh
+        db 000h,08eh,01eh,000h,000h,0b1h,02fh,0ffh,01eh,020h,000h,01fh,00ah,0c0h,074h,001h
+        db 0f9h,007h,01fh,0cbh,0fbh,01eh,006h,08ch,0deh,0e8h,043h,0f8h,0c6h,006h,0b7h,005h
+        db 004h,0ebh,0b3h,0cfh,0e8h,095h,000h,0a2h,03bh,004h,0c3h,08ah,0cah,0e9h,03ch,001h
+        db 0c3h,0c3h,0b1h,005h,0e8h,0d4h,018h,0c3h,080h,0fah,0ffh,075h,01ah,0c4h,036h,048h
+        db 004h,026h,080h,04ch,006h,040h,0e8h,008h,003h,074h,008h,026h,080h,064h,006h,0bfh
+        db 0e8h,033h,000h,0a2h,03bh,004h,0c3h,08ah,0cah,0e9h,008h,003h,0e8h,027h,000h,0a2h
+        db 03bh,004h,0c3h
+
+; DOS AH=08h: read without echo, with Ctrl-C checking. The recovered INT 23h
+; instruction runs on PCTMP's private service stack. The experimental reader
+; restores the user frame before invoking a custom handler, as AH=01h does.
+if PCMODE_CHECKED_INPUT
+        call dos_read_checked
+        mov byte ptr .dos_saved_ax,al               ; saved DOS return AL
+        ret
+        nop
+        nop
+        nop
+        nop
+        nop
+        nop
+endif
+if not PCMODE_CHECKED_INPUT
+        call raw_console_input
+        mov byte ptr .dos_saved_ax,al
+        cmp al,3
+        jne dos_read_noecho_done
+        int 23h
+dos_read_noecho_done:
+        ret
+endif
+; Preserved original CODE bytes 1DB8h..1E03h (undecoded/data).
+        db 08bh,0cah,01eh,08eh,01eh,033h,004h,0e8h,033h,001h,01fh,0c3h,0e9h,043h,001h,0e8h
+        db 05dh,000h,0a2h,03bh,004h,0c3h,0a1h,0f0h,002h,00bh,0c0h,074h,01fh,080h,03eh,0f2h
+        db 002h,0ffh,074h,00ah,00ah,0c0h,075h,008h,0c6h,006h,0f2h,002h,0ffh,0c3h,08ah,0c4h
+        db 0c6h,006h,0f2h,002h,000h,0c7h,006h,0f0h,002h,000h,000h,0c3h,0e8h,0e7h,0fah,00ah
+        db 0c0h,075h,008h,0c6h,006h,0f2h,002h,0ffh,0a3h,0f0h,002h,0c3h
+
+;------------------------------------------------------------------------------
+; dos_read_echo (1E04h), used by INT 21h/AH=01h.
+; Read a byte, classify it for echo, then return AL. The recovered original
+; omitted Ctrl-C detection here although its AH=08h handler already checks it.
+; The experimental variant uses the common INT 23h stack-unwind path. BIOS
+; reads and DOS raw input (AH=06h/07h) continue using the original raw reader.
+;------------------------------------------------------------------------------
+dos_read_echo:
+if PCMODE_CHECKED_INPUT
+        call dos_read_checked
+endif
+if not PCMODE_CHECKED_INPUT
+        call raw_console_input                   ; raw console byte reader
+endif
+        call classify_echo_byte                   ; classify echoable character; CF=control
+        jc control_echo_return               ; shared RET, control byte needs no echo
+        push ax
+        db 08ah,0c8h                 ; mov cl,al: original encoding
+        call console_echo_byte                   ; console echo helper
+        pop ax
+        ret
+; Preserved original CODE bytes 1E14h..207Ch (undecoded/data).
+        db 03ch,00dh,074h,00eh,03ch,00ah,074h,00ah,03ch,009h,074h,006h,03ch,008h,074h,002h
+        db 03ch,020h,0c3h,0e8h,06fh,002h,074h,030h,0e8h,09fh,0ffh,03ch,003h,075h,009h,0c7h
+        db 006h,0f0h,002h,000h,000h,0e9h,041h,002h,03ch,013h,075h,01dh,0e8h,08bh,0ffh,03ch
+        db 003h,075h,009h,0c7h,006h,0f0h,002h,000h,000h,0e9h,02dh,002h,03ch,011h,075h,0ech
+        db 033h,0c0h,0c7h,006h,0f0h,002h,000h,000h,0c3h,0a3h,0f0h,002h,0b0h,0ffh,0c3h,0f6h
+        db 006h,0f4h,002h,0ffh,075h,012h,0e8h,0bah,0ffh,0e8h,03ch,002h,0f6h,006h,0f5h,002h
+        db 0ffh,074h,005h,051h,0e8h,09ah,0f7h,059h,08ah,0c1h,03ch,07fh,074h,016h,0feh,006h
+        db 0f3h,002h,03ch,020h,073h,00eh,0feh,00eh,0f3h,002h,074h,008h,03ch,008h,075h,005h
+        db 0feh,00eh,0f3h,002h,0c3h,03ch,00ah,075h,005h,0c6h,006h,0f3h,002h,000h,0c3h,08ah
+        db 0c1h,0e8h,06ch,0ffh,073h,00ah,050h,0b1h,05eh,0e8h,0b3h,0ffh,059h,080h,0c9h,040h
+        db 080h,0f9h,009h,075h,0aah,0b1h,020h,0e8h,0a5h,0ffh,0a0h,0f3h,002h,024h,007h,075h
+        db 0f4h,0c3h,0e8h,005h,000h,0b1h,020h,0e8h,0deh,001h,0b1h,008h,0e9h,0d9h,001h,0b1h
+        db 023h,0e8h,08bh,0ffh,0e8h,010h,000h,0a0h,0f3h,002h,03ah,006h,0f6h,002h,073h,0e1h
+        db 0b1h,020h,0e8h,07ah,0ffh,0ebh,0f0h,0b1h,00dh,0e8h,073h,0ffh,0b1h,00ah,0e9h,06eh
+        db 0ffh,08bh,0f1h,0ach,03ch,024h,074h,0c9h,041h,051h,08ah,0c8h,01eh,016h,01fh,0e8h
+        db 0aeh,0ffh,01fh,059h,0ebh,0ebh,0a0h,0f3h,002h,0a2h,0f6h,002h,08bh,01eh,031h,004h
+        db 026h,08ah,00fh,043h,053h,0b5h,000h,051h,053h,0e8h,0aeh,0feh,05bh,059h,03ch,00dh
+        db 075h,003h,0e9h,042h,001h,03ch,00ah,074h,0f9h,03ch,008h,075h,00fh,00ah,0edh,074h
+        db 0e6h,0feh,0cdh,0a0h,0f3h,002h,0a2h,0f4h,002h,0e9h,0d3h,000h,03ch,07fh,075h,00dh
+        db 00ah,0edh,074h,0d3h,026h,08ah,007h,0feh,0cdh,04bh,0e9h,00eh,001h,03ch,005h,075h
+        db 00ch,051h,053h,0e8h,091h,0ffh,0c6h,006h,0f6h,002h,000h,0ebh,0bch,03ch,010h,074h
+        db 003h,0e9h,085h,000h,051h,053h,033h,0c9h,08bh,0d9h,006h,02eh,08eh,006h,00fh,01ah
+        db 026h,08bh,036h,068h,000h,026h,08ah,05ch,024h,088h,01eh,0f8h,004h,0beh,016h,00ch
+        db 026h,08bh,03ch,04eh,04eh,026h,08bh,034h,08ah,00eh,0f7h,004h,0b8h,02ch,000h,0f6h
+        db 0e1h,003h,0f0h,0b8h,00ah,000h,0f6h,0e3h,003h,0f8h,0f6h,006h,0f5h,002h,0ffh,074h
+        db 01ch,026h,0c7h,005h,000h,000h,026h,0c6h,045h,009h,0ffh,026h,0c6h,044h,008h,0ffh
+        db 026h,081h,064h,00eh,0ffh,0fdh,0c6h,006h,0f5h,002h,000h,0ebh,026h,026h,083h,03dh
+        db 000h,074h,008h,0b9h,00dh,007h,0e8h,028h,0ffh,0ebh,018h,026h,0c7h,005h,0ffh,0ffh
+        db 026h,088h,04dh,009h,026h,088h,05ch,008h,026h,081h,04ch,00eh,000h,002h,0c6h,006h
+        db 0f5h,002h,0ffh,007h,05bh,059h,0e9h,02eh,0ffh,03ch,018h,075h,013h,05bh,0a0h,0f6h
+        db 002h,03ah,006h,0f3h,002h,073h,011h,0feh,00eh,0f3h,002h,0e8h,0c4h,0feh,0ebh,0eeh
+        db 03ch,015h,075h,007h,0e8h,0c8h,0feh,05bh,0e9h,0fbh,0feh,03ch,012h,075h,037h,051h
+        db 0e8h,0bch,0feh,059h,05bh,053h,051h,00ah,0edh,074h,010h,043h,026h,08ah,00fh,0feh
+        db 0cdh,051h,053h,0e8h,079h,0feh,05bh,059h,0e9h,0ech,0ffh,053h,0a0h,0f4h,002h,00ah
+        db 0c0h,074h,010h,02ah,006h,0f3h,002h,0a2h,0f4h,002h,0e8h,085h,0feh,0feh,00eh,0f4h
+        db 002h,075h,0f7h,0e9h,015h,0ffh,03ch,003h,075h,007h,08ch,0d8h,08eh,0c0h,0e9h,028h
+        db 000h,03ah,0e9h,073h,00fh,043h,026h,088h,007h,0feh,0c5h,051h,053h,08ah,0c8h,0e8h
+        db 03dh,0feh,05bh,059h,0e9h,0b0h,0feh,043h,026h,0c6h,007h,00dh,05bh,026h,088h,02fh
+        db 08ch,0d8h,08eh,0c0h,0b1h,00dh,0e9h,0e6h,0fdh
+
+; Ctrl-C unwind (207Dh). Discard the private DOS service stack and restore
+; the saved application register frame, SS:SP and DS before calling INT 23h.
+; The original terminates even when a custom handler returns. The experimental
+; variant retries INT 21h with the restored application registers and untouched
+; original interrupt frame, matching the DOS 1.x continuation convention.
+        mov sp,429h                 ; saved INT 21h register frame in PCTMP DATA
+        pop bp
+        pop di
+        pop es
+        pop si
+        pop dx
+        pop cx
+        pop cx                      ; discard saved DS slot; restored below
+        pop bx
+        pop ax
+        cli
+        mov ss,word ptr .child_stack_segment
+        mov sp,word ptr .child_stack_offset
+        pop ds
+        sti
+        int 23h
+if PCMODE_CHECKED_INPUT
+        jmp dos_dispatch_handler  ; retry request if the handler returns
+endif
+if not PCMODE_CHECKED_INPUT
+        jmp dos_return_handler    ; original unconditional termination
+endif
+
+; Preserved original CODE bytes 2099h..3712h (undecoded/data).
+        db 0a1h,0f0h,002h,00bh,0c0h,075h,00bh,051h,0b2h,0feh,0b1h,006h,0e8h,0abh,015h,059h
+        db 00ah,0c0h,0c3h,051h,08ah,0d1h,0b1h,006h,0e8h,09fh,015h,059h,0c3h,0c6h,006h,0bah
+        db 003h,000h,050h,0b1h,006h,0b2h,0ffh,0e8h,090h,015h,00ah,0c0h,075h,0f5h,058h,03ch
+        db 001h,074h,016h,03ch,006h,074h,012h,03ch,007h,074h,00eh,03ch,008h,074h,00ah,03ch
+        db 00ah,074h,006h,0c6h,006h,03bh,004h,000h,0c3h,08ah,0e0h,044h,044h,0e9h,07bh,0f9h
+        db 0b1h,030h,0b8h,003h,000h,0e8h,0bah,0f9h,0b1h,00dh,0e8h,05dh,015h,0bah,080h,000h
+        db 0e9h,0d6h,007h,0b1h,00eh,0b4h,004h,08ah,0c2h,0e8h,0a6h,0f9h,088h,016h,0a8h,003h
+        db 088h,016h,0a9h,003h,02eh,08eh,006h,00fh,01ah,0beh,018h,00ch,0b9h,010h,000h,032h
+        db 0dbh,026h,0adh,00bh,0c0h,074h,002h,0feh,0c3h,0e2h,0f6h,088h,01eh,03bh,004h,0c3h
+        db 032h,0c0h,08bh,0feh,026h,080h,07ch,001h,03fh,074h,03ch,046h,0bfh,03dh,037h,057h
+        db 056h,0b9h,008h,000h,026h,0ach,024h,07fh,03ch,061h,072h,006h,03ch,07ah,077h,002h
+        db 024h,05fh,02eh,038h,005h,075h,003h,047h,0e2h,0eah,05eh,00bh,0c9h,074h,011h,05fh
+        db 083h,0c7h,009h,081h,0ffh,073h,037h,075h,0d6h,04eh,08bh,0feh,032h,0c0h,0ebh,007h
+        db 02eh,08ah,005h,05fh,04eh,08bh,0feh,0a2h,0f7h,002h,00ah,0c0h,0c3h,0c6h,006h,03bh
+        db 004h,000h,0e8h,0e7h,012h,083h,0c7h,00ch,033h,0c0h,0b9h,015h,000h,0f3h,0aah,026h
+        db 0c7h,044h,00eh,080h,000h,0e8h,0f0h,001h,0e8h,095h,0ffh,074h,010h,026h,088h,045h
+        db 018h,0e8h,093h,001h,026h,089h,055h,014h,026h,089h,04dh,016h,0c3h,080h,03eh,03ah
+        db 004h,016h,075h,015h,0ffh,036h,039h,004h,0ffh,036h,03bh,004h,0e8h,015h,005h,08fh
+        db 006h,03bh,004h,08fh,006h,039h,004h,0ebh,034h,0e8h,02ch,013h,075h,02fh,08bh,01eh
+        db 0edh,004h,03bh,01eh,0b4h,003h,075h,00ah,0c6h,006h,0b6h,003h,000h,0c6h,006h,0b3h
+        db 003h,000h,08bh,0d3h,053h,0b1h,010h,08ah,007h,0feh,0c8h,0b4h,005h,0e8h,0c2h,0f8h
+        db 05bh,0c7h,047h,00ch,000h,000h,0c7h,047h,00eh,000h,000h,0ebh,008h,0e8h,0c6h,012h
+        db 074h,003h,0e9h,072h,000h,08bh,01eh,0edh,004h,08ah,00eh,03ah,004h,0c6h,047h,020h
+        db 000h,0b4h,005h,080h,0f9h,016h,074h,006h,0c6h,047h,020h,0ffh,0b4h,004h,08bh,0d3h
+        db 08ah,007h,0feh,0c8h,0e8h,08bh,0f8h,08bh,0dah,03ch,0ffh,074h,047h,08bh,036h,0edh
+        db 004h,08bh,0deh,0e8h,064h,012h,074h,00bh,0f6h,044h,010h,002h,074h,005h,0e8h,003h
+        db 002h,0ebh,031h,057h,006h,08ch,0d8h,08eh,0c0h,0b9h,006h,000h,0bfh,0aah,006h,0f3h
+        db 0a5h,007h,05fh,08bh,0f2h,056h,0e8h,07ah,000h,026h,089h,055h,014h,026h,089h,04dh
+        db 016h,05eh,08bh,0d6h,0e8h,016h,000h,0c6h,044h,020h,000h,026h,089h,045h,010h,026h
+        db 089h,055h,012h,0c3h,0e8h,0c6h,012h,0c6h,006h,03bh,004h,0ffh,0c3h,08bh,0deh,0e8h
+        db 018h,012h,075h,045h,0b1h,023h,0bah,0aah,006h,0a0h,0aah,006h,0feh,0c8h,0b4h,004h
+        db 0e8h,01fh,0f8h,03ch,0ffh,074h,039h,056h,08bh,0f2h,08bh,044h,021h,08ah,054h,023h
+        db 032h,0f6h,0e8h,0cah,012h,05eh,08ah,04ch,020h,080h,03eh,03ah,004h,011h,074h,007h
+        db 080h,03eh,03ah,004h,012h,075h,003h,08ah,04ch,00dh,00ah,0c9h,074h,00ah,0bbh,080h
+        db 000h,02ah,0d9h,02bh,0c3h,083h,0dah,000h,0c3h,08bh,044h,01ch,08bh,054h,01eh,0c3h
+        db 0b0h,0ffh,0c3h,08bh,0deh,0e8h,0c2h,011h,075h,062h,080h,03eh,03ah,004h,012h,074h
+        db 012h,08ah,016h,0aah,006h,0feh,0cah,0b1h,065h,08ah,0c2h,0b4h,004h,0e8h,0c2h,0f7h
+        db 0a2h,0f6h,004h,0b1h,066h,0bah,0aah,006h,08bh,0f2h,0a0h,0aah,006h,0feh,0c8h,0b4h
+        db 004h,0e8h,0aeh,0f7h,00ah,0c0h,075h,02fh,0f6h,006h,0f6h,004h,020h,074h,008h,08bh
+        db 044h,01ch,08bh,05ch,01eh,0ebh,00dh,0f6h,006h,0f6h,004h,010h,074h,019h,08bh,044h
+        db 018h,08bh,05ch,01ah,050h,00bh,0c3h,058h,074h,00dh,053h,0e8h,019h,000h,08bh,0d0h
+        db 058h,0e8h,033h,000h,08bh,0c8h,0c3h,033h,0c9h,08bh,0d1h,0c3h,08bh,044h,018h,08bh
+        db 0d0h,08bh,044h,016h,08bh,0c8h,0c3h,056h,057h,0e8h,0abh,00fh,05fh,081h,0e9h,0bch
+        db 007h,033h,0c0h,08bh,0d8h,08ah,0e1h,0d1h,0e0h,08ah,0deh,0b1h,005h,0d3h,0e3h,00bh
+        db 0c3h,032h,0f6h,00bh,0c2h,05eh,0c3h,052h,050h,0e8h,0cdh,010h,08ah,0e0h,032h,0c0h
+        db 0d0h,0e4h,0d0h,0e4h,0d0h,0e4h,08bh,0d0h,058h,08ah,0c4h,0e8h,0bbh,010h,032h,0e4h
+        db 0b1h,005h,0d3h,0e0h,00bh,0c2h,05ah,0c3h,026h,080h,03ch,000h,075h,010h,0b1h,019h
+        db 0e8h,0c7h,012h,0a2h,0a8h,003h,0a2h,0a9h,003h,0feh,0c0h,026h,088h,004h,0c3h,0e8h
+        db 0cah,010h,0c6h,006h,03bh,004h,000h,0e8h,0feh,007h,074h,003h,0e9h,08ah,000h,0e8h
+        db 046h,011h,074h,003h,0e9h,082h,000h,08bh,01eh,0edh,004h,03bh,01eh,0b4h,003h,075h
+        db 009h,053h,057h,006h,0e8h,047h,006h,007h,05fh,05bh,0f6h,047h,00eh,040h,074h,06ah
+        db 026h,08bh,045h,010h,026h,08bh,055h,012h,0e8h,0a4h,011h,00ah,0edh,074h,028h,089h
+        db 047h,021h,088h,057h,023h,051h,053h,0e8h,09bh,005h,05bh,059h,00ah,0c0h,075h,041h
+        db 0c6h,006h,0b3h,003h,0ffh,08ah,0c5h,032h,0e4h,08bh,0f8h,0c6h,085h,055h,004h,01ah
+        db 047h,081h,0ffh,080h,000h,075h,0f4h,03bh,01eh,0b4h,003h,075h,007h,053h,051h,0e8h
+        db 0fch,005h,059h,05bh,051h,0e8h,02ch,000h,059h,03ch,0ffh,074h,014h,080h,04fh,006h
+        db 080h,088h,06fh,020h,0b1h,01eh,08ah,007h,0feh,0c8h,0b4h,005h,0e8h,083h,0f6h,0ebh
+        db 005h,0c6h,006h,03bh,004h,0ffh,0e9h,004h,011h,0c3h,0e8h,007h,000h,03ch,0ffh,074h
+        db 0f0h,0e9h,0f9h,010h,08bh,0d3h,053h,0b1h,010h,08ah,007h,0feh,0c8h,0b4h,005h,0e8h
+        db 060h,0f6h,05bh,0c3h,0c6h,006h,03bh,004h,000h,0e8h,010h,010h,0e8h,0a6h,000h,075h
+        db 067h,080h,03eh,03ah,004h,012h,075h,003h,0e8h,0bfh,001h,0beh,0aah,006h,0e8h,0bfh
+        db 0fch,075h,039h,0e8h,0c1h,000h,075h,050h,047h,056h,046h,0b9h,006h,000h,0f3h,0a5h
+        db 0e8h,051h,000h,0e8h,0d9h,001h,0e8h,009h,002h,05eh,056h,0e8h,045h,0feh,026h,089h
+        db 04dh,017h,026h,089h,055h,019h,0c6h,006h,0cah,006h,000h,05eh,0e8h,0deh,0fdh,026h
+        db 089h,045h,01dh,026h,089h,055h,01fh,0e8h,00bh,002h,0ebh,021h,080h,03eh,03ah,004h
+        db 011h,075h,015h,0c6h,006h,0beh,003h,000h,0e8h,019h,000h,0e8h,079h,0feh,026h,089h
+        db 04dh,017h,026h,089h,055h,019h,0ebh,005h,0c6h,006h,03bh,004h,0ffh,0c4h,016h,0c4h
+        db 003h,0e9h,00dh,004h,0c4h,03eh,0c4h,003h,0beh,0aah,006h,080h,03eh,0bch,003h,0ffh
+        db 075h,00ch,0b8h,0ffh,000h,0abh,033h,0c0h,0abh,0abh,0a0h,0bdh,003h,0aah,057h,0b9h
+        db 00ch,000h,0ach,024h,07fh,0aah,0e2h,0fah,0a0h,0beh,003h,0aah,0b9h,013h,000h,033h
+        db 0c0h,0f3h,0aah,05fh,0c3h,08ch,0c0h,08ch,0dbh,08eh,0d8h,08eh,0c3h,0bfh,0aah,006h
+        db 0e8h,09ah,00fh,08ch,0c0h,08eh,0d8h,0beh,0aah,006h,0e8h,06bh,0feh,0e8h,0eeh,004h
+        db 0c6h,006h,0b6h,003h,000h,0a0h,0b7h,003h,0a8h,0ffh,075h,008h,0bah,055h,004h,0e8h
+        db 0afh,003h,032h,0c0h,00ah,0c0h,0c3h,08bh,0feh,0f6h,006h,0bdh,003h,008h,074h,003h
+        db 0e9h,07dh,000h,08ah,00eh,03ah,004h,0e8h,0beh,000h,03ch,0ffh,075h,003h,0e9h,06ch
+        db 000h,0c6h,006h,0beh,003h,000h,0f6h,044h,009h,080h,074h,005h,080h,00eh,0beh,003h
+        db 001h,0f6h,044h,00ah,080h,074h,005h,080h,00eh,0beh,003h,004h,0f6h,044h,00bh,080h
+        db 075h,005h,080h,00eh,0beh,003h,020h,08bh,044h,010h,03ah,0e0h,075h,016h,0a8h,080h
+        db 074h,012h,0a8h,020h,074h,005h,080h,00eh,0beh,003h,002h,0a8h,040h,074h,005h,080h
+        db 00eh,0beh,003h,010h,0a0h,0bdh,003h,024h,016h,03ch,000h,074h,012h,08ah,026h,0beh
+        db 003h,080h,0e4h,016h,080h,0fch,000h,074h,012h,03ah,0e0h,074h,00eh,0ebh,007h,0f6h
+        db 006h,0beh,003h,01eh,074h,005h,0b1h,012h,0e9h,08ch,0ffh,033h,0c0h,00ah,0c0h,0c3h
+        db 0b1h,00eh,08ah,015h,0feh,0cah,088h,016h,0a9h,003h,0e8h,08dh,010h,0c6h,005h,03fh
+        db 0b1h,011h,0e8h,033h,000h,03ch,0ffh,074h,023h,0b1h,012h,080h,03ch,020h,075h,0f2h
+        db 006h,0c4h,01eh,0c8h,003h,026h,08ah,017h,007h,00ah,0d2h,075h,006h,08ah,016h,0a8h
+        db 003h,0feh,0c2h,088h,015h,0c6h,006h,0beh,003h,008h,033h,0c0h,0b1h,00eh,08ah,016h
+        db 0a8h,003h,0e8h,069h,010h,00ah,0c0h,0c3h,08bh,0d7h,08ah,005h,0feh,0c8h,03ch,03eh
+        db 075h,003h,0a0h,0a9h,003h,0b4h,004h,0e8h,098h,0f4h,03ch,0ffh,074h,00bh,032h,0e4h
+        db 0b1h,005h,0d3h,0e0h,0beh,055h,004h,003h,0f0h,0c3h,01eh,006h,056h,057h,02eh,08eh
+        db 006h,00fh,01ah,026h,08bh,03eh,068h,000h,026h,08bh,07dh,010h,08eh,0c7h,0bfh,000h
+        db 000h,0c5h,036h,0c8h,003h,08ah,044h,018h,026h,088h,045h,007h,08bh,044h,019h,026h
+        db 089h,045h,00ch,08bh,044h,01bh,026h,089h,045h,00eh,05fh,05eh,007h,01fh,0c3h,01eh
+        db 006h,056h,057h,0c4h,03eh,0c8h,003h,02eh,08eh,01eh,00fh,01ah,08bh,036h,068h,000h
+        db 08bh,074h,010h,08eh,0deh,0beh,000h,000h,08ah,044h,007h,026h,088h,045h,018h,08bh
+        db 044h,00ch,026h,089h,045h,019h,08bh,044h,00eh,026h,089h,045h,01bh,05fh,05eh,007h
+        db 01fh,0c3h,057h,01eh,006h,08ch,0d8h,08eh,0c0h,08eh,01eh,000h,000h,08bh,01eh,068h
+        db 000h,08bh,047h,010h,08eh,0d8h,0b9h,00eh,000h,0bfh,0c1h,005h,0beh,002h,000h,0f3h
+        db 0a5h,007h,01fh,05fh,0c3h,057h,006h,08eh,006h,000h,000h,026h,08bh,01eh,068h,000h
+        db 026h,08bh,047h,010h,08eh,0c0h,0b9h,00eh,000h,0beh,0c1h,005h,0bfh,002h,000h,0f3h
+        db 0a5h,007h,05fh,0c3h,0e8h,095h,00dh,0e8h,056h,0fah,074h,006h,0c6h,006h,03bh,004h
+        db 0ffh,0c3h,0c6h,006h,03bh,004h,0ffh,0e8h,01bh,0feh,0b1h,011h,0bfh,0aah,006h,0e8h
+        db 016h,0ffh,03ch,0ffh,074h,04dh,0f6h,044h,009h,080h,075h,043h,056h,0e8h,092h,0ffh
+        db 05eh,0a0h,0aah,006h,088h,004h,0b1h,013h,08bh,0d6h,08ah,004h,0feh,0c8h,0b4h,005h
+        db 0e8h,09fh,0f3h,00ah,0c0h,075h,02ch,0ffh,036h,0c8h,003h,0ffh,036h,0cah,003h,089h
+        db 036h,0c8h,003h,08ch,01eh,0cah,003h,0e8h,0ceh,00dh,075h,003h,0e8h,00eh,00eh,08fh
+        db 006h,0cah,003h,08fh,006h,0c8h,003h,0e8h,07bh,0ffh,0c6h,006h,03bh,004h,000h,0b1h
+        db 012h,0ebh,0a9h,0c4h,016h,0c4h,003h,0e9h,097h,001h,0e8h,01fh,00dh,026h,0ffh,074h
+        db 021h,026h,083h,07ch,00eh,040h,072h,006h,026h,0ffh,074h,022h,0ebh,004h,026h,0ffh
+        db 074h,023h,0e8h,0beh,003h,0e8h,005h,002h,0f6h,006h,03bh,004h,0ffh,075h,019h,0c4h
+        db 036h,0c8h,003h,026h,080h,044h,020h,001h,026h,080h,07ch,020h,080h,072h,009h,026h
+        db 0ffh,044h,00ch,026h,0c6h,044h,020h,000h,026h,083h,07ch,00eh,040h,072h,006h,026h
+        db 08fh,044h,022h,0ebh,004h,026h,08fh,044h,023h,026h,08fh,044h,021h,0c3h,0e8h,0cbh
+        db 00ch,026h,0ffh,074h,021h,026h,083h,07ch,00eh,040h,072h,006h,026h,0ffh,074h,022h
+        db 0ebh,004h,026h,0ffh,074h,023h,0e8h,06ah,003h,0e8h,0abh,002h,0ebh,0aah,0e8h,0abh
+        db 00ch,083h,0c6h,010h,0e8h,069h,0f9h,00ah,0c0h,074h,006h,0c6h,006h,03bh,004h,0ffh
+        db 0c3h,0e8h,03ah,002h,0c6h,006h,0b6h,003h,000h,0f6h,006h,0b7h,003h,0ffh,074h,003h
+        db 0e9h,0b7h,000h,08ch,0d8h,08eh,0c0h,0bah,055h,004h,0e8h,0f4h,000h,0c6h,006h,03bh
+        db 004h,0ffh,0bfh,0aah,006h,0c5h,036h,0c8h,003h,0e8h,0b1h,00ch,006h,01fh,0beh,0aah
+        db 006h,0e8h,084h,0fbh,08bh,0d6h,0b1h,011h,08ah,004h,0feh,0c8h,0b4h,004h,0e8h,0a1h
+        db 0f2h,03ch,0ffh,075h,003h,0e9h,03bh,00eh,025h,003h,000h,0b1h,005h,0d3h,0e0h,005h
+        db 055h,004h,08bh,0f0h,0bfh,020h,002h,0b9h,006h,000h,0f3h,0a5h,0a0h,0aah,006h,0a2h
+        db 020h,002h,0ffh,036h,0cah,003h,0ffh,036h,0c8h,003h,006h,01eh,007h,08ch,01eh,0cah
+        db 003h,0beh,020h,002h,08bh,0feh,089h,036h,0c8h,003h,0e8h,055h,0fbh,007h,08fh,006h
+        db 0c8h,003h,08fh,006h,0cah,003h,0c5h,036h,031h,004h,083h,0c6h,011h,0bfh,0abh,006h
+        db 0bbh,021h,002h,0b9h,00bh,000h,0ach,024h,07fh,03ch,061h,072h,006h,03ch,07ah,077h
+        db 002h,024h,05fh,03ch,03fh,075h,003h,026h,08ah,007h,0aah,043h,0e2h,0e8h,08ch,0c0h
+        db 08eh,0d8h,0bah,0aah,006h,0b1h,011h,052h,053h,08bh,0dah,08ah,007h,0feh,0c8h,0b4h
+        db 004h,0e8h,01eh,0f2h,05bh,05ah,03ch,0ffh,074h,008h,0c6h,006h,03bh,004h,0ffh,0e9h
+        db 0b1h,00dh,0beh,0aah,006h,0bfh,030h,002h,0b9h,006h,000h,0f3h,0a5h,0bah,020h,002h
+        db 0b1h,017h,052h,053h,08bh,0dah,08ah,007h,0feh,0c8h,0b4h,005h,0e8h,0f3h,0f1h,05bh
+        db 05ah,03ch,0ffh,075h,003h,0e9h,08bh,00dh,0c6h,006h,03bh,004h,000h,0e9h,022h,0ffh
+        db 0b1h,019h,0e8h,085h,00dh,0a2h,03bh,004h,0c3h,089h,016h,0c4h,003h,08ch,006h,0c6h
+        db 003h,0e8h,00ch,000h,08ch,0c2h,089h,016h,0c2h,003h,0b1h,033h,0e8h,06bh,00dh,0c3h
+        db 089h,016h,0c0h,003h,0b1h,01ah,0e8h,061h,00dh,0c3h,02eh,08eh,006h,00fh,01ah,08ah
+        db 01eh,0a8h,003h,032h,0ffh,0d1h,0e3h,026h,08bh,09fh,018h,00ch,026h,08bh,077h,008h
+        db 026h,08bh,047h,012h,033h,0c9h,08bh,0d1h,01eh,08bh,03eh,048h,004h,08eh,01eh,04ah
+        db 004h,089h,005h,01fh,089h,00eh,037h,004h,0b8h,080h,000h,026h,083h,03ch,0ffh,075h
+        db 01ah,026h,08ah,04ch,01bh,0d3h,0e0h,0a3h,035h,004h,08bh,0d8h,026h,08bh,044h,008h
+        db 0f7h,0f3h,0a2h,03bh,004h,026h,08bh,044h,006h,0ebh,01eh,026h,08ah,04ch,00fh,0d3h
+        db 0e0h,0a3h,035h,004h,08bh,0d8h,0b8h,080h,000h,026h,08ah,04ch,002h,0d3h,0e0h,0f7h
+        db 0f3h,0a2h,03bh,004h,026h,08bh,044h,005h,040h,0a3h,031h,004h,0c3h,0c6h,006h,0adh
+        db 003h,000h,0ffh,036h,035h,004h,0b9h,001h,000h,089h,00eh,035h,004h,0e8h,03ah,002h
+        db 08fh,006h,035h,004h,0c3h,080h,03eh,0b6h,003h,0ffh,075h,010h,0e8h,062h,000h,075h
+        db 001h,0c3h,0e8h,079h,000h,0a0h,0b7h,003h,00ah,0c0h,075h,038h,0c6h,006h,0b6h,003h
+        db 000h,0c4h,016h,0e3h,004h,0e8h,039h,0ffh,08bh,036h,0edh,004h,08bh,0d6h,089h,016h
+        db 0b4h,003h,0ffh,074h,021h,0ffh,074h,022h,0b1h,021h,08ah,004h,0feh,0c8h,0b4h,003h
+        db 0e8h,0efh,0f0h,08fh,044h,022h,08fh,044h,021h,0c4h,05ch,020h,088h,03eh,0a0h,003h
+        db 08ch,006h,0a1h,003h,0a2h,0b7h,003h,00ah,0c0h,074h,001h,0c3h,0c6h,006h,0b6h,003h
+        db 0ffh,050h,0b2h,0ffh,0e8h,005h,000h,0a2h,0b2h,003h,058h,0c3h,0b1h,020h,0e9h,069h
+        db 00ch,08bh,036h,0edh,004h,03bh,036h,0b4h,003h,074h,001h,0c3h,08bh,044h,021h,03bh
+        db 006h,0a0h,003h,074h,001h,0c3h,08ah,044h,023h,03ah,006h,0a2h,003h,0c3h,0c6h,006h
+        db 0b7h,003h,000h,080h,03eh,0b3h,003h,0ffh,074h,001h,0c3h,0b2h,0ffh,0e8h,0cch,0ffh
+        db 050h,08ah,016h,0b2h,003h,0e8h,0c4h,0ffh,0c4h,016h,0e3h,004h,0e8h,0b2h,0feh,08bh
+        db 016h,0b4h,003h,08bh,0f2h,0ffh,074h,021h,0ffh,074h,022h,0a1h,0a0h,003h,089h,044h
+        db 021h,0a0h,0a2h,003h,088h,044h,023h,0b1h,022h,08ah,004h,0feh,0c8h,0b4h,007h,0e8h
+        db 060h,0f0h,08fh,044h,022h,08fh,044h,021h,05ah,050h,0e8h,08fh,0ffh,058h,0c6h,006h
+        db 0b3h,003h,000h,0a2h,0b7h,003h,0c3h,0c6h,006h,0adh,003h,000h,0ffh,036h,035h,004h
+        db 0b9h,001h,000h,089h,00eh,035h,004h,0e8h,0a1h,004h,08fh,006h,035h,004h,0c3h,0c6h
+        db 006h,03bh,004h,000h,0e8h,0e5h,009h,0e8h,0a6h,0f6h,074h,009h,026h,089h,044h,021h
+        db 026h,089h,044h,023h,0c3h,0c6h,006h,03bh,004h,0ffh,0e8h,068h,0fah,0b1h,011h,0bfh
+        db 0aah,006h,0e8h,063h,0fbh,03ch,0ffh,074h,073h,033h,0dbh,08ah,05ch,00dh,053h,0bah
+        db 0aah,006h,08bh,0f2h,0b1h,023h,08ah,004h,0feh,0c8h,0b4h,004h,0e8h,0f3h,0efh,05bh
+        db 03ch,0ffh,074h,058h,08bh,044h,021h,08ah,054h,023h,032h,0f6h,0e8h,0a0h,00ah,00ah
+        db 0dbh,074h,011h,050h,00bh,0c2h,058h,074h,00bh,02dh,080h,000h,083h,0dah,000h,003h
+        db 0c3h,083h,0d2h,000h,0c4h,036h,0c8h,003h,026h,08bh,04ch,00eh,00bh,0c9h,075h,003h
+        db 0b9h,080h,000h,08bh,0dah,0e8h,09dh,00ah,00bh,0c9h,074h,006h,005h,001h,000h,083h
+        db 0d2h,000h,0c6h,006h,03bh,004h,000h,026h,089h,044h,021h,026h,083h,07ch,00eh,040h
+        db 072h,006h,026h,088h,054h,023h,0ebh,004h,026h,089h,054h,023h,0c4h,016h,0c4h,003h
+        db 0e9h,0beh,0fdh,0e8h,046h,009h,0e8h,07fh,000h,074h,001h,0c3h,08bh,0f2h,026h,08bh
+        db 044h,00ch,033h,0d2h,0e8h,038h,00ah,026h,08ah,04ch,020h,032h,0edh,003h,0c1h,083h
+        db 0d2h,000h,026h,089h,044h,021h,026h,083h,07ch,00eh,040h,072h,005h,026h,088h,054h
+        db 023h,0c3h,026h,089h,054h,023h,0c3h,032h,0e4h,0d1h,0e0h,0d1h,0e0h,08bh,0f8h,033h
+        db 0c0h,08eh,0c0h,01eh,0c5h,006h,031h,004h,09ch,0fah,0fch,0abh,08ch,0d8h,0abh,09dh
+        db 01fh,0c3h,08eh,0c2h,033h,0ffh,01eh,08eh,01eh,0d3h,003h,033h,0f6h,0fch,0b9h,080h
+        db 000h,0f3h,0a5h,033h,0c0h,08eh,0d8h,0beh,088h,000h,0bfh,00ah,000h,0b9h,004h,000h
+        db 0f3h,0a5h,01fh,02bh,016h,0d3h,003h,0a1h,0d5h,003h,02bh,0c2h,0e8h,0bah,0e9h,0bfh
+        db 006h,000h,0abh,0e8h,082h,0e9h,0abh,0c3h,026h,08ah,044h,018h,03ch,0fbh,077h,002h
+        db 032h,0c0h,00ah,0c0h,0c3h,0c6h,006h,0adh,003h,0ffh,089h,00eh,09eh,003h,0c6h,006h
+        db 03bh,004h,002h,00bh,0c9h,075h,003h,0e9h,0efh,000h,051h,0e8h,09eh,008h,059h,0c6h
+        db 006h,03bh,004h,000h,026h,0f7h,044h,00eh,0ffh,0ffh,075h,006h,026h,0c7h,044h,00eh
+        db 080h,000h,0e8h,0c3h,0ffh,075h,003h,0e9h,0abh,000h,0c6h,006h,03bh,004h,001h,03ch
+        db 0ffh,074h,003h,0e9h,09eh,000h,0f6h,006h,026h,005h,0ffh,075h,043h,0bah,027h,005h
+        db 08bh,0fah,056h,006h,01eh,007h,0ffh,036h,031h,004h,089h,016h,031h,004h,0e8h,0bah
+        db 0f1h,08fh,006h,031h,004h,0b2h,00ah,0e8h,060h,0f1h,007h,05eh,0c6h,006h,026h,005h
+        db 0ffh,033h,0dbh,08ah,01eh,028h,005h,0feh,006h,028h,005h,0feh,006h,028h,005h,0c6h
+        db 087h,029h,005h,00dh,043h,0c6h,087h,029h,005h,00ah,0c7h,006h,024h,005h,000h,000h
+        db 0c6h,006h,03bh,004h,000h,033h,0c0h,0a0h,028h,005h,02bh,006h,024h,005h,026h,08bh
+        db 04ch,00eh,08bh,0d1h,03bh,0c1h,073h,007h,08bh,0c8h,0c6h,006h,03bh,004h,003h,0c4h
+        db 03eh,0c4h,003h,0beh,029h,005h,003h,036h,024h,005h,051h,0f3h,0a4h,059h,02bh,0d1h
+        db 074h,008h,051h,08bh,0cah,033h,0c0h,0f3h,0aah,059h,001h,00eh,024h,005h,033h,0c0h
+        db 0a0h,028h,005h,039h,006h,024h,005h,072h,00bh,0c7h,006h,024h,005h,000h,000h,0c6h
+        db 006h,026h,005h,000h,0c3h,0e8h,060h,008h,03ch,0ffh,075h,007h,0e8h,0b7h,004h,00ah
+        db 0c0h,075h,00ah,0e8h,019h,009h,0e8h,0e5h,000h,00ah,0c0h,074h,053h,03ch,002h,075h
+        db 009h,0e8h,06eh,000h,0c6h,006h,03bh,004h,002h,0c3h,0ffh,036h,035h,004h,0e8h,061h
+        db 000h,058h,02bh,006h,035h,004h,0c6h,006h,03bh,004h,000h,075h,001h,0c3h,0c6h,006h
+        db 03bh,004h,001h,080h,03eh,0aah,003h,000h,075h,001h,0c3h,0c6h,006h,03bh,004h,003h
+        db 0c4h,03eh,0c4h,003h,003h,03eh,0abh,003h,01eh,0c5h,036h,0c8h,003h,08bh,04ch,00eh
+        db 01fh,0a1h,0abh,003h,033h,0d2h,0f7h,0f1h,02bh,0cah,032h,0c0h,0fch,0f3h,0aah,0c3h
+        db 0a1h,0b0h,003h,048h,078h,013h,074h,00ah,0a3h,0aeh,003h,0e8h,0e1h,000h,00ah,0c0h
+        db 075h,09bh,0e8h,064h,001h,00ah,0c0h,075h,094h,0e8h,006h,000h,0c6h,006h,03bh,004h
+        db 000h,0c3h,0a1h,0a4h,003h,02bh,006h,0c4h,003h,0a3h,0abh,003h,033h,0d2h,0c4h,036h
+        db 0c8h,003h,026h,08bh,05ch,00eh,0f7h,0f3h,00ah,0d6h,074h,001h,040h,088h,016h,0aah
+        db 003h,0a3h,035h,004h,0f6h,006h,0adh,003h,0ffh,075h,002h,0ebh,020h,0a1h,035h,004h
+        db 0c4h,036h,0c8h,003h,083h,0fbh,040h,072h,00bh,026h,001h,044h,021h,026h,080h,054h
+        db 023h,000h,0ebh,009h,026h,001h,044h,021h,026h,083h,054h,023h,000h,0c4h,036h,0c8h
+        db 003h,026h,08bh,044h,021h,026h,08bh,054h,023h,026h,083h,07ch,00eh,040h,072h,002h
+        db 032h,0f6h,0e8h,0fah,007h,026h,089h,044h,00ch,026h,088h,06ch,020h,0c3h,0c4h,006h
+        db 089h,003h,08bh,036h,0edh,004h,089h,044h,021h,08ch,0c0h,088h,044h,023h,0e8h,0e4h
+        db 0fbh,00ah,0c0h,074h,003h,0b0h,001h,0c3h,08bh,036h,085h,003h,0b9h,080h,000h,083h
+        db 03eh,0b0h,003h,000h,075h,005h,08bh,00eh,08dh,003h,041h,02bh,0ceh,077h,006h,0b8h
+        db 00ch,080h,0e9h,054h,0edh,0c4h,03eh,0a4h,003h,0fch,081h,0c6h,055h,004h,0a4h,00bh
+        db 0ffh,075h,007h,089h,03eh,0a4h,003h,0b0h,002h,0c3h,0e2h,0f2h,089h,03eh,0a4h,003h
+        db 08bh,036h,0edh,004h,083h,044h,021h,001h,080h,054h,023h,000h,033h,0c0h,0c3h,0c4h
+        db 016h,0a4h,003h,0e8h,0ebh,0fah,0bah,080h,000h,081h,03eh,0aeh,003h,080h,000h,073h
+        db 004h,08bh,016h,0aeh,003h,029h,016h,0aeh,003h,08bh,01eh,0a4h,003h,08bh,0c2h,0b1h
+        db 007h,0d3h,0e0h,003h,0d8h,073h,00dh,0c6h,006h,03bh,004h,002h,033h,0d2h,02bh,016h
+        db 0a4h,003h,0d3h,0eah,0e8h,02ah,0e7h,052h,08bh,016h,0edh,004h,08bh,0f2h,0b1h,021h
+        db 08ah,004h,0feh,0c8h,0b4h,006h,0e8h,079h,0ech,050h,0b2h,001h,0e8h,012h,0e7h,058h
+        db 05ah,00ah,0c0h,074h,002h,08ah,0d4h,0b1h,007h,052h,0d3h,0e2h,001h,016h,0a4h,003h
+        db 05ah,00ah,0c0h,074h,010h,03ch,0ffh,074h,009h,08ah,0d4h,001h,054h,021h,080h,054h
+        db 023h,000h,0b0h,001h,0c3h,001h,054h,021h,080h,054h,023h,000h,0a1h,0aeh,003h,00bh
+        db 0c0h,074h,003h,0e9h,079h,0ffh,033h,0c0h,0c3h,08bh,036h,0edh,004h,0e8h,005h,0fbh
+        db 00ah,0c0h,074h,003h,0b0h,001h,0c3h,08bh,00eh,08dh,003h,041h,0c4h,03eh,0a4h,003h
+        db 0fch,01eh,0c5h,036h,0e3h,004h,0a4h,00bh,0ffh,075h,008h,01fh,089h,03eh,0a4h,003h
+        db 0b0h,002h,0c3h,0e2h,0f1h,01fh,089h,03eh,0a4h,003h,033h,0c0h,0c3h,08bh,03eh,0edh
+        db 004h,057h,03bh,03eh,0b4h,003h,075h,003h,0e8h,053h,0fbh,05fh,0c4h,036h,0c8h,003h
+        db 026h,08bh,05ch,023h,026h,08bh,044h,021h,026h,08bh,04ch,00eh,083h,0f9h,040h,072h
+        db 002h,032h,0ffh,0e8h,08eh,006h,026h,089h,044h,010h,026h,089h,05ch,012h,08bh,0d3h
+        db 0e8h,09ch,006h,088h,055h,023h,089h,045h,021h,08bh,0d7h,0b1h,010h,08ah,005h,0feh
+        db 0c8h,0b4h,005h,0e8h,0bch,0ebh,08bh,0d7h,0b1h,063h,08ah,005h,0feh,0c8h,0b4h,005h
+        db 0e8h,0afh,0ebh,08bh,0d7h,0b1h,00fh,08ah,005h,0feh,0c8h,0b4h,004h,0e8h,0a2h,0ebh
+        db 08bh,0d7h,0a2h,03bh,004h,0c3h,0c6h,006h,0adh,003h,0ffh,089h,00eh,09eh,003h,051h
+        db 0e8h,049h,005h,059h,0c6h,006h,03bh,004h,000h,026h,0f7h,044h,00eh,0ffh,0ffh,075h
+        db 006h,026h,0c7h,044h,00eh,080h,000h,00bh,0c9h,074h,043h,0e8h,06ah,0fch,074h,03fh
+        db 03ch,0fdh,074h,03ah,0c6h,006h,03bh,004h,002h,026h,08bh,04ch,00eh,08ch,0dbh,08eh
+        db 0c3h,0c5h,036h,0c4h,003h,056h,003h,0f1h,05eh,072h,023h,03ch,0ffh,075h,00ch,0ach
+        db 08ah,0d0h,051h,0e8h,014h,0eeh,059h,0e2h,0f6h,0ebh,00ah,0ach,08ah,0d0h,051h,0e8h
+        db 00fh,0eeh,059h,0e2h,0f6h,08ch,0c0h,08eh,0d8h,0c6h,006h,03bh,004h,000h,0c3h,0e8h
+        db 076h,005h,03ch,0ffh,075h,007h,0e8h,0cdh,001h,00ah,0c0h,075h,013h,0f7h,006h,09eh
+        db 003h,0ffh,0ffh,075h,003h,0e9h,015h,0ffh,0e8h,024h,006h,006h,0e8h,065h,000h,007h
+        db 00ah,0c0h,074h,004h,0a2h,03bh,004h,0c3h,0a1h,0b0h,003h,048h,078h,01bh,074h,00eh
+        db 0a3h,0aeh,003h,0e8h,0cch,000h,00ah,0c0h,074h,004h,0a2h,03bh,004h,0c3h,0e8h,049h
+        db 001h,00ah,0c0h,074h,004h,0a2h,03bh,004h,0c3h,0c4h,036h,0c8h,003h,0a1h,0a4h,003h
+        db 02bh,006h,0c4h,003h,0bah,000h,000h,003h,006h,095h,003h,013h,016h,097h,003h,026h
+        db 03bh,054h,012h,077h,006h,026h,03bh,044h,010h,072h,008h,026h,089h,044h,010h,026h
+        db 089h,054h,012h,0c6h,006h,03bh,004h,000h,0f6h,006h,0adh,003h,0ffh,075h,001h,0c3h
+        db 0e8h,01fh,0fdh,0c3h,0c4h,006h,089h,003h,08bh,036h,0edh,004h,089h,044h,021h,08ch
+        db 0c0h,088h,044h,023h,0e8h,06eh,0f9h,03ch,002h,072h,007h,03ch,004h,074h,003h,0e9h
+        db 05ch,000h,08bh,03eh,085h,003h,0b9h,080h,000h,083h,03eh,0b0h,003h,000h,075h,005h
+        db 08bh,00eh,08dh,003h,041h,02bh,0cfh,077h,002h,0ebh,043h,051h,0b2h,0ffh,0e8h,0abh
+        db 0f9h,059h,0a2h,0b2h,003h,0c6h,006h,0b6h,003h,0ffh,0c6h,006h,0b3h,003h,0ffh,01eh
+        db 007h,01eh,081h,0c7h,055h,004h,0c5h,036h,0a4h,003h,0fch,0a4h,00bh,0ffh,075h,008h
+        db 01fh,089h,036h,0a4h,003h,0b0h,002h,0c3h,0e2h,0f1h,01fh,089h,036h,0a4h,003h,08bh
+        db 036h,0edh,004h,083h,044h,021h,001h,080h,054h,023h,000h,033h,0c0h,0c3h,0b8h,001h
+        db 000h,0c3h,0c4h,016h,0a4h,003h,0e8h,058h,0f8h,0bah,080h,000h,081h,03eh,0aeh,003h
+        db 080h,000h,073h,004h,08bh,016h,0aeh,003h,029h,016h,0aeh,003h,08bh,01eh,0a4h,003h
+        db 08bh,0c2h,0b1h,007h,0d3h,0e0h,003h,0d8h,073h,00dh,0c6h,006h,03bh,004h,002h,033h
+        db 0d2h,02bh,016h,0a4h,003h,0d3h,0eah,0e8h,097h,0e4h,052h,08bh,016h,0edh,004h,08bh
+        db 0f2h,0b1h,022h,08ah,004h,0feh,0c8h,0b4h,007h,0e8h,0e6h,0e9h,050h,0b2h,001h,0e8h
+        db 07fh,0e4h,058h,05ah,00ah,0c0h,074h,002h,08ah,0d4h,0b1h,007h,052h,0d3h,0e2h,001h
+        db 016h,0a4h,003h,05ah,00ah,0c0h,074h,010h,03ch,0ffh,074h,009h,08ah,0d4h,001h,054h
+        db 021h,080h,054h,023h,000h,0b0h,001h,0c3h,001h,054h,021h,080h,054h,023h,000h,0a1h
+        db 0aeh,003h,00bh,0c0h,074h,003h,0e9h,079h,0ffh,0c3h,08bh,036h,0edh,004h,0e8h,074h
+        db 0f8h,03ch,002h,072h,007h,03ch,004h,074h,003h,0e9h,0d9h,0ffh,08bh,00eh,08dh,003h
+        db 041h,051h,0b2h,0ffh,0e8h,0c5h,0f8h,059h,0a2h,0b2h,003h,0c6h,006h,0b3h,003h,0ffh
+        db 0c6h,006h,0b6h,003h,0ffh,01eh,0c4h,03eh,0e3h,004h,0c5h,036h,0a4h,003h,0fch,0a4h
+        db 00bh,0f6h,075h,008h,01fh,089h,036h,0a4h,003h,0b0h,002h,0c3h,0e2h,0f1h,01fh,089h
+        db 036h,0a4h,003h,033h,0c0h,0c3h,0c4h,036h,0c8h,003h,0ffh,036h,039h,004h,0ffh,036h
+        db 03bh,004h,026h,0ffh,074h,00eh,0c6h,006h,03ah,004h,00fh,08bh,0d6h,0e8h,00dh,0f0h
+        db 0c4h,036h,0c8h,003h,026h,08fh,044h,00eh,0a1h,03bh,004h,08fh,006h,03bh,004h,08fh
+        db 006h,039h,004h,032h,0e4h,03ch,0ffh,075h,002h,0b4h,001h,08ah,0c4h,0c3h,08bh,036h
+        db 02fh,004h,08bh,03eh,02bh,004h,08eh,006h,02dh,004h,08eh,01eh,033h,004h,0e8h,00bh
+        db 000h,0e8h,00ah,0e4h,089h,036h,02fh,004h,0a2h,03bh,004h,0c3h,050h,051h,057h,056h
+        db 006h,01eh,055h,08bh,0ech,0fch,01eh,0e8h,0f4h,0e3h,08ch,0d8h,01fh,08eh,0c0h,033h
+        db 0c0h,0bfh,005h,003h,0aah,0abh,0abh,0b8h,020h,020h,0abh,0abh,0abh,0abh,0abh,0aah
+        db 0bfh,009h,003h,0f6h,046h,00ch,001h,074h,007h,0e8h,0efh,000h,00ah,0c0h,075h,061h
+        db 047h,080h,07ch,001h,03ah,075h,01ch,04fh,026h,0c6h,006h,006h,003h,0ffh,0adh,00ch
+        db 020h,02ch,060h,077h,009h,026h,0c6h,006h,005h,003h,0ffh,047h,0ebh,005h,03ch,070h
+        db 077h,0f3h,0aah,0b9h,008h,000h,0ach,03ch,02eh,074h,013h,0e8h,0a2h,000h,076h,02eh
+        db 026h,0c6h,006h,007h,003h,0ffh,0e8h,085h,000h,0e3h,003h,0aah,0e2h,0e8h,003h,0f9h
+        db 0b9h,003h,000h,0ach,03ch,02eh,075h,001h,0ach,0e8h,084h,000h,076h,010h,026h,0c6h
+        db 006h,008h,003h,0ffh,0e8h,067h,000h,0e3h,008h,0aah,0e2h,0ech,0ebh,003h,04eh,0feh
+        db 0c1h,006h,01fh,089h,076h,006h,0beh,009h,003h,08eh,046h,004h,08bh,07eh,008h,0f6h
+        db 046h,00ch,002h,074h,007h,0f6h,006h,006h,003h,0ffh,074h,001h,0a4h,08bh,07eh,008h
+        db 047h,0beh,00ah,003h,0f6h,046h,00ch,004h,074h,007h,0f6h,006h,007h,003h,0ffh,074h
+        db 005h,0b9h,004h,000h,0f3h,0a5h,08bh,07eh,008h,083h,0c7h,009h,0beh,012h,003h,0f6h
+        db 046h,00ch,008h,074h,007h,0f6h,006h,008h,003h,0ffh,074h,002h,0a5h,0a4h,05dh,01fh
+        db 007h,05eh,05fh,059h,058h,01eh,0e8h,015h,0e3h,0a0h,005h,003h,01fh,0c3h,03ch,02ah
+        db 075h,00dh,026h,080h,00eh,005h,003h,001h,0b0h,03fh,0f3h,0aah,080h,0cch,001h,0c3h
+        db 03ch,060h,072h,006h,03ch,07bh,073h,002h,024h,05fh,051h,0b9h,00ch,000h,057h,0bfh
+        db 0f9h,002h,0f2h,0aeh,05fh,059h,074h,002h,03ch,020h,0c3h,0ach,0e8h,0e1h,0ffh,072h
+        db 008h,0e1h,0f8h,04eh,0feh,0c1h,0b0h,000h,0c3h,04eh,0feh,0c1h,0b0h,0ffh,0c3h,0c4h
+        db 036h,0f1h,004h,026h,08bh,004h,0e8h,00eh,000h,089h,00eh,035h,004h,089h,016h,031h
+        db 004h,0c6h,006h,03bh,004h,000h,0c3h,02dh,0dah,002h,08bh,0c8h,033h,0d2h,08bh,0fah
+        db 02dh,03ch,000h,072h,00ah,0bbh,0b5h,005h,0f7h,0f3h,040h,02bh,0c8h,08bh,0f8h,08bh
+        db 0c1h,033h,0d2h,0bbh,06dh,001h,0f7h,0f3h,00bh,0d2h,075h,004h,048h,0bah,06dh,001h
+        db 08bh,0f0h,005h,0bch,007h,050h,033h,0dbh,0b9h,00ch,000h,03bh,097h,005h,005h,076h
+        db 005h,083h,0c3h,002h,0e2h,0f5h,0d1h,0ebh,053h,04bh,0d1h,0e3h,08bh,0c6h,08bh,0cfh
+        db 083h,0fbh,002h,075h,00fh,0a9h,003h,000h,075h,00ah,0d1h,0e8h,0d1h,0e8h,040h,03bh
+        db 0c1h,075h,001h,042h,02bh,097h,005h,005h,058h,08ah,0f0h,059h,0c3h,0c6h,006h,03bh
+        db 004h,0ffh,08bh,0c1h,02dh,0bch,007h,03dh,077h,000h,077h,05ah,0c6h,006h,0fah,004h
+        db 01ch,0a9h,003h,000h,075h,005h,0c6h,006h,0fah,004h,01dh,032h,0ffh,08ah,0deh,0feh
+        db 0cbh,080h,0fbh,00ch,073h,040h,080h,0fah,001h,072h,03bh,038h,097h,0f9h,004h,072h
+        db 035h,003h,0dbh,08bh,087h,005h,005h,032h,0f6h,003h,0c2h,050h,08bh,0c1h,02dh,0bah
+        db 007h,0bbh,06dh,001h,0f7h,0e3h,05bh,003h,0c3h,08bh,0c8h,02dh,016h,003h,072h,00ah
+        db 0bbh,0b5h,005h,02bh,0d2h,0f7h,0f3h,040h,003h,0c8h,0c4h,01eh,0f1h,004h,026h,089h
+        db 00fh,0c6h,006h,03bh,004h,000h,0c3h,0c6h,006h,03bh,004h,0ffh,080h,0fdh,017h,077h
+        db 030h,080h,0f9h,03bh,077h,02bh,080h,0feh,03bh,077h,026h,0c4h,036h,0f1h,004h,0b3h
+        db 00ah,08ah,0c5h,0e8h,01ch,000h,026h,088h,044h,002h,08ah,0c1h,0e8h,013h,000h,026h
+        db 088h,044h,003h,08ah,0c6h,0e8h,00ah,000h,026h,088h,044h,004h,0c6h,006h,03bh,004h
+        db 000h,0c3h,02ah,0e4h,0f6h,0f3h,051h,0b1h,004h,0d2h,0e0h,00ah,0c4h,059h,0c3h,0c4h
+        db 036h,0f1h,004h,026h,08ah,044h,002h,0e8h,01fh,000h,0a2h,036h,004h,026h,08ah,044h
+        db 003h,0e8h,015h,000h,0a2h,035h,004h,026h,08ah,044h,004h,0e8h,00bh,000h,08ah,0e0h
+        db 032h,0c0h,0a3h,031h,004h,0a2h,03bh,004h,0c3h,0b3h,00ah,050h,0b1h,004h,0d2h,0e8h
+        db 0f6h,0e3h,08ah,0c8h,058h,024h,00fh,002h,0c1h,0c3h,0c3h,08bh,01eh,0c4h,003h,0a1h
+        db 0c6h,003h,089h,01eh,037h,004h,0a3h,02dh,004h,0c3h,033h,0c0h,0a3h,03bh,004h,0c3h
+        db 0b9h,0ceh,006h,0e8h,096h,0eah,0b8h,00ch,080h,0e9h,0adh,0e6h,0c6h,006h,0bdh,003h
+        db 000h,0c6h,006h,0bch,003h,000h,0c4h,036h,031h,004h,08ch,006h,0cah,003h,026h,080h
+        db 03ch,0ffh,075h,00dh,0c6h,006h,0bch,003h,0ffh,083h,0c6h,006h,026h,0ach,0a2h,0bdh
+        db 003h,089h,036h,0c8h,003h,08bh,0feh,08bh,0d6h,0c3h,033h,0c0h,08bh,04fh,010h,03ah
+        db 0e9h,075h,007h,080h,0e1h,080h,074h,002h,0b0h,0ffh,00ah,0c0h,0c3h,0fch,0b9h,00ch
+        db 000h,0ach,024h,07fh,03ch,061h,072h,006h,03ch,07ah,077h,002h,024h,05fh,0aah,0e2h
+        db 0f0h,033h,0c0h,0abh,0abh,0c3h,0beh,02ah,007h,0b9h,018h,000h,080h,03ch,0ffh,074h
+        db 00ah,083h,0c6h,028h,0e2h,0f6h,0b0h,0ffh,00ah,0c0h,0c3h,089h,036h,0edh,004h,08ch
+        db 0d8h,08eh,0c0h,08bh,0feh,01eh,0c5h,036h,0c8h,003h,056h,0fch,0e8h,0beh,0ffh,05fh
+        db 08ch,0d8h,08eh,0c0h,01fh,032h,0c0h,0c3h,0fch,0beh,02ah,007h,0b9h,018h,000h,0c4h
+        db 03eh,0c8h,003h,057h,0b3h,00ch,056h,0ach,024h,07fh,026h,08ah,015h,080h,0e2h,07fh
+        db 080h,0fah,061h,072h,008h,080h,0fah,07ah,077h,003h,080h,0e2h,05fh,047h,03ah,0c2h
+        db 075h,007h,0feh,0cbh,075h,0e1h,05eh,0ebh,00ch,05eh,083h,0c6h,028h,05fh,0e2h,0d3h
+        db 0b0h,0ffh,00ah,0c0h,0c3h,05fh,089h,036h,0edh,004h,032h,0c0h,0c3h,08bh,03eh,0edh
+        db 004h,081h,0ffh,02ah,007h,072h,01ch,081h,0ffh,0c1h,00ah,077h,016h,0c6h,005h,0ffh
+        db 0a1h,0b4h,003h,03bh,006h,0edh,004h,075h,00ah,0c6h,006h,0b3h,003h,000h,0c6h,006h
+        db 0b6h,003h,000h,0c3h,0f7h,0e1h,052h,093h,0f7h,0e1h,05ah,003h,0c2h,093h,0c3h,0b1h
+        db 007h,0d3h,0e2h,0d3h,0c0h,08ah,0c8h,080h,0e1h,07fh,00ah,0d1h,024h,080h,0c3h,0b1h
+        db 007h,0d3h,0cah,08ah,0e8h,080h,0e5h,07fh,0d3h,0e8h,08ah,0ceh,080h,0e1h,0feh,00ah
+        db 0e1h,080h,0e6h,001h,0c3h,0e3h,020h,083h,0f9h,001h,075h,005h,08bh,0d3h,033h,0c9h
+        db 0c3h,033h,0d2h,093h,050h,0f7h,0f1h,08bh,0f8h,0f7h,0e1h,05ah,02bh,0d0h,08bh,0c3h
+        db 0f7h,0f1h,08bh,0cah,08bh,0d7h,0c3h,0b8h,0ffh,0ffh,08bh,0d8h,08bh,0d0h,0c3h,0c4h
+        db 006h,0c4h,003h,0a3h,0a4h,003h,08ch,006h,0a6h,003h,0a1h,09eh,003h,01eh,0c5h,036h
+        db 0c8h,003h,08bh,04ch,00eh,0f7h,0e1h,00ah,0d6h,01fh,088h,016h,09dh,003h,074h,003h
+        db 0b8h,0ffh,0ffh,0a3h,093h,003h,01eh,0c5h,036h,0c8h,003h,08bh,05ch,023h,08bh,044h
+        db 021h,083h,07ch,00eh,040h,072h,002h,032h,0ffh,01fh,0e8h,067h,0ffh,0a3h,095h,003h
+        db 089h,01eh,097h,003h,050h,08bh,0d3h,003h,006h,093h,003h,083h,0d3h,000h,02dh,001h
+        db 000h,083h,0dbh,000h,0a3h,099h,003h,089h,01eh,09bh,003h,058h,0e8h,060h,0ffh,0a3h
+        db 089h,003h,088h,016h,08bh,003h,088h,02eh,085h,003h,0f6h,0ddh,080h,0c5h,080h,088h
+        db 02eh,087h,003h,08bh,016h,09bh,003h,0a1h,099h,003h,0e8h,042h,0ffh,0a3h,08fh,003h
+        db 088h,016h,091h,003h,088h,02eh,08dh,003h,0a1h,08fh,003h,02bh,006h,089h,003h,0a3h
+        db 0b0h,003h,0c3h,0c4h,016h,0c4h,003h,0e9h,087h,0f2h,006h,051h,052h,056h,057h,055h
+        db 09ch,0fah,02eh,0ffh,01eh,005h,01ah,05dh,05fh,05eh,05ah,059h,007h,0c3h,050h,053h
+        db 0e8h,0e7h,0ffh,05bh,058h,0c3h,090h,090h,090h,090h,090h,090h,090h,090h,090h,090h
+        db 090h,090h,090h,090h,090h,090h,090h,090h,090h,090h,090h,090h,090h,090h,090h,090h
+        db 090h,090h,090h,090h,090h,090h,090h,090h,090h,090h,090h,090h,090h,090h,090h,090h
+        db 090h,090h,090h,090h,090h,090h,090h,090h,090h,090h,090h,090h,090h,090h,090h,090h
+        db 090h,090h,090h,090h,090h,090h,095h,01ah,06ch,01dh,073h,01dh,078h,01dh,079h,01dh
+        db 07ah,01dh,080h,01dh,0a4h,01dh,0abh,01dh,0b8h,01dh,0c4h,01dh,0c7h,01dh,0b6h,020h
+        db 0e9h,020h,0fch,020h,076h,021h,098h,023h,04dh,024h,04dh,024h,0cdh,026h,043h,027h
+        db 097h,027h,076h,021h,0b7h,027h,095h,01ah,0c9h,028h,0d2h,028h,0f3h,028h,095h,01ah
+        db 095h,01ah,095h,01ah,095h,01ah,095h,01ah,066h,029h,060h,02ah,078h,02ah,01ch,02bh
+        db 050h,02bh,06bh,02bh,0aeh,02bh,00fh,02fh,087h,031h,0d8h,032h,056h,033h,008h,034h
+        db 0c0h,033h,043h,034h,044h,034h,053h,034h,095h,01ah
+
+; Remaining handler offsets are retained until their bodies are reconstructed. Roles
+; are established from this installation table and the corresponding gateways.
+bios_memory_handler      equ 17cfh
+bios_disk_handler        equ 17e2h
+bios_printer_handler     equ 18e8h
+dos_terminate_handler    equ 19b2h
+dos_dispatch_handler equ code_origin+1a11h
+dos_return_handler equ code_origin+1532h
+dos_ctrl_c_handler       equ 1a9bh
+dos_error_handler        equ 1bd1h
+dos_disk_read_handler    equ 1d11h
+dos_disk_write_handler   equ 1d5ch
+dos_resident_handler     equ 1d6bh
+
+;------------------------------------------------------------------------------
+; interrupt_vectors (3713h)
+; Fourteen packed records: interrupt number (byte), handler offset (word).
+; The installation loop at 14FEh supplies CS for each vector's segment word.
+; PD user-dispatch callbacks manage ownership as the scheduler switches tasks.
+;------------------------------------------------------------------------------
+interrupt_vectors:
+        db 10h
+        dw bios_video_handler        ; routes to legacy XIOS functions 30/31
+        db 11h
+        dw bios_equipment_handler    ; routes to legacy XIOS function 34
+        db 12h
+        dw bios_memory_handler
+        db 13h
+        dw bios_disk_handler         ; internal BDOS function 2Fh
+        db 16h
+        dw bios_keyboard_handler
+        db 17h
+        dw bios_printer_handler
+        db 20h
+        dw dos_terminate_handler
+        db 21h
+        dw dos_dispatch_handler      ; function table at 36AFh
+        db 22h
+        dw dos_return_handler
+        db 23h
+        dw dos_ctrl_c_handler
+        db 24h
+        dw dos_error_handler
+        db 25h
+        dw dos_disk_read_handler
+        db 26h
+        dw dos_disk_write_handler
+        db 27h
+        dw dos_resident_handler
+
+; UNDECODED 373Dh..37DFh: final tables and paragraph padding.
+; Preserved original CODE bytes 373Dh..37DFh (undecoded/data).
+        db 043h,04fh,04eh,020h,020h,020h,020h,020h,0ffh,041h,055h,058h,020h,020h,020h,020h
+        db 020h,0feh,043h,04fh,04dh,031h,020h,020h,020h,020h,0feh,04eh,055h,04ch,020h,020h
+        db 020h,020h,020h,0fdh,04ch,050h,054h,031h,020h,020h,020h,020h,0fch,050h,052h,04eh
+        db 020h,020h,020h,020h,020h,0fch,044h,049h,052h,020h,020h,020h,020h,020h,043h,04fh
+        db 050h,059h,020h,020h,020h,020h,054h,049h,04dh,045h,020h,020h,020h,020h,044h,041h
+        db 054h,045h,020h,020h,020h,020h,052h,045h,04eh,020h,020h,020h,020h,020h,045h,052h
+        db 041h,053h,045h,020h,020h,020h,020h,020h,020h,020h,020h,020h,020h,020h,020h,020h
+        db 020h,020h,020h,020h,020h,020h,020h,020h,020h,020h,020h,020h,020h,020h,020h,020h
+        db 020h,020h,020h,020h,020h,020h,020h,020h,020h,020h,020h,020h,020h,020h,020h,028h
+        db 055h,073h,065h,072h,020h,030h,029h,020h,050h,043h,02dh,04dh,04fh,044h,045h,00dh
+        db 00ah,000h,000h
+
+if PCMODE_SAFE_LOADER
+include pcguard.lib
+endif
+
+if PCMODE_CHECKED_INPUT
+; Only the checked/echoing DOS input path comes here. Ctrl-C must unwind the
+; dispatcher frame before invoking INT 23h; jumping to the existing helper
+; discards this call's return address along with the other internal frames.
+; Do not directly invoke INT 23h on this temporary dispatcher stack.
+dos_read_checked:
+        call raw_console_input
+        cmp al,3
+        je dos_input_break
+        ret
+dos_input_break:
+        jmp unwind_dos_break               ; restore user SS:SP and dispatch INT 23h
+        org (offset $+15) and 0fff0h
+endif
+
+if PCMODE_PIXEL_READ
+; The recovered packet path discards XIOS AX when it pops the INT 10h frame.
+; Only AH=0Dh defines a pixel-color return here. Copy its successful AL into
+; that frame; preserve original AH and all other packet-operation registers.
+; FFFFh is the bridge's unsupported/rejected result: retain the caller's AL.
+; This helper adds no state and runs on the existing per-console private stack.
+bios_video_packet_result:
+        call xios_gateway
+        cmp si,0d1fh
+        jne bios_video_packet_done
+        cmp ax,0ffffh
+        je bios_video_packet_done
+        mov byte ptr .bios_frame_ax,al
+bios_video_packet_done:
+        ret
+        org (offset $+15) and 0fff0h
+endif
+
+if PCMODE_SHELL
+include pcshell.lib
+include pcerror.lib
+endif
+
+if PCMODE_HELP
+include pchelp.lib
+endif
+
+if PCMODE_SEARCH
+include pcsearch.lib
+endif
+
+dseg
+org 0
+include pcdata.lib
+end
