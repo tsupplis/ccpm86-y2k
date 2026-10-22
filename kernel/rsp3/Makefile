@@ -5,7 +5,7 @@ SNIPPETS= pctmp.rsp
 
 all: $(SNIPPETS)
 
-pctmp.h86: pcdefs.lib pcguard.lib pcshell.lib pcerror.lib pchelp.lib pcsearch.lib pcdata.lib
+pctmp.h86: pcguard.lib pcshell.lib pcerror.lib pchelp.lib pcsearch.lib pcdata.lib
 
 %.rsp: %.h86
 	$(GENCMD) $^

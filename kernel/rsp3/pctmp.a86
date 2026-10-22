@@ -5,39 +5,17 @@
 ;
 ;*****************************************************************************
 
-; Native ASM86 PCTMP; pcdefs.lib selects the supported extensions.
-	include	pcdefs.lib
-PCMODE_SAFE_LOADER		equ	PCMODE_BUILD
-PCMODE_CHECKED_INPUT		equ	PCMODE_BUILD
-PCMODE_PIXEL_READ		equ	PCMODE_BUILD
-PCMODE_SHELL			equ	PCMODE_BUILD
-PCMODE_HELP			equ	PCMODE_BUILD
-PCMODE_SEARCH			equ	PCMODE_BUILD
+; Native ASM86 PCTMP. All maintained fixes and extensions are mandatory.
 	cseg
 	org	0
 code_origin:
 ;******************************************************************************
 ; PCTMP - PC-MODE terminal message processor, Concurrent CP/M-86 3.1
 ;
-; Provenance: inputs/pctmp.bin, recovered from a.sys.
-; Executable ranges are decoded. Annotated instruction encodings retain bytes
-; where ASM86 would otherwise choose a different encoding.
-; pcdata.lib declares the original normalized DATA bytes; the reference remains
-; in inputs/pctmp.rsp. GENCMD generates both group headers and record padding.
-;
-; Build through the native ASM86 -> H86 -> GENCMD rules in this directory.
-; PCMODE_BUILD=0 in pcdefs.lib reconstructs the original RSP byte for byte.
-; Normal builds use the standard local RSP rules. Sandbox tools copy sources
-; to their chosen build directory before invoking Make.
-;
-; Original mode is byte-exact. PCMODE_SAFE_LOADER adds the documented header
-; guard; PCMODE_CHECKED_INPUT fixes DOS function 01h Ctrl-C dispatch.
-; PCMODE_PIXEL_READ returns a successful XIOS pixel color through saved AL.
-; PCMODE_SHELL adds native TMP CLS/SYSDISK and drive-command parity.
-; PCMODE_HELP adds native TMP quick-help/topic expansion before FCB parsing.
-; Original input files remain untouched.
-; Original instruction encodings are kept,
-; including explicit alternate encodings in decoded historical routines.
+; Reconstructed from Concurrent CP/M-86 3.1 PCTMP, with maintained fixes.
+; Build through this module's native ASM86 -> H86 -> GENCMD rules.
+; Loader checks, console fixes, shell extensions, help and search are always on.
+; pcdata.lib declares the per-console DATA layout.
 ;
 ; Residency model:
 ;   GENCCPM allocates one 0AF0h-byte DATA group per virtual console, followed
@@ -261,7 +239,7 @@ process_start:
 
 ; Original region 0078h..0690h: startup file processing, prompt/command parser,
 ; built-in commands and external command pre-search.
-; All instruction and data offsets remain fixed during reconstruction.
+; The following routines implement command parsing and dispatch.
 ; Decoded original region 0078h..0170h.
 
 ; Detach while trying the per-console startup file. Its FCB extension comes
@@ -373,17 +351,11 @@ command_line_comment:
 	je	command_line_empty
 
 ; Intercept compact/spaced drive commands before the recovered direct select.
-	if	PCMODE_SHELL
 	jmp	shell_drive_command
 	nop
 	nop
 	nop
 	nop
-	endif
-	if	not PCMODE_SHELL
-	cmp	byte ptr .command_text+2,0
-	jne	command_parse_entry
-	endif
 ; Decoded original region 0178h..01A7h.
 
 ; Historical bare-drive selection, retained behind the supported drive hook.
@@ -411,12 +383,7 @@ command_line_empty:
 
 command_parse_entry:
 ; Help must intercept '?' before BDOS 152 interprets it as a wildcard.
-	if	PCMODE_HELP
 	jmp	shell_help_command
-	endif
-	if	not PCMODE_HELP
-	mov	bx,command_text
-	endif
 ; Decoded original region 01ABh..0207h.
 
 
@@ -467,12 +434,7 @@ match_original_builtin:
 ; The original unqualified-built-in dispatch starts with MOV DI,0BA0h.
 ; Qualified commands already bypass this point. Retain every original offset.
 command_builtin_entry:
-	if	PCMODE_SHELL
 	jmp	shell_extensions
-	endif
-	if	not PCMODE_SHELL
-	mov	di,offset original_name_user
-	endif
 ; Decoded original region 020Bh..04C0h.
 
 
@@ -804,19 +766,12 @@ print_off:
 	call	print_console_character
 	ret
 external_command_entry:
-	if	PCMODE_SEARCH
 ; Replace the original external pre-search prologue, keeping all offsets.
 	jmp	search_command
 	nop
 	nop
 	nop
 	nop
-	endif
-	if	not PCMODE_SEARCH
-	push	ds
-	pop	es
-	mov	byte ptr .02dbh,1
-	endif
 ; Decoded historical search and dispatch, 04C8h..0690h.
 
 
@@ -1243,12 +1198,7 @@ native_cli_success:
 
 command_error_entry:
 ; Replace the common error dispatcher, preserving the original entry address.
-	if	PCMODE_SHELL
 	jmp	shell_command_error
-	endif
-	if	not PCMODE_SHELL
-	mov	si,offset original_error_table-4
-	endif
 ; Decoded 07E0h..0900h: errors, parser helpers and native BDOS wrappers.
 
 ; Scan four-byte (error number, message offset) records in CS; FFFFh is the default.
@@ -1263,43 +1213,21 @@ find_command_error:
 command_error_found:
 	db	02eh					; CS override
 	mov	dx,2[si]
-	if	PCMODE_SHELL
 	or	dx,dx
-	endif
-	if	not PCMODE_SHELL
-	cmp	dx,00h
-	endif
 	jnz	print_command_error
-	if	PCMODE_SHELL
 	mov	byte ptr .command_sent,dl
-	endif
-	if	not PCMODE_SHELL
-	mov	byte ptr .0208h,00h
-	endif
 	jmp	command_prompt_resume
 print_command_error:
 ; Preserve the error number across BDOS output for the numeric fallback.
 ; Two shorter instructions above pay for PUSH/POP without moving the tail.
-	if	PCMODE_SHELL
 	push	cx
-	endif
 	push	dx
 	call	print_code_newline
-	if	PCMODE_SHELL
 	mov	dx,offset error_prefix
-	endif
-	if	not PCMODE_SHELL
-	mov	dx,offset original_msg_error_prefix
-	endif
 	call	print_code_string
 	pop	dx
-	if	PCMODE_SHELL
 	pop	ax
 	call	error_print_message
-	endif
-	if	not PCMODE_SHELL
-	call	print_code_string
-	endif
 	call	print_code_newline
 	mov	dx,offset original_msg_command_prefix
 	call	print_code_string
@@ -1647,12 +1575,7 @@ pcmode_service:
 	xor	bh,bh
 	shl	bx,1
 	mov	ax,0ffffh
-	if	PCMODE_BUILD
 	cmp	cl,8
-	endif
-	if	not PCMODE_BUILD
-	cmp	cl,16
-	endif
 	jnc	service_return
 	call	cs:word ptr service_table[bx]
 service_return:
@@ -2000,16 +1923,11 @@ loader_read_error:
 	mov	cx,01dh
 	jmp	loader_failure
 exe_header_checked_entry:
-	if	PCMODE_SAFE_LOADER
 ; After the first header read, validate before size arithmetic/allocation.
 ; Replace exactly the original four-byte MOV BX,[0457h]; the out-of-line
 ; guard executes that instruction on success. All existing offsets stay fixed.
 	jmp	validate_exe_file
 	nop
-	endif
-	if	not PCMODE_SAFE_LOADER
-	mov	bx,word ptr .exe_header+2
-	endif
 ; Decoded original length arithmetic, 0F91h..0FA2h.
 
 
@@ -2024,12 +1942,7 @@ exe_page_paragraphs:
 	mov	cl,05h
 	shl	ax,cl
 	dec	cl
-	if	PCMODE_SAFE_LOADER
 	add	bx,15					; ceil(last-page bytes / 16), not nearest
-	endif
-	if	not PCMODE_SAFE_LOADER
-	add	bx,7					; original under-rounding retained for audit
-	endif
 
 	shr	bx,cl
 	db	003h,0c3h				; add ax,bx (original encoding)
@@ -2125,17 +2038,11 @@ exe_memory_allocated:
 ; launch path consumes these four child_* fields after image relocation.
 ;------------------------------------------------------------------------------
 prepare_exe_entry:
-	if	PCMODE_SAFE_LOADER
 	call	validate_exe_stack
 	nop
 	nop
 	nop
 	nop
-	endif
-	if	not PCMODE_SAFE_LOADER
-	mov	ax,word ptr .exe_load_segment
-	add	ax,word ptr .exe_initial_ss
-	endif
 	mov	word ptr .child_stack_segment,ax
 	mov	ax,word ptr .exe_initial_sp
 	mov	word ptr .child_stack_offset,ax
@@ -2159,14 +2066,8 @@ prepare_exe_entry:
 
 ; The original calculation discards a partial 512-byte header page. The
 ; experimental path selects bulk record reads or a header-tail copy reader.
-	if	PCMODE_SAFE_LOADER
 	jmp	load_exe_header_tail			; choose record-aligned or byte-shifting path
-	endif
-	if	not PCMODE_SAFE_LOADER
-	mov	ax,word ptr .exe_header_paragraphs
-	endif
 exe_aligned_record_index:
-	if	PCMODE_SAFE_LOADER
 	mov	cl,3
 	shr	ax,cl					; header paragraphs / 8 = CP/M records
 	nop
@@ -2180,15 +2081,6 @@ exe_aligned_record_index:
 	nop
 	nop
 	nop
-	endif
-	if	not PCMODE_SAFE_LOADER
-	mov	dx,16
-	mul	dx
-	mov	cx,512
-	div	cx
-	mov	cx,4
-	mul	cx					; file's first image record (128-byte units)
-	endif
 	mov	word ptr .exe_next_record,ax
 	mov	byte ptr .exe_next_record+2,0
 	mov	dx,128
@@ -2237,23 +2129,17 @@ exe_image_chunk_done:
 ; actual load base in paragraphs. exe_header still holds file record zero.
 ; Each MZ relocation is an offset:segment pair relative to the image base.
 ; Resolve that pair and add the load base to the target WORD, not its address.
-; The original branch is byte-exact recovery; the extended helper validates both
+; The relocation helper validates both
 ; target bytes before rebasing. See pcguard.lib for its error-stack contract.
 ; The original reader assumes the initial table offset is in record zero and
 ; entries fit the record layout. The checked pass handles arbitrary byte starts
-; and split entries while preserving these original offsets for reconstruction.
+; and entries split across file records.
 ;------------------------------------------------------------------------------
 relocate_exe:
-	if	PCMODE_SAFE_LOADER
 	jmp	relocate_exe_checked
 	nop
 	nop
 	nop
-	endif
-	if	not PCMODE_SAFE_LOADER
-	mov	dx,1
-	call	set_multi_record_count
-	endif
 	mov	word ptr .exe_next_record,1
 	mov	byte ptr .exe_next_record+2,0
 	mov	ax,word ptr .exe_relocation_offset
@@ -2264,16 +2150,10 @@ exe_relocation_loop:
 	push	cx
 	call	read_exe_relocation
 	pop	cx
-	if	PCMODE_SAFE_LOADER
 	call	validate_exe_relocation
 	nop
 	nop
 	nop
-	endif
-	if	not PCMODE_SAFE_LOADER
-	mov	ax,es					; entry's relative segment
-	add	ax,word ptr .exe_load_segment
-	endif
 	mov	es,ax					; ES:SI now addresses the loaded target
 	mov	ax,word ptr .exe_load_segment
 	add	es:word ptr [si],ax
@@ -3021,12 +2901,7 @@ bios_video_packet:
 	db	08ah,0dch				; mov bl,ah: original encoding
 	mov	cx,ds
 	mov	dx,bios_packet_ax
-	if	PCMODE_PIXEL_READ
 	call	bios_video_packet_result
-	endif
-	if	not PCMODE_PIXEL_READ
-	call	xios_gateway
-	endif
 	jmp	bios_video_restore_frame
 
 ;------------------------------------------------------------------------------
@@ -3243,7 +3118,7 @@ bios_disk_return:
 
 
 ;------------------------------------------------------------------------------
-; INT 16h (1863h..18E7h), byte-exact recovered legacy keyboard handler.
+; INT 16h (1863h..18E7h), recovered keyboard handler.
 ; Select the running console DATA, then use its private service stack. Return
 ; AX through the saved frame. RETF 2 discards the caller FLAGS: current ZF from
 ; the input word test is the AH=01h result. This is not an enhanced BIOS API:
@@ -3919,7 +3794,6 @@ dos_fn_raw_input:
 ; instruction runs on PCTMP's private service stack. The extended reader
 ; restores the user frame before invoking a custom handler, as AH=01h does.
 dos_fn_checked_input:
-	if	PCMODE_CHECKED_INPUT
 	call	dos_read_checked
 	mov	byte ptr .dos_saved_ax,al		; saved DOS return AL
 	ret
@@ -3929,16 +3803,6 @@ dos_fn_checked_input:
 	nop
 	nop
 	nop
-	endif
-	if	not PCMODE_CHECKED_INPUT
-	call	raw_console_input
-	mov	byte ptr .dos_saved_ax,al
-	cmp	al,3
-	jne	dos_read_noecho_done
-	int	23h
-dos_read_noecho_done:
-	ret
-	endif
 ; Decoded original region 1DB8h..1E03h.
 
 ; AH=09h prints from the application's DS, saved by the dispatcher.
@@ -3991,12 +3855,7 @@ dos_input_return:
 ; reads and DOS raw input (AH=06h/07h) continue using the original raw reader.
 ;------------------------------------------------------------------------------
 dos_read_echo:
-	if	PCMODE_CHECKED_INPUT
 	call	dos_read_checked
-	endif
-	if	not PCMODE_CHECKED_INPUT
-	call	raw_console_input			; raw console byte reader
-	endif
 	call	classify_echo_byte			; classify echoable character; CF=control
 	jc	control_echo_return			; shared RET, control byte needs no echo
 	push	ax
@@ -4383,12 +4242,7 @@ unwind_dos_break:
 	pop	ds
 	sti
 	int	23h
-	if	PCMODE_CHECKED_INPUT
 	jmp	dos_dispatch_handler			; retry request if the handler returns
-	endif
-	if	not PCMODE_CHECKED_INPUT
-	jmp	dos_return_handler			; original unconditional termination
-	endif
 
 
 ; Return buffered key AX or native direct-console status; ZF indicates empty.
@@ -4564,7 +4418,6 @@ open_regular_file:
 	call	dos_fn_delete_fcb
 	pop	word ptr .dos_saved_ax
 	pop	word ptr .bios_frame_ax
-	if	PCMODE_BUILD
 ; A missing target is allowed, but a failed dirty-cache flush is not.
 	cmp	byte ptr .record_cache_dirty,0ffh
 	jne	open_create_ready
@@ -4573,7 +4426,6 @@ open_regular_file:
 	mov	byte ptr .dos_saved_ax,0ffh
 	ret
 open_create_ready:
-	endif
 	jmps	open_allocate_slot
 open_find_existing_slot:
 	call	find_fcb_slot
@@ -4581,7 +4433,6 @@ open_find_existing_slot:
 	mov	bx,.dos_fcb_slot
 	cmp	bx,.cached_fcb_slot
 	jnz	open_close_existing_slot
-	if	PCMODE_BUILD
 	push	bx
 	push	di
 	push	es
@@ -4594,7 +4445,6 @@ open_find_existing_slot:
 	mov	byte ptr .dos_saved_ax,0ffh
 	ret
 open_cache_flushed:
-	endif
 	mov	byte ptr .record_cache_valid,00h
 	mov	byte ptr .record_cache_dirty,00h
 open_close_existing_slot:
@@ -4864,12 +4714,10 @@ close_check_cache:
 	pop	es
 	pop	di
 	pop	bx
-	if	PCMODE_BUILD
 	or	al,al
 	jz	close_check_modified
 	mov	byte ptr .dos_saved_ax,0ffh
 	ret
-	endif
 close_check_modified:
 	test	byte ptr 0eh[bx],040h
 	jz	close_unmodified_file
@@ -4906,12 +4754,10 @@ close_flush_final_record:
 	call	flush_record_cache
 	pop	cx
 	pop	bx
-	if	PCMODE_BUILD
 	or	al,al
 	jz	close_update_attributes
 	mov	byte ptr .dos_saved_ax,0ffh
 	ret
-	endif
 close_update_attributes:
 	push	cx
 	call	close_native_slot
@@ -5055,15 +4901,10 @@ prepare_directory_search:
 	mov	si,06aah
 	call	resolve_default_fcb_drive
 	call	flush_record_cache
-	if	not PCMODE_BUILD
-	mov	byte ptr .record_cache_valid,00h
-	endif
 	mov	al,.record_cache_result
 	test	al,0ffh
 	jnz	directory_prepare_result
-	if	PCMODE_BUILD
 	mov	byte ptr .record_cache_valid,00h
-	endif
 	mov	dx,0455h
 	call	set_loader_dma
 	xor	al,al
@@ -5417,16 +5258,11 @@ dos_fn_rename_fcb:
 	ret
 rename_flush:
 	call	flush_record_cache
-	if	not PCMODE_BUILD
-	mov	byte ptr .record_cache_valid,00h
-	endif
 	test	byte ptr .record_cache_result,0ffh
 	jz	rename_prepare
 	jmp	rename_failed
 rename_prepare:
-	if	PCMODE_BUILD
 	mov	byte ptr .record_cache_valid,00h
-	endif
 	mov	ax,ds
 	mov	es,ax
 	mov	dx,0455h
@@ -5473,12 +5309,10 @@ rename_source_found:
 	pop	es
 	pop	word ptr .dos_fcb_offset
 	pop	word ptr .dos_fcb_segment
-	if	PCMODE_BUILD
 	cmp	byte ptr .dos_saved_ax,0ffh
 	jne	rename_close_ready
 	jmp	rename_failed
 rename_close_ready:
-	endif
 	lds	si,dword ptr .bios_frame_dx
 	add	si,011h
 	mov	di,06abh
@@ -5649,9 +5483,7 @@ read_record_cache:
 	jnz	cache_read_native
 	call	cache_record_matches
 	jnz	cache_replace
-	if	PCMODE_BUILD
 	xor	ax,ax
-	endif
 	ret
 cache_replace:
 	call	flush_record_cache
@@ -5717,9 +5549,7 @@ flush_record_cache:
 	mov	byte ptr .record_cache_result,00h
 	cmp	byte ptr .record_cache_dirty,0ffh
 	jz	cache_write_dirty
-	if	PCMODE_BUILD
 	xor	ax,ax
-	endif
 	ret
 cache_write_dirty:
 	mov	dl,0ffh
@@ -5748,10 +5578,8 @@ cache_write_dirty:
 	push	ax
 	call	file_user_select
 	pop	ax
-	if	PCMODE_BUILD
 	or	al,al
 	jnz	cache_flush_result
-	endif
 	mov	byte ptr .record_cache_dirty,00h
 cache_flush_result:
 	mov	.record_cache_result,al
@@ -6309,13 +6137,11 @@ truncate_at_random_position:
 	cmp	di,.cached_fcb_slot
 	jnz	truncate_update_size
 	call	flush_record_cache
-	if	PCMODE_BUILD
 	or	al,al
 	jz	truncate_update_size
 	pop	di
 	mov	byte ptr .dos_saved_ax,01h
 	ret
-	endif
 truncate_update_size:
 	pop	di
 	les	si,dword ptr .dos_fcb_offset
@@ -6466,9 +6292,7 @@ block_write_update_size:
 	db	026h					; ES override; original addressing
 	cmp	dx,012h[si]
 	ja	block_write_store_size
-	if	PCMODE_BUILD
 	jb	block_write_success
-	endif
 	db	026h					; ES override; original addressing
 	cmp	ax,010h[si]
 	jc	block_write_success
@@ -6488,7 +6312,7 @@ block_write_advance:
 
 ; Read/modify initial partial CP/M record in cache. Accept native read
 ; statuses 0/1/4, mark cache dirty, copy bytes and advance private record.
-; PCMODE_BUILD checks source SI for segment wrap; the original tested cache DI.
+; Check source SI for segment wrap before copying another byte.
 write_first_partial_record:
 	les	ax,dword ptr .transfer_first_record
 	mov	si,.dos_fcb_slot
@@ -6528,12 +6352,7 @@ write_first_mark_dirty:
 	cld
 write_first_copy_byte:
 	movsb
-	if	PCMODE_BUILD
 	or	si,si
-	endif
-	if	not PCMODE_BUILD
-	or	di,di
-	endif
 	jnz	write_first_copy_next
 	pop	ds
 	mov	.transfer_buffer_offset,si
@@ -6745,14 +6564,9 @@ parse_invalid_drive:
 	inc	di
 	jmps	parse_name_begin
 
-; A..P becomes 1..16. Original mode retains its erroneous 70h upper limit.
+; A..P becomes 1..16; reject larger drive numbers.
 parse_drive_upper_bound:
-	if	PCMODE_BUILD
 	cmp	al,010h
-	endif
-	if	not PCMODE_BUILD
-	cmp	al,070h
-	endif
 	ja	parse_invalid_drive
 	stosb
 parse_name_begin:
@@ -7093,17 +6907,10 @@ dos_fn_get_dta:
 
 ; INT 21h/AH=30h at 3453h. Keep the six-byte slot and original table offsets.
 dos_fn_get_version:
-	if	PCMODE_BUILD
 	jmp	dos_version_query
 	nop
 	nop
 	nop
-	endif
-	if	not PCMODE_BUILD
-	db	033h,0c0h				; xor ax,ax, original direction encoding
-	mov	word ptr .dos_saved_ax,ax
-	ret
-	endif
 
 
 ; Report the private file-error message, then enter the DOS critical-error path.
@@ -7606,7 +7413,7 @@ dos_device_names:
 	db	'PRN     ',0fch
 dos_device_names_end:
 ; Private service 7 returns this table's offset. Eleven eight-byte slots,
-; of which six contain names; the remaining five are blank in the reference.
+; of which six contain names; the remaining five slots are blank.
 dos_command_names:
 	db	'DIR     '
 	db	'COPY    '
@@ -7626,11 +7433,8 @@ dos_launch_suffix:
 	db	0,0					; original paragraph padding
 
 
-	if	PCMODE_SAFE_LOADER
 	include	pcguard.lib
-	endif
 
-	if	PCMODE_CHECKED_INPUT
 ; Only the checked/echoing DOS input path comes here. Ctrl-C must unwind the
 ; dispatcher frame before invoking INT 23h; jumping to the existing helper
 ; discards this call's return address along with the other internal frames.
@@ -7643,9 +7447,7 @@ dos_read_checked:
 dos_input_break:
 	jmp	unwind_dos_break			; restore user SS:SP and dispatch INT 23h
 	org	(offset $+15) and 0fff0h
-	endif
 
-	if	PCMODE_PIXEL_READ
 ; The recovered packet path discards XIOS AX when it pops the INT 10h frame.
 ; Only AH=0Dh defines a pixel-color return here. Copy its successful AL into
 ; that frame; preserve original AH and all other packet-operation registers.
@@ -7661,28 +7463,19 @@ bios_video_packet_result:
 bios_video_packet_done:
 	ret
 	org	(offset $+15) and 0fff0h
-	endif
 
-	if	PCMODE_SHELL
 	include	pcshell.lib
 	include	pcerror.lib
-	endif
 
-	if	PCMODE_HELP
 	include	pchelp.lib
-	endif
 
-	if	PCMODE_SEARCH
 	include	pcsearch.lib
-	endif
 
-	if	PCMODE_BUILD
 ; Project version-query extension: AL=1, AH=25 decimal (AX=1901h).
 ; Update only saved AX; this DOS 1.x personality defines no OEM/serial outputs.
 dos_version_query:
 	mov	word ptr .dos_saved_ax,01901h
 	ret
-	endif
 
 	dseg
 	org	0

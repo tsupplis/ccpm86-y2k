@@ -5,7 +5,7 @@
 ;
 ;*****************************************************************************
 
-; PCTMP MZ checks. Included only with PCMODE_SAFE_LOADER.
+; PCTMP MZ checks. Always enabled.
 ; DS is the current console's DATA. Per-console lengths live in shared CODE
 ; because the recovered DATA stride is an ABI and must not be enlarged.
 ; Four console slots are available; the guard rejects any larger index.

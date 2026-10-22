@@ -5,7 +5,7 @@
 ;
 ;*****************************************************************************
 
-; SETDEF v3 drive-by-drive search. Included only with PCMODE_SEARCH.
+; SETDEF v3 drive-by-drive search. Always enabled.
 ; Replaces the original external pre-search entry at 04C1h, after built-ins.
 ; DS=this console DATA; four explicit CS-owned 128-byte sidecars isolate prompt
 ; state without resizing recovered DATA. No child is running on this console.
