@@ -3,6 +3,7 @@
 import hashlib
 import json
 from pathlib import Path
+import shutil
 import subprocess
 import tempfile
 
@@ -19,8 +20,12 @@ def verify():
             raise ValueError('recovered input differs: ' + name)
     with tempfile.TemporaryDirectory(prefix='pcmode-verify-') as temporary:
         rsp_output = Path(temporary) / 'rsp3'
-        subprocess.run(['make', '-C', str(BASE), 'PCMODE=0',
-                        'OUTPUT=' + str(rsp_output)], check=True,
+        rsp_output.mkdir()
+        for path in BASE.iterdir():
+            if path.suffix.lower() in ('.a86', '.lib') or path.name == 'Makefile':
+                shutil.copy2(path, rsp_output / path.name)
+        (rsp_output / 'pcdefs.lib').write_bytes(b'PCMODE_BUILD equ 0\r\n')
+        subprocess.run(['make', 'all'], cwd=rsp_output, check=True,
                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         from pctmpcheck import check as check_pctmp
         check_pctmp(rsp_output / 'pctmp.rsp', original=True)

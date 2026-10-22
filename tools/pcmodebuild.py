@@ -101,8 +101,11 @@ def build(output, audit, enhanced_keyboard=True, extras=None):
     # Preserve the recovered original and build the explicitly selected safe
     # loader variant. Replace only CODE; DATA layout/console stride is unchanged.
     rsp = output / 'rsp3'
-    run(['make', '-C', str(ROOT / 'kernel/rsp3'),
-         'OUTPUT=' + str(rsp), 'PCMODE=1', 'all'], ROOT, output / 'pctmp-build.log')
+    rsp.mkdir()
+    for path in SOURCE.iterdir():
+        if path.suffix.lower() in ('.a86', '.lib') or path.name == 'Makefile':
+            shutil.copy2(path, rsp / path.name)
+    run(['make', 'all'], rsp, output / 'pctmp-build.log')
     from pctmpcheck import check as check_pctmp
     check_pctmp(rsp / 'pctmp.rsp')
     shutil.copy2(rsp / 'pctmp.rsp', gen / 'pctmp.rsp')

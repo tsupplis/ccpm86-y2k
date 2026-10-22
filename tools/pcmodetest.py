@@ -17,7 +17,7 @@ from pcmem import accounting
 ROOT = Path(__file__).resolve().parent.parent
 
 
-def check(image, output, shell_checks=False, keyboard_checks=False, state_checks=False, graphics_checks=False, loader_checks=False, tools_image=None, failure_checks=False, failure_case='all', mz_checks=False, break_vector_checks=False, memory_map=None, header_checks=False, relocation_checks=False, size_checks=False, recovery_checks=False, equipment_checks=False, pixel_read_checks=False, builtin_checks=False, enhanced_keyboard_checks=False, help_checks=False, help_tail_checks=False, native_help_checks=False, search_checks=False, native_search_checks=False, toolchain_checks=False, drive_checks=False, command_errors=None):
+def check(image, output, shell_checks=False, keyboard_checks=False, state_checks=False, graphics_checks=False, loader_checks=False, tools_image=None, failure_checks=False, failure_case='all', mz_checks=False, break_vector_checks=False, memory_map=None, header_checks=False, relocation_checks=False, size_checks=False, recovery_checks=False, equipment_checks=False, pixel_read_checks=False, builtin_checks=False, enhanced_keyboard_checks=False, help_checks=False, help_tail_checks=False, native_help_checks=False, search_checks=False, native_search_checks=False, toolchain_checks=False, drive_checks=False, command_errors=None, startup_case=None, submit_checks=False, submit_failure=None):
     output.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix='pcmode-test-') as td:
         video = Path(td) / 'video.bin'
@@ -73,10 +73,31 @@ def check(image, output, shell_checks=False, keyboard_checks=False, state_checks
         try:
             receive()
             command('qmp_capabilities')
+            if startup_case:
+                from pcstartupcheck import startup_checks
+                results.extend(startup_checks(hmp, wait, type_command, output, startup_case))
+                (output / 'results.txt').write_text('\n'.join(results) + '\n')
+                print('\n'.join(results))
+                return
             wait(prompt)
+            if submit_failure:
+                from pcstartupcheck import submit_failure_checks
+                results.extend(submit_failure_checks(wait, type_command, prompt, output, submit_failure))
+                (output / 'results.txt').write_text('\n'.join(results) + '\n')
+                print('\n'.join(results))
+                return
+            if submit_checks:
+                from pcstartupcheck import submit_checks as check_submit
+                results.extend(check_submit(wait, type_command, prompt, output))
+                (output / 'results.txt').write_text('\n'.join(results) + '\n')
+                print('\n'.join(results))
+                return
             if command_errors:
                 from pcerrorcheck import error_checks, diagnostic_checks
-                if command_errors == 'diag':
+                if command_errors in ('cmd', 'cmd-baseline'):
+                    from pccmdcheck import checks
+                    results.extend(checks(wait, type_command, prompt, output, command_errors == 'cmd-baseline'))
+                elif command_errors == 'diag':
                     results.extend(diagnostic_checks(wait, type_command, prompt, output))
                 else:
                     results.extend(error_checks(wait, type_command, prompt, output, command_errors == 'native'))
@@ -779,7 +800,10 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--image', type=Path, default=ROOT / 'build/pcmode/pc-text.img')
     parser.add_argument('--output', type=Path, default=ROOT / 'build/pcmode/tests')
-    parser.add_argument('--command-errors', choices=['pc', 'native', 'diag'], help='test parser/CLI diagnostics and error recovery on matching fixtures')
+    parser.add_argument('--startup-case', choices=['compact', 'spaced', 'whitespace', 'unavailable', 'comment', 'empty', 'no-cr', 'native', 'submit', 'help', 'console1'])
+    parser.add_argument('--submit-failure', choices=['missing', 'tail'])
+    parser.add_argument('--submit-checks', action='store_true')
+    parser.add_argument('--command-errors', choices=['pc', 'native', 'diag', 'cmd', 'cmd-baseline'], help='test parser/CLI diagnostics and error recovery on matching fixtures')
     parser.add_argument('--drive-checks', action='store_true', help='compare TMP drive validation; requires a B: companion, skips DOS smoke cases')
     parser.add_argument('--builtins', action='store_true', help='test experimental CLS/SYSDISK parity; requires B: companion')
     parser.add_argument('--search', action='store_true', help='test four-way SETDEF search with isolated search fixture disks')
@@ -807,4 +831,4 @@ if __name__ == '__main__':
     parser.add_argument('--equipment', action='store_true', help='test INT 11h across supported color modes on two consoles; requires equipment companion')
     parser.add_argument('--pixel-read', action='store_true', help='test bounded CGA pixel read on all four consoles; requires matching companion')
     args = parser.parse_args()
-    check(args.image, args.output, args.shell, args.keyboard, args.state, args.graphics, args.loader, args.tools_image, args.failures, args.failure_case, args.mz, args.break_vectors, args.memory_map, args.headers, args.relocations, args.sizes, args.recovery, args.equipment, args.pixel_read, args.builtins, args.enhanced_keyboard, args.help_commands, args.help_tail, args.native_help, args.search, args.search_native, args.toolchain, args.drive_checks, args.command_errors)
+    check(args.image, args.output, args.shell, args.keyboard, args.state, args.graphics, args.loader, args.tools_image, args.failures, args.failure_case, args.mz, args.break_vectors, args.memory_map, args.headers, args.relocations, args.sizes, args.recovery, args.equipment, args.pixel_read, args.builtins, args.enhanced_keyboard, args.help_commands, args.help_tail, args.native_help, args.search, args.search_native, args.toolchain, args.drive_checks, args.command_errors, args.startup_case, args.submit_checks, args.submit_failure)
