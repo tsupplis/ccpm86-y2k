@@ -9,8 +9,8 @@
 ; Explicit initialization preserves all 0AF0h bytes, including per-console
 ; links, process/UDA fields, command/FCB buffers and initial private stack.
 ; Verified against the original RSP DATA group; never resized.
-; *_image labels describe storage; numeric EQU offsets in pctmp.a86 avoid
-; ASM86 typed-label changes to immediate versus memory operand selection.
+; Storage labels define the offsets used by pctmp.a86. OFFSET-valued EQUs
+; keep immediate address operands distinct from typed memory operands.
 ; Original normalized PCTMP DATA, 2,800 bytes. No layout changes.
 ; Resident-system-process prefix, following the TMP/GENCCPM layout.
 ; This normalized DATA is copied once per console; GENCCPM fixes segment links.
@@ -67,7 +67,7 @@ rsp_u_bp			dw	00h		; UDA +2Ch, u_bp
 rsp_u_wrkseg			dw	00h		; UDA +2Eh, u_wrkseg
 rsp_u_retseg			dw	00h		; UDA +30h, u_retseg
 rsp_u_ds_sav			dw	00h		; UDA +32h, u_ds_sav
-rsp_u_stack_sp			dw	0172h		; UDA +34h, u_stack_sp
+rsp_u_stack_sp			dw	offset resident_initial_frame		; UDA +34h, u_stack_sp
 rsp_u_stack_ss			dw	00h		; UDA +36h, u_stack_ss
 rsp_u_ivectors			dw	00h,00h,00h,00h	; UDA +38h, u_ivectors
 rsp_u_ivec87_of			dw	00h		; UDA +40h, u_ivec87_of
@@ -118,14 +118,14 @@ resident_stack:
 	dw	0cccch,0cccch,0cccch,0cccch
 	dw	0cccch,0cccch,0cccch,0cccch
 resident_initial_frame:
-	dw	044h					; process_start IP
+	dw	offset process_start					; process_start IP
 	dw	0					; CODE segment fixed by GENCCPM
 	dw	0					; initial FLAGS fixed by GENCCPM
 
 
 ; 0178h..017Bh: Private far service entry: CODE offset 3, segment fixed at startup.
 service_pointer_image:
-	dw	00003h,00000h
+	dw	offset private_service_entry,0
 
 ; 017Ch..0180h: Native CLI prefix, reused as BATCH command control block.
 batch_prefix_image:
@@ -153,7 +153,7 @@ command_tail_image:
 
 ; 020Bh..020Eh: BDOS 152 packet: saved text offset, output FCB offset.
 parser_packet_image:
-	dw	00245h,00220h
+	dw	offset saved_command_image,offset command_fcb_image
 
 ; 020Fh..0216h: Private service 1: far FCB, far tail; option byte follows.
 load_packet_image:
@@ -193,7 +193,7 @@ shell_delimiters_image:
 
 ; 02D3h..02D4h: Pointer to shell delimiter table.
 shell_delimiter_pointer_image:
-	dw	002c8h
+	dw	offset shell_delimiters_image
 
 ; 02D5h..02D7h: Explicit-drive/search flags and selected one-based drive.
 search_explicit_image:
@@ -309,7 +309,7 @@ cache_fcb_image:
 cache_result_image:
 	db	000h,000h
 
-; 03B8h..03BBh: Original zero storage; +2 reset by DOS flush-input dispatcher.
+; 03B8h..03BBh: Reserved storage.
 file_spare_image:
 	rb	4
 
@@ -394,7 +394,7 @@ exe_record_image:
 
 ; 04E3h..04E6h: Far pointer to record buffer; DATA segment installed at initialization.
 cache_pointer_image:
-	dw	00455h,00000h
+	dw	offset record_buffer_image,0
 
 ; 04E7h..04EAh: Original offset 005Ch pointer; segment initialized to instance DATA.
 default_fcb_pointer_image:

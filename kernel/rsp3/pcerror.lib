@@ -65,6 +65,7 @@ error_table:
 	dw	32,offset error_console
 	dw	36,offset error_console
 	dw	60,offset error_unsupported
+	dw	62,offset error_command_length
 	dw	61,offset error_batch
 	dw	0ffffh,offset error_unknown_text
 error_prefix			db	'Command error: $'
@@ -93,3 +94,5 @@ error_console			db	'Cannot assign console$'
 error_unsupported		db	'Unsupported file type$'
 error_batch			db	'BATCH.CMD not found$'
 	org	(offset $+15) and 0fff0h
+
+error_command_length		db	'Expanded command too long (max 127 characters)$'

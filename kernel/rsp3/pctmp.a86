@@ -6,6 +6,9 @@
 ;*****************************************************************************
 
 ; Native ASM86 PCTMP. All maintained fixes and extensions are mandatory.
+	dseg
+	org	0
+	include	pcdata.lib
 	cseg
 	org	0
 code_origin:
@@ -26,48 +29,48 @@ code_origin:
 ;******************************************************************************
 
 ; Per-instance DATA fields used by decoded routines.
-rsp_sysdat_segment		equ	0000h		; startup link replaced by kernel INIT
-rsp_console_instance		equ	0004h		; zero-based instance set by GENCCPM
-service_entry_segment		equ	017ah		; segment half of private service far pointer
-console_data_bytes		equ	0af0h
+rsp_sysdat_segment		equ	offset rsp_system_link		; startup link replaced by kernel INIT
+rsp_console_instance		equ	offset rsp_console_slot		; zero-based instance set by GENCCPM
+service_entry_segment		equ	offset service_pointer_image+2		; segment half of private service far pointer
+console_data_bytes		equ	offset instance_data_end
 
 ; EXE loader state, in this instance's DATA group. The first 128-byte
 ; header record is read into exe_header and subsequently reused for fixups.
-program_fcb			equ	0220h
+program_fcb		equ	offset command_fcb_image
 fcb_random_record		equ	0021h		; 24-bit CP/M random record number
-loader_memory_base		equ	03cch		; BDOS 55 allocation descriptor, segment
-loader_memory_size		equ	03ceh		; allocated paragraphs returned by BDOS 55
-child_psp_segment		equ	03d3h		; allocation base + 1Bh private paragraphs
-child_memory_size		equ	03d5h		; allocation size minus those private paragraphs
-exe_header			equ	0455h
+loader_memory_base		equ	offset allocation_image		; BDOS 55 allocation descriptor, segment
+loader_memory_size		equ	offset allocation_image+2		; allocated paragraphs returned by BDOS 55
+child_psp_segment		equ	offset child_segments_image+2		; allocation base + 1Bh private paragraphs
+child_memory_size		equ	offset child_segments_image+4		; allocation size minus those private paragraphs
+exe_header		equ	offset record_buffer_image
 exe_relocation_count		equ	exe_header+6
 exe_header_paragraphs		equ	exe_header+8
 exe_initial_ss			equ	exe_header+0eh
 exe_initial_sp			equ	exe_header+10h
 exe_initial_ip			equ	exe_header+14h
 exe_initial_cs			equ	exe_header+16h
-dos_saved_ax			equ	043bh		; return AX in private INT 21h frame
-child_stack_offset		equ	0448h
-child_stack_segment		equ	044ah
-child_entry_segment		equ	044ch
-child_entry_offset		equ	044eh
-child_is_com			equ	02f8h
-exe_records_left		equ	04d8h
-exe_dma_segment			equ	04dah
-exe_image_paragraphs		equ	04dch
+dos_saved_ax		equ	offset dos_result_image		; return AX in private INT 21h frame
+child_stack_offset		equ	offset child_entry_image
+child_stack_segment		equ	offset child_entry_image+2
+child_entry_segment		equ	offset child_entry_image+4
+child_entry_offset		equ	offset child_entry_image+6
+child_is_com		equ	offset console_state_image+6
+exe_records_left		equ	offset exe_transfer_image
+exe_dma_segment		equ	offset exe_transfer_image+2
+exe_image_paragraphs		equ	offset exe_transfer_image+4
 
 exe_relocation_offset		equ	exe_header+18h
-exe_load_segment		equ	04deh
-exe_next_record			equ	04e0h		; low word followed by high byte
-exe_relocation_cursor		equ	04ebh		; byte offset into current header record
+exe_load_segment		equ	offset exe_transfer_image+6
+exe_next_record		equ	offset exe_record_image		; low word followed by high byte
+exe_relocation_cursor		equ	offset relocation_cursor_image		; byte offset into current header record
 
 
-command_buffer			equ	0181h
-command_length			equ	0182h
-command_text			equ	0183h
-command_buffer_end		equ	0207h
-bios_keyboard_pending		equ	02f0h
-command_sent			equ	0208h
+command_buffer		equ	offset command_capacity_image
+command_length		equ	offset command_count_image
+command_text		equ	offset command_text_image
+command_buffer_end		equ	offset command_text_image+132
+bios_keyboard_pending		equ	offset keyboard_pending_image
+command_sent		equ	offset command_sent_image
 
 ; Stable SYSDAT/PD fields. DS must select SYSDAT before using sd_* fields.
 sd_supervisor_segment		equ	0040h
@@ -81,128 +84,211 @@ pd_console_number		equ	0020h
 
 ; Saved INT 10h register-frame slots and packet ABI, selected per console.
 pd_uda_segment			equ	010h
-bios_frame_ax			equ	0439h
-bios_frame_bx			equ	0437h
-bios_frame_bh			equ	0438h
-bios_frame_cx			equ	0435h
-bios_frame_dx			equ	0431h
-bios_packet_ax			equ	05aeh
-bios_packet_bx			equ	05b0h
-bios_packet_cx			equ	05b2h
-bios_packet_dx			equ	05b4h
-bios_packet_console		equ	05b6h
+bios_frame_ax		equ	offset dos_frame_image+16
+bios_frame_bx		equ	offset dos_frame_image+14
+bios_frame_bh		equ	offset dos_frame_image+15
+bios_frame_cx		equ	offset dos_frame_image+12
+bios_frame_dx		equ	offset dos_frame_image+8
+bios_packet_ax		equ	offset bios_register_packet_image
+bios_packet_bx		equ	offset bios_register_packet_image+2
+bios_packet_cx		equ	offset bios_register_packet_image+4
+bios_packet_dx		equ	offset bios_register_packet_image+6
+bios_packet_console		equ	offset bios_console_image
 
-dos_output_column		equ	02f3h
-dos_output_suppressed		equ	02f4h
-dos_printer_echo		equ	02f5h
-dos_line_origin			equ	02f6h
-dos_scan_pending		equ	02f2h
+dos_output_column		equ	offset console_state_image+1
+dos_output_suppressed		equ	offset console_state_image+2
+dos_printer_echo		equ	offset console_state_image+3
+dos_line_origin		equ	offset console_state_image+4
+dos_scan_pending		equ	offset console_state_image
 
-dos_console_number		equ	04f7h
-dos_list_number			equ	04f8h
+dos_console_number		equ	offset runtime_flags_image+2
+dos_list_number		equ	offset runtime_flags_image+3
 
-service_caller_ds		equ	0450h
-service_memory_paragraphs	equ	06a8h
-service_flags			equ	06a5h
+service_caller_ds		equ	offset service_ds_image
+service_memory_paragraphs		equ	offset memory_setting_image
+service_flags		equ	offset private_service_flags_image
 
-dos_dta_offset			equ	03c4h
-dos_dta_segment			equ	03c6h
-dos_saved_es			equ	042dh
+dos_dta_offset		equ	offset dos_dma_image
+dos_dta_segment		equ	offset dos_dma_image+2
+dos_saved_es		equ	offset dos_frame_image+4
 
-dos_vectors_active		equ	04f5h
-dos_file_slots			equ	072ah
+dos_vectors_active		equ	offset runtime_flags_image
+dos_file_slots		equ	offset private_fcb_slots_image
 
 
-critical_context		equ	0446h
+critical_context		equ	offset critical_stacks_image+8
 
 ; Decoded interrupt-frame and direct-BIOS packet fields.
-dos_entry_ax			equ	0429h
-dos_caller_ds			equ	0433h
-dos_nested_console		equ	043dh
-dos_nested_stack		equ	0444h
-printer_bios_function		equ	051fh
-printer_bios_character		equ	0520h
-printer_bios_device		equ	0522h
-dos_saved_function		equ	043ah
-raw_disk_operation		equ	05b7h
-raw_disk_drive			equ	05b8h
-raw_disk_count			equ	05b9h
-raw_disk_head			equ	05bah
-raw_disk_sector			equ	05bbh
-raw_disk_cylinder		equ	05bch
-raw_disk_buffer			equ	05bdh
-raw_disk_segment		equ	05bfh
+dos_entry_ax		equ	offset dos_frame_image
+dos_caller_ds		equ	offset dos_frame_image+10
+dos_nested_console		equ	offset dos_nested_image
+dos_nested_stack		equ	offset critical_stacks_image+6
+printer_bios_function		equ	offset printer_state_image+2
+printer_bios_character		equ	offset printer_state_image+3
+printer_bios_device		equ	offset printer_state_image+5
+dos_saved_function		equ	offset dos_frame_image+17
+raw_disk_operation		equ	offset raw_disk_packet_image
+raw_disk_drive		equ	offset raw_disk_packet_image+1
+raw_disk_count		equ	offset raw_disk_packet_image+2
+raw_disk_head		equ	offset raw_disk_packet_image+3
+raw_disk_sector		equ	offset raw_disk_packet_image+4
+raw_disk_cylinder		equ	offset raw_disk_packet_image+5
+raw_disk_buffer		equ	offset raw_disk_packet_image+6
+raw_disk_segment		equ	offset raw_disk_packet_image+8
 
 
-saved_command_text		equ	0245h
-command_tail_pointer		equ	0209h
-service_entry			equ	0178h
+saved_command_text		equ	offset saved_command_image
+command_tail_pointer		equ	offset command_tail_image
+service_entry		equ	offset service_pointer_image
 
-original_search_explicit	equ	02d5h
-original_search_drive_number	equ	02d7h
-original_search_types_left	equ	02dbh
-original_search_user_zero	equ	0217h
+original_search_explicit		equ	offset search_explicit_image
+original_search_drive_number		equ	offset search_explicit_image+2
+original_search_types_left		equ	offset search_count_image
+original_search_user_zero		equ	offset load_user_zero_image
 
-dos_extended_fcb		equ	03bch
-dos_fcb_attribute		equ	03bdh
-dos_fcb_offset			equ	03c8h
-dos_fcb_segment			equ	03cah
-dos_fcb_slot			equ	04edh
+dos_extended_fcb		equ	offset fcb_attribute_image
+dos_fcb_attribute		equ	offset fcb_attribute_image+1
+dos_fcb_offset		equ	offset application_fcb_image
+dos_fcb_segment		equ	offset application_fcb_image+2
+dos_fcb_slot		equ	offset slot_pointer_image
 
-critical_private_ss		equ	0442h
-critical_child_ss		equ	043eh
-critical_child_sp		equ	0440h
+critical_private_ss		equ	offset critical_stacks_image+4
+critical_child_ss		equ	offset critical_stacks_image
+critical_child_sp		equ	offset critical_stacks_image+2
 
-native_clock_pointer		equ	04f1h
-native_dma_offset		equ	03c0h
-native_dma_segment		equ	03c2h
-dos_current_drive		equ	03a8h
-dos_working_drive		equ	03a9h
-dos_device_id			equ	02f7h
+native_clock_pointer		equ	offset clock_pointer_image
+native_dma_offset		equ	offset native_dma_image
+native_dma_segment		equ	offset native_dma_image+2
+dos_current_drive		equ	offset drive_state_image
+dos_working_drive		equ	offset drive_state_image+1
+dos_device_id		equ	offset console_state_image+5
 
-cached_fcb_slot			equ	03b4h
-record_cache_dirty		equ	03b3h
-record_cache_valid		equ	03b6h
-directory_timestamp_mode	equ	04f6h
+cached_fcb_slot		equ	offset cache_fcb_image
+record_cache_dirty		equ	offset cache_user_dirty_image+1
+record_cache_valid		equ	offset cache_result_image
+directory_timestamp_mode		equ	offset runtime_flags_image+1
 
-record_cache_result		equ	03b7h
-record_cache_user		equ	03b2h
-record_cache_number		equ	03a0h
-record_cache_buffer		equ	04e3h
+record_cache_result		equ	offset cache_result_image+1
+record_cache_user		equ	offset cache_user_dirty_image
+record_cache_number		equ	offset cache_record_image
+record_cache_buffer		equ	offset cache_pointer_image
 
-loader_user_zero		equ	0452h
-loader_compatibility_flags	equ	0453h
-loader_saved_user		equ	0454h
-loader_command_text		equ	05abh
+loader_user_zero		equ	offset load_flags_image
+loader_compatibility_flags		equ	offset load_flags_image+1
+loader_saved_user		equ	offset load_flags_image+2
+loader_command_text		equ	offset launch_command_pointer_image
 
-directory_dos_attributes	equ	03beh
+directory_dos_attributes		equ	offset fcb_attribute_image+2
 
-dos_saved_si			equ	042fh
-dos_saved_di			equ	042bh
-parse_status			equ	0305h
-parse_drive_present		equ	0306h
-parse_name_present		equ	0307h
-parse_type_present		equ	0308h
+dos_saved_si		equ	offset dos_frame_image+6
+dos_saved_di		equ	offset dos_frame_image+2
+parse_status		equ	offset parse_flags_image
+parse_drive_present		equ	offset parse_flags_image+1
+parse_name_present		equ	offset parse_flags_image+2
+parse_type_present		equ	offset parse_flags_image+3
 
-transfer_advance_random		equ	03adh
-transfer_requested_records	equ	039eh
-transfer_buffer_offset		equ	03a4h
-transfer_whole_records		equ	03aeh
-transfer_record_span		equ	03b0h
-transfer_first_byte		equ	0385h
-transfer_first_record		equ	0389h
-transfer_last_byte		equ	038dh
-transfer_start_offset		equ	0395h
-transfer_start_high		equ	0397h
-transfer_has_partial		equ	03aah
-transfer_bytes_done		equ	03abh
-console_record_position		equ	0524h
-console_record_pending		equ	0526h
-console_record_length		equ	0528h
+transfer_advance_random		equ	offset transfer_advance_image
+transfer_requested_records		equ	offset transfer_records_image
+transfer_buffer_offset		equ	offset transfer_dma_image
+transfer_whole_records		equ	offset transfer_span_image
+transfer_record_span		equ	offset transfer_span_image+2
+transfer_first_byte		equ	offset transfer_boundaries_image
+transfer_first_record		equ	offset transfer_boundaries_image+4
+transfer_last_byte		equ	offset transfer_boundaries_image+8
+transfer_start_offset		equ	offset transfer_size_image+2
+transfer_start_high		equ	offset transfer_size_image+4
+transfer_has_partial		equ	offset drive_state_image+2
+transfer_bytes_done		equ	offset transfer_done_image
+console_record_position		equ	offset console_record_cursor_image
+console_record_pending		equ	offset console_record_flag_image
+console_record_length		equ	offset console_record_count_image
 
+
+
+; Private buffer and pointer offsets derived from pcdata.lib.
+batch_prefix_offset		equ	offset batch_prefix_image
+batch_prefix_offset_4		equ	offset batch_prefix_image+4
+command_text_offset_1		equ	offset command_text_image+1
+parser_packet_offset		equ	offset parser_packet_image
+load_packet_offset		equ	offset load_packet_image
+load_packet_offset_2		equ	offset load_packet_image+2
+load_packet_offset_4		equ	offset load_packet_image+4
+load_packet_offset_6		equ	offset load_packet_image+6
+queue_prefix_offset		equ	offset queue_prefix_image
+command_fcb_offset_1		equ	offset command_fcb_image+1
+command_fcb_offset_9		equ	offset command_fcb_image+9
+command_fcb_offset_10		equ	offset command_fcb_image+10
+command_fcb_offset_11		equ	offset command_fcb_image+11
+command_fcb_offset_16		equ	offset command_fcb_image+16
+batch_pending_offset		equ	offset batch_pending_image
+shell_delimiter_pointer		equ	offset shell_delimiter_pointer_image
+shell_scan_limits_offset		equ	offset shell_scan_limits_image
+shell_delimiter_offset		equ	offset shell_delimiter_image
+search_packet_direction		equ	offset search_packet_direction_image
+shell_extensions_offset		equ	offset shell_extensions_image
+shell_extensions_offset_2		equ	offset shell_extensions_image+2
+shell_extensions_offset_3		equ	offset shell_extensions_image+3
+shell_extensions_offset_6		equ	offset shell_extensions_image+6
+shell_extensions_offset_9		equ	offset shell_extensions_image+9
+dos_launch_pending_offset		equ	offset dos_launch_pending_image
+decimal_started_offset		equ	offset decimal_started_image
+dos_delimiters_offset		equ	offset dos_delimiters_image
+parse_fcb_offset		equ	offset parse_fcb_image
+parse_fcb_offset_1		equ	offset parse_fcb_image+1
+parse_fcb_offset_9		equ	offset parse_fcb_image+9
+original_spare_offset_107		equ	offset original_spare_image+107
+original_spare_offset_109		equ	offset original_spare_image+109
+transfer_boundaries_offset_2		equ	offset transfer_boundaries_image+2
+transfer_boundaries_offset_6		equ	offset transfer_boundaries_image+6
+transfer_boundaries_offset_10		equ	offset transfer_boundaries_image+10
+transfer_boundaries_offset_12		equ	offset transfer_boundaries_image+12
+transfer_size_offset		equ	offset transfer_size_image
+transfer_size_offset_6		equ	offset transfer_size_image+6
+transfer_size_offset_8		equ	offset transfer_size_image+8
+transfer_overflow_offset		equ	offset transfer_overflow_image
+cache_record_offset_1		equ	offset cache_record_image+1
+cache_record_offset_2		equ	offset cache_record_image+2
+transfer_dma_offset_2		equ	offset transfer_dma_image+2
+child_segments_offset		equ	offset child_segments_image
+child_segments_offset_6		equ	offset child_segments_image+6
+dos_frame_offset_13		equ	offset dos_frame_image+13
+record_buffer_offset_4		equ	offset record_buffer_image+4
+record_buffer_offset_8		equ	offset record_buffer_image+8
+record_buffer_offset_10		equ	offset record_buffer_image+10
+cache_pointer_offset_2		equ	offset cache_pointer_image+2
+default_fcb_pointer_offset_2		equ	offset default_fcb_pointer_image+2
+slot_pointer_offset_2		equ	offset slot_pointer_image+2
+clock_pointer_offset_2		equ	offset clock_pointer_image+2
+month_days_offset_1		equ	offset month_days_image+1
+month_starts_offset		equ	offset month_starts_image
+console_record_capacity_offset		equ	offset console_record_capacity_image
+console_record_text_offset		equ	offset console_record_text_image
+launch_command_count_offset		equ	offset launch_command_count_image
+directory_state_offset		equ	offset directory_state_image
+active_vectors_offset		equ	offset active_vectors_image
+original_vectors_offset		equ	offset original_vectors_image
+attach_packet_offset		equ	offset attach_packet_image
+private_service_word_offset		equ	offset private_service_word_image
+metadata_fcb_offset		equ	offset metadata_fcb_image
+metadata_fcb_offset_1		equ	offset metadata_fcb_image+1
+metadata_fcb_offset_32		equ	offset metadata_fcb_image+32
+invalid_dos_message_offset		equ	offset invalid_dos_message_image
+printer_busy_message_offset		equ	offset printer_busy_message_image
+private_extensions_offset		equ	offset private_extensions_image
+
+; Native XIOS header and packed PC-MODE operation selectors.
+xios_service_entry equ 0c03h
+xios_console_table equ 0c14h
+xios_list_table equ 0c16h
+xios_disk_table equ 0c18h
+xios_pixel_write equ 0c1fh
+fcb_slot_bytes equ 40
+fcb_slot_count equ (offset data_padding_image-offset private_fcb_slots_image)/fcb_slot_bytes
+fcb_slots_end equ offset data_padding_image
 
 ; Two public entry jumps precede the vendor/version identification bytes.
 	jmp	process_start
+private_service_entry:
 	jmp	pcmode_service
 ; Decoded original region 0006h..0043h.
 
@@ -294,10 +380,10 @@ command_prompt_resume:
 	call	free_all_memory
 	call	console_attach
 	mov	cl,0
-	callf	dword ptr .0178h
-	cmp	byte ptr .02eeh,0ffh			; DOS-launch flag, cleared when returning to the prompt
+	callf	dword ptr .service_entry
+	cmp	byte ptr .dos_launch_pending_offset,0ffh			; DOS-launch flag, cleared when returning to the prompt
 	jne	command_prompt_spacing
-	mov	byte ptr .02eeh,0
+	mov	byte ptr .dos_launch_pending_offset,0
 command_prompt_spacing:
 	cmp	byte ptr .command_sent,0
 	je	command_prompt_user
@@ -395,18 +481,18 @@ command_parse_tail:
 	db	003h,0d8h				; add bx,ax (original encoding)
 	mov	byte ptr [bx],00h
 	mov	cx,040h
-	mov	si,0183h
-	mov	di,0245h
+	mov	si,command_text
+	mov	di,saved_command_text
 	push	ds
 	pop	es
 	rep	movsw
-	mov	si,0220h
-	mov	di,0245h
+	mov	si,program_fcb
+	mov	di,saved_command_text
 	call	parse_command_filename
 	jcxz	command_parse_ok
 	db	02bh,0dbh				; sub bx,bx (original encoding)
 	mov	bl,.command_length
-	add	bx,0245h
+	add	bx,saved_command_text
 	mov	byte ptr [bx],024h
 	jmp	command_error_entry
 command_parse_ok:
@@ -414,7 +500,7 @@ command_parse_ok:
 	cmp	bx,00h
 	jnz	command_mark_end
 	mov	bl,.command_length
-	add	bx,0245h
+	add	bx,saved_command_text
 command_mark_end:
 	mov	byte ptr [bx],024h
 	inc	bx
@@ -424,7 +510,7 @@ command_mark_end:
 
 ; Compare nine FCB bytes with a CS command name; return comparison flags.
 match_original_builtin:
-	mov	si,0220h
+	mov	si,program_fcb
 	inc	si
 	push	cs
 	pop	es
@@ -432,7 +518,7 @@ match_original_builtin:
 	repe	cmpsb
 	ret
 ; The original unqualified-built-in dispatch starts with MOV DI,0BA0h.
-; Qualified commands already bypass this point. Retain every original offset.
+; Qualified commands already bypass this point.
 command_builtin_entry:
 	jmp	shell_extensions
 ; Decoded original region 020Bh..04C0h.
@@ -442,7 +528,7 @@ command_builtin_entry:
 original_user_dispatch:
 	call	match_original_builtin
 	jnz	original_memory_dispatch
-	mov	si,0220h
+	mov	si,program_fcb
 	mov	di,.command_tail_pointer
 	cmp	di,00h
 	jz	user_show
@@ -450,7 +536,7 @@ original_user_dispatch:
 	call	parse_command_filename
 	cmp	cx,00h
 	jnz	user_show
-	mov	si,0220h
+	mov	si,program_fcb
 	inc	si
 	mov	dx,[si]
 	mov	ch,030h
@@ -480,7 +566,7 @@ original_memory_dispatch:
 	mov	di,offset original_name_memory
 	call	match_original_builtin
 	jnz	original_ndp_dispatch
-	mov	si,0220h
+	mov	si,program_fcb
 	mov	di,.command_tail_pointer
 	cmp	di,00h
 	jz	memory_show
@@ -488,7 +574,7 @@ original_memory_dispatch:
 	call	parse_command_filename
 	cmp	cx,00h
 	jnz	memory_show
-	mov	si,0220h
+	mov	si,program_fcb
 	inc	si
 	mov	ch,[si]
 	inc	si
@@ -526,7 +612,7 @@ original_ndp_dispatch:
 	jz	ndp_argument
 	jmp	original_del_dispatch
 ndp_argument:
-	mov	si,0220h
+	mov	si,program_fcb
 	mov	di,.command_tail_pointer
 	cmp	di,00h
 	jz	ndp_show
@@ -534,7 +620,7 @@ ndp_argument:
 	call	parse_command_filename
 	cmp	cx,00h
 	jnz	ndp_show
-	mov	si,0221h
+	mov	si,command_fcb_offset_1
 	mov	di,offset original_off
 	mov	cx,02h
 	call	compare_code_words
@@ -544,7 +630,7 @@ ndp_argument:
 	callf	dword ptr .service_entry
 	jmps	ndp_show
 ndp_try_on:
-	mov	si,0220h
+	mov	si,program_fcb
 	inc	si
 	mov	di,offset original_on
 	mov	cx,02h
@@ -589,33 +675,45 @@ original_del_dispatch:
 	mov	di,offset original_name_del
 	call	match_original_builtin
 	jnz	original_rename_dispatch
+	cmp	byte ptr .command_length,121
+	ja	command_expansion_error
 	push	es
 	push	ds
 	push	ds
 	pop	es
+	xor	cx,cx
+	mov	cl,.command_length
+	mov	si,offset command_text
+	add	si,cx
+	mov	di,si
+	add	di,6
+	sub	cx,3
+	inc	cx
 	std
-	mov	si,0207h
-	mov	di,020dh
-	mov	cx,084h
 	rep	movsb
-	dec	si
-	add	byte ptr [si],06h
+	add	byte ptr .command_length,6
 	cld
 	push	cs
 	pop	ds
 	mov	si,offset original_erase_command
-	mov	di,0183h
+	mov	di,command_text
 	mov	cx,0ah
 	rep	movsb
 	pop	ds
 	pop	es
 	jmp	command_normalize
 
+command_expansion_error:
+	mov	cx,62
+	jmp	shell_command_error
+
 ; RENAME inserts .EXE into the command and reparses it.
 original_rename_dispatch:
 	mov	di,offset original_name_rename
 	call	match_original_builtin
 	jnz	original_rem_dispatch
+	cmp	byte ptr .command_length,126
+	ja	command_expansion_error
 	push	es
 	push	ds
 	push	ds
@@ -623,12 +721,12 @@ original_rename_dispatch:
 	db	033h,0c0h				; xor ax,ax (original encoding)
 	mov	al,.command_length
 	inc	byte ptr .command_length
-	mov	si,0182h
+	mov	si,command_text
 	db	003h,0f0h				; add si,ax (original encoding)
 	db	08bh,0feh				; mov di,si (original encoding)
 	inc	di
 	db	08bh,0c8h				; mov cx,ax (original encoding)
-	sub	cx,06h
+	sub	cx,05h
 	std
 	rep	movsb
 	cld
@@ -668,7 +766,7 @@ original_suspend_dispatch:
 	mov	di,offset original_name_suspend
 	call	match_original_builtin
 	jnz	original_printer_dispatch
-	mov	si,0220h
+	mov	si,program_fcb
 	mov	di,.command_tail_pointer
 	cmp	di,00h
 	jz	suspend_show
@@ -676,7 +774,7 @@ original_suspend_dispatch:
 	call	parse_command_filename
 	cmp	cx,00h
 	jnz	suspend_show
-	mov	si,0221h
+	mov	si,command_fcb_offset_1
 	mov	di,offset original_off
 	mov	cx,02h
 	call	compare_code_words
@@ -686,7 +784,7 @@ original_suspend_dispatch:
 	callf	dword ptr .service_entry
 	jmps	suspend_show
 suspend_try_on:
-	mov	si,0220h
+	mov	si,program_fcb
 	inc	si
 	mov	di,offset original_on
 	mov	cx,02h
@@ -720,7 +818,7 @@ original_printer_dispatch:
 	mov	di,offset original_name_printer
 	call	match_original_builtin
 	jnz	external_command_entry
-	mov	si,0220h
+	mov	si,program_fcb
 	mov	di,.command_tail_pointer
 	cmp	di,00h
 	jz	printer_number_show
@@ -728,7 +826,7 @@ original_printer_dispatch:
 	call	parse_command_filename
 	cmp	cx,00h
 	jnz	printer_number_show
-	mov	si,0220h
+	mov	si,program_fcb
 	inc	si
 	mov	dx,[si]
 	mov	ch,030h
@@ -766,7 +864,7 @@ print_off:
 	call	print_console_character
 	ret
 external_command_entry:
-; Replace the original external pre-search prologue, keeping all offsets.
+; Route external commands through the configured search order.
 	jmp	search_command
 	nop
 	nop
@@ -793,7 +891,7 @@ original_search_drive:
 	cmp	byte ptr .original_search_explicit,0ffh
 	jz	original_search_settings
 	mov	cl,087h
-	mov	dx,0219h
+	mov	dx,queue_prefix_offset
 	call	ccpm_call
 	inc	al
 	jz	original_search_settings
@@ -803,7 +901,7 @@ original_search_drive:
 ; Fetch the twelve-byte private search settings, then try CMD/COM/EXE/BAT.
 original_search_settings:
 	mov	cl,06h
-	mov	dx,02e1h
+	mov	dx,search_packet_direction
 	callf	dword ptr .service_entry
 	mov	byte ptr .original_search_types_left,04h
 	mov	cl,02dh
@@ -813,7 +911,7 @@ original_search_settings:
 original_search_next:
 	call	original_next_extension
 original_search_open:
-	mov	dx,0220h
+	mov	dx,program_fcb
 	call	open_command_file
 	inc	al
 	jz	original_search_failed
@@ -831,27 +929,27 @@ original_search_failed:
 	pop	es
 	inc	al
 	mov	.program_fcb,al
-	mov	dx,0220h
+	mov	dx,program_fcb
 	call	open_command_file
 	inc	al
 	jz	original_search_restore_drive
 
 ; Require SYS attribute (extension byte 2, bit 7) for system-disk fallback.
 ; If absent, close and retry user 0; restore the caller user on every path.
-	mov	al,.022ah
+	mov	al,.command_fcb_offset_10
 	test	al,080h
 	jnz	original_search_selected
-	mov	dx,0220h
+	mov	dx,program_fcb
 	call	close_command_file
 	call	current_user_get
 	push	ax
 	mov	dl,00h
 	call	current_user_set
-	mov	dx,0220h
+	mov	dx,program_fcb
 	call	open_command_file
 	inc	al
 	jz	original_search_restore_user
-	test	byte ptr .022ah,080h
+	test	byte ptr .command_fcb_offset_10,080h
 	jz	original_search_close_user_zero
 
 ; Remember user-zero origin for the subsequent loader.
@@ -860,7 +958,7 @@ original_search_failed:
 	mov	byte ptr .original_search_user_zero,0ffh
 	jmps	original_search_selected
 original_search_close_user_zero:
-	mov	dx,0220h
+	mov	dx,program_fcb
 	call	close_command_file
 original_search_restore_user:
 	pop	dx
@@ -894,7 +992,7 @@ original_search_found:
 	xor	dl,dl
 	call	ccpm_call
 original_dispatch_type:
-	mov	bx,022bh
+	mov	bx,command_fcb_offset_11
 	mov	al,[bx]
 	and	al,07fh
 	cmp	al,044h
@@ -902,7 +1000,7 @@ original_dispatch_type:
 	mov	byte ptr .original_search_explicit,0ffh
 	jmp	prepare_cli_command
 original_search_not_cmd:
-	mov	bx,0229h
+	mov	bx,command_fcb_offset_9
 	mov	al,[bx]
 	and	al,07fh
 	cmp	al,042h
@@ -913,15 +1011,15 @@ original_search_not_cmd:
 ; Submit service 1; report nonzero BX as a command error.
 original_search_dos:
 	mov	byte ptr .command_length,00h
-	mov	dx,0182h
-	mov	byte ptr .0208h,0ffh
-	mov	byte ptr .02eeh,0ffh
-	mov	byte ptr .02c7h,00h
-	mov	word ptr .020fh,0220h
-	mov	word ptr .0211h,ds
-	mov	.0213h,dx
-	mov	word ptr .0215h,ds
-	mov	dx,020fh
+	mov	dx,command_length
+	mov	byte ptr .command_sent,0ffh
+	mov	byte ptr .dos_launch_pending_offset,0ffh
+	mov	byte ptr .batch_pending_offset,00h
+	mov	word ptr .load_packet_offset,0220h
+	mov	word ptr .load_packet_offset_2,ds
+	mov	.load_packet_offset_4,dx
+	mov	word ptr .load_packet_offset_6,ds
+	mov	dx,load_packet_offset
 	mov	cl,01h
 	callf	dword ptr .service_entry
 	cmp	bx,00h
@@ -934,7 +1032,7 @@ original_search_done:
 ; Blank returns AL=0. A match returns its first character; invalid discards
 ; the return address and branches to command error 60.
 original_check_extension:
-	mov	bx,0229h
+	mov	bx,command_fcb_offset_9
 	cmp	byte ptr [bx],020h
 	jnz	original_extension_present
 	mov	al,00h
@@ -942,7 +1040,7 @@ original_check_extension:
 original_extension_present:
 	mov	cx,04h
 	add	bx,02h
-	mov	si,02e4h
+	mov	si,shell_extensions_offset_2
 original_extension_scan:
 	mov	al,[bx]
 	cmp	al,[si]
@@ -970,23 +1068,23 @@ original_extension_invalid:
 
 ; Copy the next historical extension into the FCB; remaining count selects it.
 original_next_extension:
-	mov	di,0229h
+	mov	di,command_fcb_offset_9
 	cmp	byte ptr .original_search_types_left,04h
 	jnz	original_extension_not_cmd
-	mov	si,02e2h
+	mov	si,shell_extensions_offset
 	jmps	original_extension_copy
 original_extension_not_cmd:
 	cmp	byte ptr .original_search_types_left,03h
 	jnz	original_extension_not_com
-	mov	si,02e5h
+	mov	si,shell_extensions_offset_3
 	jmps	original_extension_copy
 original_extension_not_com:
 	cmp	byte ptr .original_search_types_left,02h
 	jnz	original_extension_bat
-	mov	si,02e8h
+	mov	si,shell_extensions_offset_6
 	jmps	original_extension_copy
 original_extension_bat:
-	mov	si,02ebh
+	mov	si,shell_extensions_offset_9
 original_extension_copy:
 	mov	cl,03h
 	rep	movsb
@@ -1004,7 +1102,7 @@ original_extension_copy:
 read_command_line:
 	push	ds
 	pop	es
-	mov	byte ptr .02c7h,0
+	mov	byte ptr .batch_pending_offset,0
 	mov	byte ptr .command_buffer,80h
 	mov	cl,10
 	mov	dx,command_buffer
@@ -1057,9 +1155,9 @@ scan_command_character:
 	push	cx
 	push	bx
 	mov	ch,00h
-	mov	cl,.02d8h
+	mov	cl,.shell_scan_limits_offset
 	db	08bh,0d9h				; mov bx,cx (original encoding)
-	mov	di,.02d3h
+	mov	di,.shell_delimiter_pointer
 	repne	scasb
 	pop	bx
 	pop	cx
@@ -1069,7 +1167,7 @@ scan_command_character:
 ; Compare DS:[BX] against the parser delimiter byte at DATA:02E0h.
 compare_command_delimiter:
 	mov	al,[bx]
-	cmp	al,.02e0h
+	cmp	al,.shell_delimiter_offset
 	ret
 
 ; Print CS:DX dollar-terminated text through the DS-string wrapper; preserve DS.
@@ -1091,12 +1189,12 @@ print_console_character:
 print_decimal_place:
 	div	cx
 	push	dx
-	cmp	byte ptr .02efh,0ffh
+	cmp	byte ptr .decimal_started_offset,0ffh
 	jz	print_nonzero_place
 	db	00bh,0c0h				; or ax,ax (original encoding)
 	jz	decimal_place_remainder
 print_nonzero_place:
-	mov	byte ptr .02efh,0ffh
+	mov	byte ptr .decimal_started_offset,0ffh
 	mov	dl,al
 	add	dl,030h
 	call	print_console_character
@@ -1108,7 +1206,7 @@ decimal_place_remainder:
 ; Print unsigned AX (0..65535), including zero, using 10000/1000/100/10 divisors.
 ; Modifies AX/CX/DX and DATA:02EFh.
 print_unsigned_decimal:
-	mov	byte ptr .02efh,00h
+	mov	byte ptr .decimal_started_offset,00h
 	db	033h,0d2h				; xor dx,dx (original encoding)
 	mov	cx,02710h
 	call	print_decimal_place
@@ -1131,41 +1229,41 @@ print_data_string:
 ; Prepare CH command prefix; when needed shift text back two bytes and add drive.
 ; Uses the existing per-console command buffer and CLI control block.
 prepare_chain_command:
-	mov	byte ptr .0180h,043h
-	mov	byte ptr .0181h,048h
-	mov	byte ptr .0182h,020h
-	cmp	byte ptr .02d5h,00h
+	mov	byte ptr .batch_prefix_offset_4,043h
+	mov	byte ptr .command_buffer,048h
+	mov	byte ptr .command_length,020h
+	cmp	byte ptr .original_search_explicit,00h
 	jnz	chain_command_ready
 	push	ds
 	pop	es
 	mov	cx,084h
-	mov	di,0207h
+	mov	di,command_buffer_end
 	db	08bh,0f7h				; mov si,di (original encoding)
 	dec	si
 	dec	si
 	std
 	rep	movsb
 	cld
-	mov	al,.02d7h
+	mov	al,.original_search_drive_number
 	add	al,040h
-	mov	.0183h,al
-	mov	byte ptr .0184h,03ah
+	mov	.command_text,al
+	mov	byte ptr .command_text_offset_1,03ah
 chain_command_ready:
-	lea	dx,.017ch
-	mov	byte ptr .02c7h,0ffh
+	lea	dx,.batch_prefix_offset
+	mov	byte ptr .batch_pending_offset,0ffh
 	jmps	submit_native_command
 
 ; Release all process memory before submitting the native CLI control block.
 prepare_cli_command:
 	mov	dx,0ffffh
 	call	free_all_memory
-	mov	byte ptr .0180h,00h
-	lea	dx,.0180h
-	cmp	byte ptr .02d5h,00h
+	mov	byte ptr .batch_prefix_offset_4,00h
+	lea	dx,.batch_prefix_offset_4
+	cmp	byte ptr .original_search_explicit,00h
 	jz	submit_native_command
 	inc	dx
 	inc	dx
-	mov	byte ptr .0182h,00h
+	mov	byte ptr .command_length,00h
 
 ;------------------------------------------------------------------------------
 ; submit_native_command (07B4h), shared by the CLI launch setup paths.
@@ -1187,13 +1285,13 @@ submit_native_command:
 
 ; Map a failed BATCH launch to error 61; otherwise retain the native error.
 native_cli_error:
-	cmp	byte ptr .02c7h,0ffh
+	cmp	byte ptr .batch_pending_offset,0ffh
 	jne	command_error_entry
-	mov	byte ptr .02c7h,0
+	mov	byte ptr .batch_pending_offset,0
 	mov	cx,61
 	jmp	command_error_entry
 native_cli_success:
-	mov	byte ptr .02d5h,0ffh
+	mov	byte ptr .original_search_explicit,0ffh
 	jmp	command_prompt_resume
 
 command_error_entry:
@@ -1231,7 +1329,7 @@ print_command_error:
 	call	print_code_newline
 	mov	dx,offset original_msg_command_prefix
 	call	print_code_string
-	mov	dx,0245h
+	mov	dx,saved_command_text
 	call	print_data_string
 	call	print_code_newline
 	jmp	command_prompt_resume
@@ -1271,7 +1369,7 @@ compare_code_words:
 ; BDOS 152: store source DI and destination SI in the per-console parse packet.
 parse_command_filename:
 	mov	cx,098h
-	mov	bx,020bh
+	mov	bx,parser_packet_offset
 	mov	[bx],di
 	mov	02h[bx],si
 	mov	dx,bx
@@ -1518,12 +1616,12 @@ original_service_identification:
 ; Save the original INT E0h vector for the private BDOS gateway.
 initialize_pc_mode:
 	mov	es,word ptr .rsp_sysdat_segment
-	mov	word ptr .04f3h,es
+	mov	word ptr .clock_pointer_offset_2,es
 	mov	cs:word ptr shared_sysdat_segment,es
 	mov	ax,ds
-	mov	word ptr .04e5h,ax			; private far-pointer segment components
-	mov	word ptr .04efh,ax
-	mov	word ptr .04e9h,ax
+	mov	word ptr .cache_pointer_offset_2,ax			; private far-pointer segment components
+	mov	word ptr .slot_pointer_offset_2,ax
+	mov	word ptr .default_fcb_pointer_offset_2,ax
 	mov	si,es:word ptr .sd_running_process
 	db	026h					; ES override, original disp8
 	mov	bl,pd_console_number[si]
@@ -1539,9 +1637,9 @@ initialize_bdos_vector:
 	push	ds
 	mov	ax,0
 	mov	ds,ax
-	mov	ax,word ptr .0380h
+	mov	ax,word ptr .original_spare_offset_107
 	mov	cs:word ptr shared_bdos_vector,ax
-	mov	ax,word ptr .0382h
+	mov	ax,word ptr .original_spare_offset_109
 	mov	cs:word ptr shared_bdos_vector+2,ax
 	pop	ds
 initialize_wait_console_zero:
@@ -1575,7 +1673,7 @@ pcmode_service:
 	xor	bh,bh
 	shl	bx,1
 	mov	ax,0ffffh
-	cmp	cl,8
+	cmp	cl,(offset service_table_end-offset service_table)/2
 	jnc	service_return
 	call	cs:word ptr service_table[bx]
 service_return:
@@ -1593,6 +1691,7 @@ service_table:
 	dw	offset service_word_setting
 	dw	offset service_copy_settings
 	dw	offset service_command_names
+service_table_end:
 
 
 ; Copy caller FCB and command tail into private DATA, then load/execute.
@@ -1610,7 +1709,7 @@ service_load:
 	lodsw
 	push	ax
 	lodsb
-	mov	es:byte ptr .0452h,al
+	mov	es:byte ptr .loader_user_zero,al
 	mov	di,program_fcb
 	mov	cx,18
 	db	08bh,0f3h				; mov si,bx, original direction encoding
@@ -1675,10 +1774,10 @@ service_suspend_on:
 service_word_setting:
 	cmp	dx,0ffffh
 	jne	service_word_set
-	mov	ax,word ptr .06a6h
+	mov	ax,word ptr .private_service_word_offset
 	ret
 service_word_set:
-	mov	word ptr .06a6h,dx
+	mov	word ptr .private_service_word_offset,dx
 	ret
 ; Caller packet byte selects direction for twelve setting bytes at DATA:071Eh.
 ; Nonzero copies out; zero copies in. Return AX=0.
@@ -1689,11 +1788,11 @@ service_copy_settings:
 	test	byte ptr [bx],0ffh
 	jz	service_settings_in
 	lea	di,1[bx]
-	mov	si,071eh
+	mov	si,private_extensions_offset
 	jmps	service_settings_copy
 service_settings_in:
 	lea	si,1[bx]
-	mov	di,071eh
+	mov	di,private_extensions_offset
 	push	ds
 	push	es
 	pop	ds
@@ -1726,7 +1825,7 @@ cleanup_vectors:
 	db	033h,0c9h				; xor cx,cx, original direction encoding
 	mov	es,cx
 	mov	di,040h					; original vector region begins at INT 10h
-	mov	si,063bh				; saved vector region, 47 words
+	mov	si,original_vectors_offset				; saved vector region, 47 words
 	mov	cx,47
 	rep	movsw
 	mov	ax,020h
@@ -1736,21 +1835,21 @@ cleanup_file_slots:
 	push	ds
 	pop	es
 	mov	di,dos_file_slots
-	mov	cx,480
+	mov	cx,fcb_slot_count*fcb_slot_bytes/2
 	db	033h,0c0h				; xor ax,ax, original direction encoding
 	cld
 	rep	stosw
 	mov	di,dos_file_slots
-	mov	cx,24
+	mov	cx,fcb_slot_count
 cleanup_mark_unused:
 	mov	byte ptr [di],0ffh
-	add	di,40
+	add	di,fcb_slot_bytes
 	loop	cleanup_mark_unused
-	mov	byte ptr .0526h,0			; buffered console record pending/cursor
-	mov	word ptr .0524h,0
-	mov	byte ptr .03b7h,0			; file cache result/dirty/valid flags
-	mov	byte ptr .03b3h,0
-	mov	byte ptr .03b6h,0
+	mov	byte ptr .console_record_pending,0			; buffered console record pending/cursor
+	mov	word ptr .console_record_position,0
+	mov	byte ptr .record_cache_result,0			; file cache result/dirty/valid flags
+	mov	byte ptr .record_cache_dirty,0
+	mov	byte ptr .record_cache_valid,0
 	mov	byte ptr .dos_printer_echo,0
 	mov	byte ptr .dos_nested_console,0
 	mov	word ptr .bios_keyboard_pending,0
@@ -1777,7 +1876,7 @@ print_launch_banner:
 	call	launch_banner_bcd
 	mov	dl,020h
 	call	launch_banner_character
-	mov	si,0220h
+	mov	si,program_fcb
 	lodsb
 	or	al,al
 	jnz	launch_banner_drive
@@ -1796,7 +1895,7 @@ launch_banner_drive:
 	call	launch_banner_character
 	mov	cx,03h
 	call	launch_banner_name
-	mov	di,0220h
+	mov	di,program_fcb
 	mov	si,offset dos_launch_suffix
 	mov	cx,013h
 	test	byte ptr 08h[di],080h
@@ -1868,7 +1967,7 @@ service_execute:
 	mov	.dos_current_drive,al
 	mov	.dos_working_drive,al
 	call	print_launch_banner
-	mov	si,0220h
+	mov	si,program_fcb
 	mov	byte ptr .loader_compatibility_flags,00h
 	test	byte ptr 01h[si],080h
 	jz	load_attribute_two
@@ -1897,7 +1996,7 @@ load_save_user:
 	mov	cl,020h
 	call	loader_bdos_call
 load_select_format:
-	mov	al,.0229h
+	mov	al,.command_fcb_offset_9
 	and	al,07fh
 	cmp	al,043h
 	jnz	load_exe_header
@@ -1905,11 +2004,11 @@ load_select_format:
 load_exe_header:
 	push	ds
 	pop	es
-	mov	dx,0455h
+	mov	dx,exe_header
 	call	set_loader_dma
 	mov	dl,01h
 	call	set_multi_record_count
-	mov	si,0220h
+	mov	si,program_fcb
 	db	08bh,0d6h				; mov dx,si (original encoding)
 	mov	word ptr 021h[si],00h
 	mov	byte ptr 023h[si],00h
@@ -1925,7 +2024,7 @@ loader_read_error:
 exe_header_checked_entry:
 ; After the first header read, validate before size arithmetic/allocation.
 ; Replace exactly the original four-byte MOV BX,[0457h]; the out-of-line
-; guard executes that instruction on success. All existing offsets stay fixed.
+; guard executes that instruction on success.
 	jmp	validate_exe_file
 	nop
 ; Decoded original length arithmetic, 0F91h..0FA2h.
@@ -1934,7 +2033,7 @@ exe_header_checked_entry:
 ; Historical EXE length calculation, after the supported header guard.
 exe_size_arithmetic:
 	and	bx,01ffh
-	mov	ax,.0459h
+	mov	ax,.record_buffer_offset_4
 	or	bx,bx
 	jz	exe_page_paragraphs
 	dec	ax
@@ -1946,12 +2045,12 @@ exe_page_paragraphs:
 
 	shr	bx,cl
 	db	003h,0c3h				; add ax,bx (original encoding)
-	sub	ax,.045dh
+	sub	ax,.record_buffer_offset_8
 	mov	.exe_image_paragraphs,ax
 	add	ax,02bh
-	add	ax,.045fh
+	add	ax,.record_buffer_offset_10
 	db	08bh,0d8h				; mov bx,ax (original encoding)
-	mov	si,0221h
+	mov	si,command_fcb_offset_1
 	mov	di,offset dos_command_names
 
 ; Match the eleven fixed DOS command-name slots. Other programs request at
@@ -1994,7 +2093,7 @@ exe_allocate_memory:
 exe_allocate_request:
 	mov	.loader_memory_size,ax
 	mov	cl,037h
-	mov	dx,03cch
+	mov	dx,loader_memory_base
 	call	loader_bdos_call
 	pop	es:word ptr .04ch
 	pop	es
@@ -2222,7 +2321,7 @@ load_com_file:
 	add	es:word ptr .04ch,0600h
 com_allocate_request:
 	mov	cl,037h
-	mov	dx,03cch
+	mov	dx,loader_memory_base
 	call	loader_bdos_call
 	pop	es:word ptr .04ch
 	pop	es
@@ -2231,6 +2330,11 @@ com_allocate_request:
 	mov	cx,03h
 	jmp	loader_failure
 com_memory_allocated:
+	cmp	word ptr .loader_memory_size,02ch
+	jnc	com_memory_valid
+	mov	cx,3
+	jmp	loader_failure
+com_memory_valid:
 	mov	ax,.loader_memory_size
 	sub	ax,01bh
 	mov	.child_memory_size,ax
@@ -2248,8 +2352,8 @@ com_memory_allocated:
 	mov	dx,es
 	mov	cl,033h
 	call	loader_bdos_call
-	mov	word ptr .03d7h,0100h
-	mov	di,0220h
+	mov	word ptr .child_segments_offset_6,0100h
+	mov	di,program_fcb
 	mov	byte ptr 020h[di],00h
 	mov	dl,080h
 	call	set_multi_record_count
@@ -2258,18 +2362,20 @@ com_memory_allocated:
 ; Read COM sequentially in 128-record (16 KiB) chunks. Check each complete
 ; chunk against the PSP call-area limit; accept native EOF result 1.
 com_next_chunk:
-	mov	ax,.03d7h
+	mov	ax,.child_segments_offset_6
 	db	003h,0c7h				; add ax,di (original encoding)
+	jc	com_chunk_too_large
 	cmp	ax,es:.06h
 	jna	com_read_chunk
+com_chunk_too_large:
 	mov	cx,03h
 	jmp	loader_failure
 com_read_chunk:
-	mov	dx,.03d7h
+	mov	dx,.child_segments_offset_6
 	mov	cl,01ah
 	call	loader_bdos_call
-	add	.03d7h,di
-	mov	dx,0220h
+	add	.child_segments_offset_6,di
+	mov	dx,program_fcb
 	mov	cl,014h
 	call	loader_bdos_call
 	or	al,al
@@ -2310,11 +2416,11 @@ prepare_dos_execution:
 	db	02bh,0c1h				; sub ax,cx (original encoding)
 	db	08bh,0c8h				; mov cx,ax (original encoding)
 	dec	cx
-	mov	.05adh,cl
+	mov	.launch_command_count_offset,cl
 	or	cl,cl
 	jz	launch_build_process
 	push	cx
-	mov	di,06aah
+	mov	di,metadata_fcb_offset
 	mov	al,01h
 	call	parse_dos_fcb
 	pop	cx
@@ -2346,14 +2452,14 @@ prepare_dos_execution:
 ; Prepare native child process state, inherit console attributes, set DOS DTA,
 ; snapshot interrupt vectors and enable the XIOS PC-MODE service.
 launch_build_process:
-	mov	word ptr .06a6h,0fffeh
+	mov	word ptr .private_service_word_offset,0fffeh
 	db	033h,0c9h				; xor cx,cx (original encoding)
 	db	08bh,0d1h				; mov dx,cx (original encoding)
-	mov	cl,.04f7h
+	mov	cl,.dos_console_number
 	mov	ax,02ch
 	mul	cl
 	push	es
-	mov	si,0c14h
+	mov	si,xios_console_table
 	mov	es,cs:word ptr shared_sysdat_segment
 	db	026h					; ES override; original addressing
 	mov	si,[si]
@@ -2361,10 +2467,10 @@ launch_build_process:
 	db	026h					; ES override; original addressing
 	test	word ptr 0eh[si],0200h
 	jz	launch_set_dma
-	mov	byte ptr .02f5h,0ffh
+	mov	byte ptr .dos_printer_echo,0ffh
 	db	026h					; ES override; original addressing
 	mov	al,08h[si]
-	mov	.04f8h,al
+	mov	.dos_list_number,al
 launch_set_dma:
 	mov	es,word ptr .child_psp_segment
 	mov	dx,080h
@@ -2375,7 +2481,7 @@ launch_set_dma:
 	db	033h,0c0h				; xor ax,ax (original encoding)
 	mov	ds,ax
 	mov	si,040h
-	mov	di,063bh
+	mov	di,original_vectors_offset
 	mov	cx,02fh
 	rep	movsw
 	push	es
@@ -2387,13 +2493,13 @@ launch_set_dma:
 	push	ds
 	mov	ds,word ptr .loader_memory_base
 	mov	cl,090h
-	mov	dx,0180h
+	mov	dx,batch_prefix_offset_4
 	call	loader_bdos_call
 	pop	ds
 	or	ax,ax
 	jnz	loader_failure
 	mov	cl,095h
-	mov	dx,0699h
+	mov	dx,attach_packet_offset
 	call	loader_bdos_call
 	jmps	loader_restore_user
 
@@ -2415,7 +2521,7 @@ construct_psp:
 	mov	ax,.loader_memory_base
 	mov	es,ax
 	add	ax,018h
-	mov	.03d1h,ax
+	mov	.child_segments_offset,ax
 	db	033h,0c0h				; xor ax,ax (original encoding)
 	db	08bh,0f8h				; mov di,ax (original encoding)
 	mov	cx,0158h
@@ -2440,14 +2546,14 @@ construct_psp:
 psp_stack_ready:
 	mov	es:.034h,ax
 	mov	es:word ptr .0100h,03ffh
-	mov	es,word ptr .03d1h
+	mov	es,word ptr .child_segments_offset
 	mov	es:byte ptr .05h,0c8h
-	test	byte ptr .06a5h,01h
+	test	byte ptr .service_flags,01h
 	jz	psp_set_process_flags
 	mov	es:word ptr .026h,01h
 psp_set_process_flags:
 	mov	es:word ptr .06h,02040h
-	test	byte ptr .06a5h,02h
+	test	byte ptr .service_flags,02h
 	jz	psp_inherit_console
 	or	es:word ptr .06h,08000h
 psp_inherit_console:
@@ -2460,13 +2566,13 @@ psp_inherit_console:
 	mov	es:.020h,al
 	mov	cx,012h[si]
 	pop	ds
-	mov	.0699h,al
+	mov	.attach_packet_offset,al
 	mov	ch,.loader_saved_user
 	mov	es:.012h,cx
 	mov	al,.loader_compatibility_flags
 	mov	es:.018h,al
 	db	033h,0ffh				; xor di,di (original encoding)
-	mov	si,0221h
+	mov	si,command_fcb_offset_1
 	mov	cx,04h
 psp_copy_process_name:
 	lodsw
@@ -2492,15 +2598,15 @@ psp_copy_process_name:
 	stosw
 	call	call_trampoline_segment
 	stosw
-	mov	ax,01532h
+	mov	ax,offset dos_return_handler
 	stosw
 	mov	ax,cs
 	stosw
-	mov	ax,01a9bh
+	mov	ax,offset dos_ctrl_c_handler
 	stosw
 	mov	ax,cs
 	stosw
-	mov	ax,01bd1h
+	mov	ax,offset dos_error_handler
 	stosw
 	mov	ax,cs
 	stosw
@@ -2567,15 +2673,15 @@ install_child_vectors:
 	mov	es:byte ptr .010h,0ffh
 	popf
 	mov	es,cx
-	mov	cx,es:word ptr .0380h
+	mov	cx,es:word ptr .original_spare_offset_107
 	mov	cs:word ptr shared_previous_dispatch,cx
-	mov	cx,es:word ptr .0382h
+	mov	cx,es:word ptr .original_spare_offset_109
 	mov	cs:word ptr shared_previous_dispatch+2,cx
 	mov	cx,offset child_native_dispatch
-	mov	es:word ptr .0380h,cx
-	mov	es:word ptr .0382h,cs
+	mov	es:word ptr .original_spare_offset_107,cx
+	mov	es:word ptr .original_spare_offset_109,cs
 	mov	si,offset interrupt_vectors
-	mov	cx,14
+	mov	cx,(offset interrupt_vectors_end-offset interrupt_vectors)/3
 install_child_vector:
 	db	02eh					; CS override for LODSB
 	lodsb
@@ -2610,7 +2716,7 @@ call_trampoline_segment:
 ; DOS INT 22h return path: restore vectors, then terminate the native process.
 dos_return_handler:
 	call	select_console_data
-	mov	word ptr .06a6h,0
+	mov	word ptr .private_service_word_offset,0
 child_cleanup_return:
 	call	cleanup_vectors
 	mov	cl,143
@@ -2624,7 +2730,7 @@ set_multi_record_count:
 	jmp	loader_bdos_call
 ; Convert allocated paragraphs to a bounded byte count for the child segment.
 child_segment_bytes:
-	mov	ax,word ptr .loader_memory_size
+	mov	ax,word ptr .child_memory_size
 ; Alternate entry: AH=26h supplies its new PSP allocation size in AX.
 limit_segment_bytes:
 	cmp	ax,01000h
@@ -2646,14 +2752,14 @@ swap_child_vectors:
 	db	00bh,0c0h				; or ax,ax, original direction encoding
 	jnz	restore_child_vectors
 	mov	si,040h
-	mov	di,05ddh
+	mov	di,active_vectors_offset
 	mov	ax,ds
 	mov	es,ax
 	db	033h,0c0h				; xor ax,ax, original direction encoding
 	mov	ds,ax
 	jmps	copy_child_vectors
 restore_child_vectors:
-	mov	si,05ddh
+	mov	si,active_vectors_offset
 	mov	di,040h
 	db	033h,0c0h				; xor ax,ax, original direction encoding
 	mov	es,ax
@@ -2671,7 +2777,7 @@ child_native_dispatch:
 child_native_terminate:
 	push	ds
 	call	select_console_data
-	mov	word ptr .06a6h,0
+	mov	word ptr .private_service_word_offset,0
 	pop	ds
 	jmpf	cs:dword ptr shared_previous_dispatch
 
@@ -2935,7 +3041,7 @@ bios_video_try_palette:
 bios_video_try_pixel_write:
 	cmp	ah,0ch
 	jnz	bios_video_try_pixel_read
-	mov	si,offset original_identity_separator
+	mov	si,xios_pixel_write				; XIOS pixel-write protocol selector
 	jmps	bios_video_packet
 
 ;------------------------------------------------------------------------------
@@ -3134,7 +3240,7 @@ bios_keyboard_handler:
 	mov	word ptr .child_stack_offset,sp
 	mov	bx,ds
 	mov	ss,bx
-	mov	sp,043bh
+	mov	sp,dos_saved_ax
 	sti
 	push	ax
 	push	cx
@@ -3213,7 +3319,7 @@ bios_printer_handler:
 	mov	word ptr .child_stack_offset,sp
 	mov	bx,ds
 	mov	ss,bx
-	mov	sp,043bh
+	mov	sp,dos_saved_ax
 	push	ax
 	push	cx
 	push	dx
@@ -3240,7 +3346,7 @@ printer_attached:
 printer_wait_ready:
 	push	cx
 	mov	byte ptr .printer_bios_function,15	; direct BIOS list status
-	mov	dx,051fh
+	mov	dx,printer_bios_function
 	mov	cl,50
 	push	ax
 	call	loader_bdos_call
@@ -3256,7 +3362,7 @@ printer_wait_ready:
 printer_write:
 	mov	byte ptr .printer_bios_function,5	; direct BIOS list output
 	mov	byte ptr .printer_bios_character,bl
-	mov	dx,051fh
+	mov	dx,printer_bios_function
 	mov	cl,50
 	call	loader_bdos_call
 	mov	byte ptr .dos_saved_function,010h
@@ -3273,7 +3379,7 @@ printer_try_status:
 	cmp	ah,2
 	jne	printer_return
 	mov	byte ptr .printer_bios_function,15
-	mov	dx,051fh
+	mov	dx,printer_bios_function
 	mov	cl,50
 	call	loader_bdos_call
 	test	ah,080h
@@ -3339,10 +3445,9 @@ dos_terminate_entry:
 	iret
 
 
-; Three original zero bytes precede the paragraph-aligned CALL trampoline.
-; Padding aligns the CALL trampoline to a 16-byte paragraph boundary.
+; The PSP far-call segment calculation requires paragraph alignment.
 original_trampoline_prefix:
-	db	0,0,0
+	org	(offset $+15) and 0fff0h
 ; Adapt the incoming stack frame, move native function CL to DOS AH, then
 ; jump to the DOS dispatcher. Console-zero initialization writes the far target.
 dos_call_trampoline:
@@ -3359,7 +3464,7 @@ shared_dos_target		dw	0,0
 shared_first_data_segment	dw	0
 shared_bdos_vector		dw	0,0
 shared_previous_dispatch	dw	0,0
-shared_xios_entry		dw	0c03h
+shared_xios_entry		dw	xios_service_entry
 shared_sysdat_segment		dw	0		; also the segment half of shared_xios_entry
 
 
@@ -3380,7 +3485,7 @@ dos_dispatch_frame:
 	mov	word ptr .dos_entry_ax,ax
 	mov	ax,ds
 	mov	ss,ax
-	mov	sp,043bh
+	mov	sp,dos_saved_ax
 	mov	ax,word ptr .dos_entry_ax
 	cmp	byte ptr .dos_nested_console,0ffh
 	jne	dos_dispatch_save
@@ -3409,9 +3514,9 @@ dos_dispatch_select:
 	mov	bl,ah
 	db	032h,0ffh				; xor bh,bh, original direction encoding
 	shl	bx,1
-	cmp	bx,062h
+	cmp	bx,offset dos_function_fallback-offset dos_function_table
 	jc	dos_dispatch_call
-	mov	bx,062h					; all AH>=31h use the same fallback
+	mov	bx,offset dos_function_fallback-offset dos_function_table					; all AH>=31h use the same fallback
 dos_dispatch_call:
 	mov	es,word ptr .dos_caller_ds
 	call	cs:word ptr dos_function_table[bx]
@@ -3473,7 +3578,7 @@ file_bdos_translate_error:
 	mov	bl,es:byte ptr .067h			; native extended disk error in caller UDA
 	pop	es
 	mov	si,offset native_dos_error_map
-	mov	cx,10
+	mov	cx,(offset native_dos_error_map_end-offset native_dos_error_map)/2
 file_bdos_find_error:
 	db	02eh					; CS override for LODSW
 	lodsw
@@ -3504,6 +3609,7 @@ native_dos_error_map:
 	db	004h,8
 	db	008h,12
 	db	009h,12
+native_dos_error_map_end:
 
 
 ; Invoke application INT 24h on the child stack while retaining the private
@@ -3532,8 +3638,8 @@ dos_critical_error:
 	push	word ptr .dos_saved_es
 	push	word ptr .dos_caller_ds
 	push	word ptr .dos_entry_ax
-	push	word ptr .042bh
-	push	word ptr .042fh
+	push	word ptr .dos_saved_di
+	push	word ptr .dos_saved_si
 	push	word ptr .bios_frame_dx
 	push	word ptr .bios_frame_cx
 	push	word ptr .bios_frame_bx
@@ -3546,8 +3652,8 @@ dos_critical_error:
 	pop	word ptr .bios_frame_bx
 	pop	word ptr .bios_frame_cx
 	pop	word ptr .bios_frame_dx
-	pop	word ptr .042fh
-	pop	word ptr .042bh
+	pop	word ptr .dos_saved_si
+	pop	word ptr .dos_saved_di
 	pop	word ptr .dos_entry_ax
 	pop	word ptr .dos_caller_ds
 	mov	bx,.critical_child_ss
@@ -4080,7 +4186,7 @@ dos_line_toggle_printer:
 	db	026h					; ES override; retain original addressing
 	mov	bl,024h[si]
 	mov	.dos_list_number,bl
-	mov	si,0c16h
+	mov	si,xios_list_table
 	db	026h					; ES override; retain original addressing
 	mov	di,[si]
 	dec	si
@@ -4110,7 +4216,7 @@ dos_line_attach_printer:
 	db	026h					; ES override; retain original addressing
 	cmp	word ptr [di],00h
 	jz	dos_line_printer_available
-	mov	cx,070dh
+	mov	cx,printer_busy_message_offset
 	call	dos_print_string
 	jmps	dos_line_printer_done
 dos_line_printer_available:
@@ -4269,13 +4375,14 @@ dos_raw_output:
 ; AH=0Ch drains native console input, then accepts only AL=1,6,7,8,0Ah.
 ; Redispatch without a second interrupt frame by dropping this near return.
 dos_fn_flush_input:
-	mov	byte ptr .03bah,0			; original flush-state byte (no other recovered DATA reference)
+	mov	word ptr .bios_keyboard_pending,0
+	mov	byte ptr .dos_scan_pending,0
 	push	ax
 dos_flush_next:
 	mov	cl,6
 	mov	dl,0ffh
 	call	loader_bdos_call
-	or	al,al
+	or	ax,ax
 	jnz	dos_flush_next
 	pop	ax
 	cmp	al,1
@@ -4317,7 +4424,7 @@ dos_fn_select_drive:
 	mov	.dos_current_drive,dl
 	mov	.dos_working_drive,dl
 	mov	es,cs:word ptr shared_sysdat_segment
-	mov	si,0c18h
+	mov	si,xios_disk_table
 	mov	cx,010h
 	xor	bl,bl
 count_present_drives:
@@ -4500,7 +4607,7 @@ open_collect_metadata:
 	mov	ax,ds
 	mov	es,ax
 	mov	cx,06h
-	mov	di,06aah
+	mov	di,metadata_fcb_offset
 	rep	movsw
 	pop	es
 	pop	di
@@ -4534,8 +4641,8 @@ native_file_size_bytes:
 	call	check_device_fcb
 	jnz	file_size_device
 	mov	cl,023h
-	mov	dx,06aah
-	mov	al,.06aah
+	mov	dx,metadata_fcb_offset
+	mov	al,.metadata_fcb_offset
 	dec	al
 	mov	ah,04h
 	call	file_bdos_checked
@@ -4581,7 +4688,7 @@ native_file_timestamp:
 	jnz	file_timestamp_device
 	cmp	byte ptr .dos_saved_function,012h
 	jz	file_timestamp_read
-	mov	dl,.06aah
+	mov	dl,.metadata_fcb_offset
 	dec	dl
 	mov	cl,065h
 	mov	al,dl
@@ -4590,9 +4697,9 @@ native_file_timestamp:
 	mov	.directory_timestamp_mode,al
 file_timestamp_read:
 	mov	cl,066h
-	mov	dx,06aah
+	mov	dx,metadata_fcb_offset
 	db	08bh,0f2h				; mov si,dx (original encoding)
-	mov	al,.06aah
+	mov	al,.metadata_fcb_offset
 	dec	al
 	mov	ah,04h
 	call	file_bdos_checked
@@ -4742,7 +4849,7 @@ close_check_modified:
 	xor	ah,ah
 	db	08bh,0f8h				; mov di,ax (original encoding)
 close_pad_final_record:
-	mov	byte ptr 0455h[di],01ah
+	mov	byte ptr exe_header[di],01ah
 	inc	di
 	cmp	di,080h
 	jnz	close_pad_final_record
@@ -4809,7 +4916,7 @@ dos_fn_find_first:
 	jnz	find_dispatch_device
 	call	restore_find_position
 find_dispatch_device:
-	mov	si,06aah
+	mov	si,metadata_fcb_offset
 	call	match_dos_device
 	jnz	find_named_device
 	call	search_matching_attributes
@@ -4829,7 +4936,7 @@ find_dispatch_device:
 	mov	017h[di],cx
 	db	026h					; ES override; original addressing
 	mov	019h[di],dx
-	mov	byte ptr .06cah,00h
+	mov	byte ptr .metadata_fcb_offset_32,00h
 	pop	si
 	call	native_file_size_bytes
 	db	026h					; ES override; original addressing
@@ -4861,7 +4968,7 @@ find_restore_dma:
 ; bytes without native attribute bits, add DOS attributes, clear result state.
 build_find_result:
 	les	di,dword ptr .dos_dta_offset
-	mov	si,06aah
+	mov	si,metadata_fcb_offset
 	cmp	byte ptr .dos_extended_fcb,0ffh
 	jnz	find_copy_name
 	mov	ax,0ffh
@@ -4894,18 +5001,18 @@ prepare_directory_search:
 	mov	bx,ds
 	mov	ds,ax
 	mov	es,bx
-	mov	di,06aah
+	mov	di,metadata_fcb_offset
 	call	copy_normalized_fcb
 	mov	ax,es
 	mov	ds,ax
-	mov	si,06aah
+	mov	si,metadata_fcb_offset
 	call	resolve_default_fcb_drive
 	call	flush_record_cache
 	mov	al,.record_cache_result
 	test	al,0ffh
 	jnz	directory_prepare_result
 	mov	byte ptr .record_cache_valid,00h
-	mov	dx,0455h
+	mov	dx,exe_header
 	call	set_loader_dma
 	xor	al,al
 directory_prepare_result:
@@ -5031,7 +5138,7 @@ directory_issue_bdos:
 	xor	ah,ah
 	mov	cl,05h
 	shl	ax,cl
-	mov	si,0455h
+	mov	si,exe_header
 	db	003h,0f0h				; add si,ax (original encoding)
 directory_search_return:
 	ret
@@ -5103,7 +5210,7 @@ save_native_directory_state:
 	mov	ax,010h[bx]
 	mov	ds,ax
 	mov	cx,0eh
-	mov	di,05c1h
+	mov	di,directory_state_offset
 	mov	si,02h
 	rep	movsw
 	pop	es
@@ -5121,7 +5228,7 @@ restore_native_directory_state:
 	mov	ax,010h[bx]
 	mov	es,ax
 	mov	cx,0eh
-	mov	si,05c1h
+	mov	si,directory_state_offset
 	mov	di,02h
 	rep	movsw
 	pop	es
@@ -5140,9 +5247,10 @@ dos_fn_delete_fcb:
 delete_regular_file:
 	mov	byte ptr .dos_saved_ax,0ffh
 	call	prepare_directory_search
+	jnz	delete_restore_dma
 	mov	cl,011h
 delete_next_entry:
-	mov	di,06aah
+	mov	di,metadata_fcb_offset
 	call	native_directory_search
 	cmp	al,0ffh
 	jz	delete_restore_dma
@@ -5151,7 +5259,7 @@ delete_next_entry:
 	push	si
 	call	save_native_directory_state
 	pop	si
-	mov	al,.06aah
+	mov	al,.metadata_fcb_offset
 	mov	[si],al
 	mov	cl,013h
 	db	08bh,0d6h				; mov dx,si (original encoding)
@@ -5265,16 +5373,16 @@ rename_prepare:
 	mov	byte ptr .record_cache_valid,00h
 	mov	ax,ds
 	mov	es,ax
-	mov	dx,0455h
+	mov	dx,exe_header
 	call	set_loader_dma
 	mov	byte ptr .dos_saved_ax,0ffh
 rename_find_source:
-	mov	di,06aah
+	mov	di,metadata_fcb_offset
 	lds	si,dword ptr .dos_fcb_offset
 	call	copy_normalized_fcb
 	push	es
 	pop	ds
-	mov	si,06aah
+	mov	si,metadata_fcb_offset
 	call	resolve_default_fcb_drive
 	db	08bh,0d6h				; mov dx,si (original encoding)
 	mov	cl,011h
@@ -5289,20 +5397,20 @@ rename_source_found:
 	and	ax,03h
 	mov	cl,05h
 	shl	ax,cl
-	add	ax,0455h
+	add	ax,exe_header
 	db	08bh,0f0h				; mov si,ax (original encoding)
-	mov	di,0220h
+	mov	di,program_fcb
 	mov	cx,06h
 	rep	movsw
-	mov	al,.06aah
-	mov	.0220h,al
+	mov	al,.metadata_fcb_offset
+	mov	.program_fcb,al
 	push	word ptr .dos_fcb_segment
 	push	word ptr .dos_fcb_offset
 	push	es
 	push	ds
 	pop	es
 	mov	word ptr .dos_fcb_segment,ds
-	mov	si,0220h
+	mov	si,program_fcb
 	db	08bh,0feh				; mov di,si (original encoding)
 	mov	.dos_fcb_offset,si
 	call	close_resolved_fcb
@@ -5315,8 +5423,8 @@ rename_source_found:
 rename_close_ready:
 	lds	si,dword ptr .bios_frame_dx
 	add	si,011h
-	mov	di,06abh
-	mov	bx,0221h
+	mov	di,metadata_fcb_offset_1
+	mov	bx,command_fcb_offset_1
 	mov	cx,0bh
 rename_build_target:
 	lodsb
@@ -5337,7 +5445,7 @@ rename_store_character:
 	loop	rename_build_target
 	mov	ax,es
 	mov	ds,ax
-	mov	dx,06aah
+	mov	dx,metadata_fcb_offset
 	mov	cl,011h
 	push	dx
 	push	bx
@@ -5354,11 +5462,11 @@ rename_failed:
 	mov	byte ptr .dos_saved_ax,0ffh
 	jmp	restore_dos_dma
 rename_issue_request:
-	mov	si,06aah
-	mov	di,0230h
+	mov	si,metadata_fcb_offset
+	mov	di,command_fcb_offset_16
 	mov	cx,06h
 	rep	movsw
-	mov	dx,0220h
+	mov	dx,program_fcb
 	mov	cl,017h
 	push	dx
 	push	bx
@@ -5413,7 +5521,7 @@ dos_fn_allocation_info:
 	xor	bh,bh
 	shl	bx,1
 	db	026h					; ES override; original addressing
-	mov	bx,0c18h[bx]
+	mov	bx,xios_disk_table[bx]
 	db	026h					; ES override; original addressing
 	mov	si,08h[bx]
 	db	026h					; ES override; original addressing
@@ -5467,7 +5575,7 @@ allocation_return_count:
 ; AH=21h: perform one random-record read through the block-transfer core,
 ; preserving application CX. The zero mode flag suppresses block advancement.
 dos_fn_random_read:
-	mov	byte ptr .03adh,00h
+	mov	byte ptr .transfer_advance_random,00h
 	push	word ptr .bios_frame_cx
 	mov	cx,01h
 	mov	.bios_frame_cx,cx
@@ -5508,7 +5616,7 @@ cache_read_native:
 	pop	word ptr 021h[si]
 	les	bx,dword ptr 020h[si]
 	mov	.record_cache_number,bh
-	mov	word ptr .03a1h,es
+	mov	word ptr .cache_record_offset_1,es
 cache_read_result:
 	mov	.record_cache_result,al
 	or	al,al
@@ -5540,7 +5648,7 @@ cache_compare_record_low:
 	ret
 cache_compare_record_high:
 	mov	al,023h[si]
-	cmp	al,.03a2h
+	cmp	al,.cache_record_offset_2
 	ret
 
 ; Flush dirty cache under its recorded user number, restoring the caller user
@@ -5565,7 +5673,7 @@ cache_write_dirty:
 	push	word ptr 022h[si]
 	mov	ax,.record_cache_number
 	mov	021h[si],ax
-	mov	al,.03a2h
+	mov	al,.cache_record_offset_2
 	mov	023h[si],al
 	mov	cl,022h
 	mov	al,[si]
@@ -5587,7 +5695,7 @@ cache_flush_result:
 
 ; AH=22h: one random-record write through the block core; preserve application CX.
 dos_fn_random_write:
-	mov	byte ptr .03adh,00h
+	mov	byte ptr .transfer_advance_random,00h
 	push	word ptr .bios_frame_cx
 	mov	cx,01h
 	mov	.bios_frame_cx,cx
@@ -5612,15 +5720,16 @@ dos_fn_file_size:
 file_size_find_entry:
 	mov	byte ptr .dos_saved_ax,0ffh
 	call	prepare_directory_search
+	jnz	file_size_restore_dma
 	mov	cl,011h
-	mov	di,06aah
+	mov	di,metadata_fcb_offset
 	call	native_directory_search
 	cmp	al,0ffh
 	jz	file_size_restore_dma
 	db	033h,0dbh				; xor bx,bx (original encoding)
 	mov	bl,0dh[si]
 	push	bx
-	mov	dx,06aah
+	mov	dx,metadata_fcb_offset
 	db	08bh,0f2h				; mov si,dx (original encoding)
 	mov	cl,023h
 	mov	al,[si]
@@ -5803,7 +5912,7 @@ block_read_device:
 block_read_console:
 	test	byte ptr .console_record_pending,0ffh
 	jnz	console_record_copy
-	mov	dx,0527h
+	mov	dx,console_record_capacity_offset
 	db	08bh,0fah				; mov di,dx (original encoding)
 	push	si
 	push	es
@@ -5822,9 +5931,9 @@ block_read_console:
 	mov	bl,.console_record_length
 	inc	byte ptr .console_record_length
 	inc	byte ptr .console_record_length
-	mov	byte ptr 0529h[bx],0dh
+	mov	byte ptr console_record_text_offset[bx],0dh
 	inc	bx
-	mov	byte ptr 0529h[bx],0ah
+	mov	byte ptr console_record_text_offset[bx],0ah
 	mov	word ptr .console_record_position,00h
 console_record_copy:
 	mov	byte ptr .dos_saved_ax,00h
@@ -5840,7 +5949,7 @@ console_record_copy:
 	mov	byte ptr .dos_saved_ax,03h
 console_copy_available:
 	les	di,dword ptr .dos_dta_offset
-	mov	si,0529h
+	mov	si,console_record_text_offset
 	add	si,.console_record_position
 	push	cx
 	rep	movsb
@@ -6015,7 +6124,7 @@ read_first_count:
 read_first_copy_setup:
 	les	di,dword ptr .transfer_buffer_offset
 	cld
-	add	si,0455h
+	add	si,exe_header
 read_first_copy_byte:
 	movsb
 	or	di,di
@@ -6055,6 +6164,11 @@ read_whole_limit:
 	sub	dx,.transfer_buffer_offset
 	shr	dx,cl
 read_whole_request:
+	or	dx,dx
+	jnz	read_whole_nonzero
+	mov	al,2
+	ret
+read_whole_nonzero:
 	call	set_multi_record_count
 	push	dx
 	mov	dx,.dos_fcb_slot
@@ -6091,6 +6205,11 @@ read_whole_failed:
 read_whole_advance_record:
 	add	021h[si],dx
 	adc	byte ptr 023h[si],00h
+	cmp	byte ptr .dos_saved_ax,2
+	jne	read_whole_continue
+	mov	al,2
+	ret
+read_whole_continue:
 	mov	ax,.transfer_whole_records
 	or	ax,ax
 	jz	read_whole_done
@@ -6156,10 +6275,8 @@ truncate_update_size:
 	xor	bh,bh
 truncate_size_convert:
 	call	multiply_record_offset
-	db	026h					; ES override; original addressing
-	mov	010h[si],ax
-	db	026h					; ES override; original addressing
-	mov	012h[si],bx
+	push	ax
+	push	bx
 	db	08bh,0d3h				; mov dx,bx (original encoding)
 	call	bytes_to_records
 	mov	023h[di],dl
@@ -6170,20 +6287,39 @@ truncate_size_convert:
 	dec	al
 	mov	ah,05h
 	call	file_bdos_checked
+	cmp	al,0ffh
+	je	truncate_failed
 	db	08bh,0d7h				; mov dx,di (original encoding)
 	mov	cl,063h
 	mov	al,[di]
 	dec	al
 	mov	ah,05h
 	call	file_bdos_checked
+	cmp	al,0ffh
+	je	truncate_failed
 	db	08bh,0d7h				; mov dx,di (original encoding)
 	mov	cl,0fh
 	mov	al,[di]
 	dec	al
 	mov	ah,04h
 	call	file_bdos_checked
-	db	08bh,0d7h				; mov dx,di (original encoding)
-	mov	.dos_saved_ax,al
+	cmp	al,0ffh
+	je	truncate_failed
+	pop	bx
+	pop	ax
+	les	si,dword ptr .dos_fcb_offset
+	mov	es:010h[si],ax
+	mov	es:012h[si],bx
+	cmp	di,.cached_fcb_slot
+	jne	truncate_success
+	mov	byte ptr .record_cache_valid,0
+truncate_success:
+	mov	byte ptr .dos_saved_ax,0
+	ret
+truncate_failed:
+	pop	bx
+	pop	ax
+	mov	byte ptr .dos_saved_ax,1
 	ret
 
 ; AH=28h: random block write. Set advancement mode and default record size.
@@ -6202,42 +6338,47 @@ block_write_common:
 	db	026h					; ES override; original addressing
 	mov	word ptr 0eh[si],080h
 block_write_check_device:
-	or	cx,cx
-	jz	block_write_return
 	call	application_fcb_device
 	jz	block_write_find_slot
+	cmp	word ptr .transfer_requested_records,0
+	je	block_write_return
 	cmp	al,0fdh
 	jz	block_write_return
 	mov	byte ptr .dos_saved_ax,02h
 	db	026h					; ES override; original addressing
 	mov	cx,0eh[si]
-	mov	bx,ds
-	mov	es,bx
-	lds	si,dword ptr .dos_dta_offset
+	les	si,dword ptr .dos_dta_offset
 	push	si
-	db	003h,0f1h				; add si,cx (original encoding)
+	add	si,cx
 	pop	si
 	jc	block_write_return
+	cld
 	cmp	al,0ffh
 	jnz	write_printer_record
 write_console_record:
-	lodsb
-	mov	dl,al
+	mov	dl,es:[si]
+	inc	si
 	push	cx
+	push	si
+	push	es
 	call	dos_fn_console_output
+	pop	es
+	pop	si
 	pop	cx
 	loop	write_console_record
 	jmps	write_device_success
 write_printer_record:
-	lodsb
-	mov	dl,al
+	mov	dl,es:[si]
+	inc	si
 	push	cx
+	push	si
+	push	es
 	call	dos_fn_printer_output
+	pop	es
+	pop	si
 	pop	cx
 	loop	write_printer_record
 write_device_success:
-	mov	ax,es
-	mov	ds,ax
 	mov	byte ptr .dos_saved_ax,00h
 block_write_return:
 	ret
@@ -6260,6 +6401,8 @@ block_write_prepare:
 	push	es
 	call	write_first_partial_record
 	pop	es
+	or	al,al
+	jnz	block_write_transfer_error
 block_write_first_result:
 	or	al,al
 	jz	block_write_middle
@@ -6274,12 +6417,15 @@ block_write_middle:
 	call	write_whole_records
 	or	al,al
 	jz	block_write_last
-	mov	.dos_saved_ax,al
-	ret
+	jmps	block_write_transfer_error
 block_write_last:
 	call	write_last_partial_record
 	or	al,al
 	jz	block_write_update_size
+block_write_transfer_error:
+	push	ax
+	call	block_write_update_size
+	pop	ax
 	mov	.dos_saved_ax,al
 	ret
 block_write_update_size:
@@ -6347,7 +6493,7 @@ write_first_mark_dirty:
 	push	ds
 	pop	es
 	push	ds
-	add	di,0455h
+	add	di,exe_header
 	lds	si,dword ptr .transfer_buffer_offset
 	cld
 write_first_copy_byte:
@@ -6393,6 +6539,11 @@ write_whole_limit:
 	sub	dx,.transfer_buffer_offset
 	shr	dx,cl
 write_whole_request:
+	or	dx,dx
+	jnz	write_whole_nonzero
+	mov	al,2
+	ret
+write_whole_nonzero:
 	call	set_multi_record_count
 	push	dx
 	mov	dx,.dos_fcb_slot
@@ -6429,6 +6580,11 @@ write_whole_failed:
 write_whole_advance_record:
 	add	021h[si],dx
 	adc	byte ptr 023h[si],00h
+	cmp	byte ptr .dos_saved_ax,2
+	jne	write_whole_continue
+	mov	al,2
+	ret
+write_whole_continue:
 	mov	ax,.transfer_whole_records
 	or	ax,ax
 	jz	write_whole_done
@@ -6532,7 +6688,7 @@ parse_dos_fcb:
 	pop	ds
 	mov	es,ax
 	db	033h,0c0h				; xor ax,ax (original encoding)
-	mov	di,0305h
+	mov	di,parse_status
 	stosb
 	stosw
 	stosw
@@ -6543,7 +6699,7 @@ parse_dos_fcb:
 	stosw
 	stosw
 	stosb
-	mov	di,0309h
+	mov	di,parse_fcb_offset
 	test	byte ptr 0ch[bp],01h
 	jz	parse_drive_prefix
 	call	parse_skip_delimiters
@@ -6609,7 +6765,7 @@ parse_copy_result:
 	push	es
 	pop	ds
 	mov	06h[bp],si
-	mov	si,0309h
+	mov	si,parse_fcb_offset
 	mov	es,word ptr 04h[bp]
 	mov	di,08h[bp]
 	test	byte ptr 0ch[bp],02h
@@ -6621,7 +6777,7 @@ parse_copy_drive:
 parse_copy_name_check:
 	mov	di,08h[bp]
 	inc	di
-	mov	si,030ah
+	mov	si,parse_fcb_offset_1
 	test	byte ptr 0ch[bp],04h
 	jz	parse_copy_name
 	test	byte ptr .parse_name_present,0ffh
@@ -6632,7 +6788,7 @@ parse_copy_name:
 parse_copy_type_check:
 	mov	di,08h[bp]
 	add	di,09h
-	mov	si,0312h
+	mov	si,parse_fcb_offset_9
 	test	byte ptr 0ch[bp],08h
 	jz	parse_copy_type
 	test	byte ptr .parse_type_present,0ffh
@@ -6677,7 +6833,7 @@ parse_check_delimiter:
 	push	cx
 	mov	cx,0ch
 	push	di
-	mov	di,02f9h
+	mov	di,dos_delimiters_offset
 	repne	scasb
 	pop	di
 	pop	cx
@@ -6746,7 +6902,7 @@ date_year_ready:
 	db	033h,0dbh				; xor bx,bx (original encoding)
 	mov	cx,0ch
 date_find_month:
-	cmp	dx,0505h[bx]
+	cmp	dx,month_starts_offset[bx]
 	jna	date_month_ready
 	add	bx,02h
 	loop	date_find_month
@@ -6768,7 +6924,7 @@ date_month_ready:
 	jnz	date_day_ready
 	inc	dx
 date_day_ready:
-	sub	dx,0505h[bx]
+	sub	dx,month_starts_offset[bx]
 	pop	ax
 	mov	dh,al
 	pop	cx
@@ -6782,10 +6938,10 @@ dos_fn_set_date:
 	sub	ax,07bch
 	cmp	ax,077h
 	ja	set_date_return
-	mov	byte ptr .04fah,01ch
+	mov	byte ptr .month_days_offset_1,01ch
 	test	ax,03h
 	jnz	set_date_check_month
-	mov	byte ptr .04fah,01dh
+	mov	byte ptr .month_days_offset_1,01dh
 set_date_check_month:
 	xor	bh,bh
 	mov	bl,dh
@@ -6797,7 +6953,7 @@ set_date_check_month:
 	cmp	04f9h[bx],dl
 	jc	set_date_return
 	db	003h,0dbh				; add bx,bx (original encoding)
-	mov	ax,0505h[bx]
+	mov	ax,month_starts_offset[bx]
 	xor	dh,dh
 	db	003h,0c2h				; add ax,dx (original encoding)
 	push	ax
@@ -6865,11 +7021,11 @@ binary_to_bcd:
 ; AH=2Ch: decode BCD hours/minutes/seconds from the native clock packet.
 ; CH=hours, CL=minutes, DH=seconds, DL=0; no hundredths are supplied.
 dos_fn_get_time:
-	les	si,dword ptr .04f1h
+	les	si,dword ptr .native_clock_pointer
 	db	026h					; ES override; retain original instruction addressing
 	mov	al,2[si]
 	call	bcd_to_binary
-	mov	byte ptr .0436h,al
+	mov	byte ptr .dos_frame_offset_13,al
 	db	026h					; ES override; retain original instruction addressing
 	mov	al,3[si]
 	call	bcd_to_binary
@@ -6905,7 +7061,7 @@ dos_fn_get_dta:
 	mov	word ptr .dos_saved_es,ax
 	ret
 
-; INT 21h/AH=30h at 3453h. Keep the six-byte slot and original table offsets.
+; INT 21h/AH=30h routes to the project version-query implementation.
 dos_fn_get_version:
 	jmp	dos_version_query
 	nop
@@ -6915,7 +7071,7 @@ dos_fn_get_version:
 
 ; Report the private file-error message, then enter the DOS critical-error path.
 dos_file_error:
-	mov	cx,06ceh
+	mov	cx,invalid_dos_message_offset
 	call	dos_print_string
 	mov	ax,0800ch
 	jmp	dos_critical_error
@@ -6981,12 +7137,12 @@ store_fcb_character:
 ; FFh in the first byte marks free. Save slot pointer and copy normalized name.
 ; Return AL=0 on success, FFh if full; restore DS and application ES:DI.
 allocate_fcb_slot:
-	mov	si,072ah
-	mov	cx,018h
+	mov	si,dos_file_slots
+	mov	cx,fcb_slot_count
 scan_free_fcb_slot:
 	cmp	byte ptr [si],0ffh
 	jz	initialize_fcb_slot
-	add	si,028h
+	add	si,fcb_slot_bytes
 	loop	scan_free_fcb_slot
 	mov	al,0ffh
 	or	al,al
@@ -7012,8 +7168,8 @@ initialize_fcb_slot:
 ; and letter case. Return AL=0 and saved slot pointer, or AL=FFh if absent.
 find_fcb_slot:
 	cld
-	mov	si,072ah
-	mov	cx,018h
+	mov	si,dos_file_slots
+	mov	cx,fcb_slot_count
 	les	di,dword ptr .dos_fcb_offset
 compare_fcb_slot:
 	push	di
@@ -7040,7 +7196,7 @@ compare_fcb_uppercase:
 	jmps	found_fcb_slot
 next_fcb_slot:
 	pop	si
-	add	si,028h
+	add	si,fcb_slot_bytes
 	pop	di
 	loop	compare_fcb_slot
 	mov	al,0ffh
@@ -7053,19 +7209,32 @@ found_fcb_slot:
 	ret
 
 ; Mark the selected private slot free when its pointer is within table bounds.
-; Clear cached-transfer flags if it is the cached slot; no alignment check.
+; Reject pointers outside the table or between slots; clear matching cache state.
 release_fcb_slot:
 	mov	di,.dos_fcb_slot
-	cmp	di,072ah
+	cmp	di,dos_file_slots
 	jc	release_fcb_done
-	cmp	di,0ac1h
-	ja	release_fcb_done
+	cmp	di,fcb_slots_end
+	jae	release_fcb_done
+	push	ax
+	push	dx
+	push	bx
+	mov	ax,di
+	sub	ax,dos_file_slots
+	xor	dx,dx
+	mov	bx,fcb_slot_bytes
+	div	bx
+	or	dx,dx
+	pop	bx
+	pop	dx
+	pop	ax
+	jnz	release_fcb_done
 	mov	byte ptr [di],0ffh
-	mov	ax,.03b4h
+	mov	ax,.cached_fcb_slot
 	cmp	ax,.dos_fcb_slot
 	jnz	release_fcb_done
-	mov	byte ptr .03b3h,00h
-	mov	byte ptr .03b6h,00h
+	mov	byte ptr .record_cache_dirty,00h
+	mov	byte ptr .record_cache_valid,00h
 release_fcb_done:
 	ret
 
@@ -7142,20 +7311,20 @@ divide_record_zero:
 ; use only 24 random-record bits; smaller sizes use the full 32-bit field.
 prepare_random_transfer:
 	les	ax,dword ptr .dos_dta_offset
-	mov	.03a4h,ax
-	mov	word ptr .03a6h,es
-	mov	ax,.039eh
+	mov	.transfer_buffer_offset,ax
+	mov	word ptr .transfer_dma_offset_2,es
+	mov	ax,.transfer_requested_records
 	push	ds
 	lds	si,dword ptr .dos_fcb_offset
 	mov	cx,0eh[si]
 	mul	cx
 	or	dl,dh
 	pop	ds
-	mov	.039dh,dl
+	mov	.transfer_overflow_offset,dl
 	jz	transfer_size_ready
 	mov	ax,0ffffh
 transfer_size_ready:
-	mov	.0393h,ax
+	mov	.transfer_size_offset,ax
 	push	ds
 	lds	si,dword ptr .dos_fcb_offset
 	mov	bx,023h[si]
@@ -7166,33 +7335,33 @@ transfer_size_ready:
 random_record_ready:
 	pop	ds
 	call	multiply_record_offset
-	mov	.0395h,ax
-	mov	.0397h,bx
+	mov	.transfer_start_offset,ax
+	mov	.transfer_start_high,bx
 	push	ax
 	db	08bh,0d3h				; mov dx,bx (original encoding)
-	add	ax,.0393h
+	add	ax,.transfer_size_offset
 	adc	bx,00h
 	sub	ax,01h
 	sbb	bx,00h
-	mov	.0399h,ax
-	mov	.039bh,bx
+	mov	.transfer_size_offset_6,ax
+	mov	.transfer_size_offset_8,bx
 	pop	ax
 	call	bytes_to_records
-	mov	.0389h,ax
-	mov	.038bh,dl
-	mov	.0385h,ch
+	mov	.transfer_first_record,ax
+	mov	.transfer_boundaries_offset_6,dl
+	mov	.transfer_first_byte,ch
 	neg	ch
 	add	ch,080h
-	mov	.0387h,ch
-	mov	dx,.039bh
-	mov	ax,.0399h
+	mov	.transfer_boundaries_offset_2,ch
+	mov	dx,.transfer_size_offset_8
+	mov	ax,.transfer_size_offset_6
 	call	bytes_to_records
-	mov	.038fh,ax
-	mov	.0391h,dl
-	mov	.038dh,ch
-	mov	ax,.038fh
-	sub	ax,.0389h
-	mov	.03b0h,ax
+	mov	.transfer_boundaries_offset_10,ax
+	mov	.transfer_boundaries_offset_12,dl
+	mov	.transfer_last_byte,ch
+	mov	ax,.transfer_boundaries_offset_10
+	sub	ax,.transfer_first_record
+	mov	.transfer_record_span,ax
 	ret
 
 ; Restore native DMA from the saved DOS DTA far pointer.
@@ -7357,6 +7526,7 @@ dos_function_table:
 	dw	dos_fn_verify				; AH=2Eh
 	dw	dos_fn_get_dta				; AH=2Fh
 	dw	dos_fn_get_version			; AH=30h
+dos_function_fallback:
 	dw	dos_fn_unsupported			; AH=31h
 
 
@@ -7399,6 +7569,7 @@ interrupt_vectors:
 	dw	dos_disk_write_handler
 	db	27h
 	dw	dos_resident_handler
+interrupt_vectors_end:
 
 ; Original region 373Dh..37DFh: final tables and paragraph padding.
 
@@ -7477,7 +7648,4 @@ dos_version_query:
 	mov	word ptr .dos_saved_ax,01901h
 	ret
 
-	dseg
-	org	0
-	include	pcdata.lib
 	end
