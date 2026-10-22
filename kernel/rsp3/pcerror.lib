@@ -1,120 +1,127 @@
+;*****************************************************************************
+;
+;	PCERROR - PCTMP command diagnostics.
+;	Concurrent CP/M-86 3.1, project PC-MODE personality.
+;
+;*****************************************************************************
+
 ; Command diagnostics adapted from kernel/rsp1/tmp.a86 clierror/clierrtab.
 ; CX=error. DS=this console DATA, saved original command at 0245h ends in '$'.
 ; CODE is immutable; the existing prompt path owns cleanup and console attach.
 ; DOS/native loaders share some numbers: only confirmed native CLI failures
 ; use CMD-specific load/read text. Common DOS failures retain executable wording.
 shell_native_error:
-        mov dx,offset error_cmd_load
-        cmp cx,28
-        je error_show
-        mov dx,offset error_cmd_read
-        cmp cx,29
-        je error_show
+	mov	dx,offset error_cmd_load
+	cmp	cx,28
+	je	error_show
+	mov	dx,offset error_cmd_read
+	cmp	cx,29
+	je	error_show
 shell_command_error:
-        cmp cx,31
-        jne error_find
-        mov byte ptr .command_sent,0
-        jmp shell_next_command
+	cmp	cx,31
+	jne	error_find
+	mov	byte ptr .command_sent,0
+	jmp	command_prompt_resume
 error_find:
-        mov si,offset error_table
+	mov	si,offset error_table
 error_scan:
-        cmp cs:word ptr [si],0ffffh
-        je error_unknown
-        cmp cx,cs:word ptr [si]
-        je error_known
-        add si,4
-        jmps error_scan
+	cmp	cs:word ptr [si],0ffffh
+	je	error_unknown
+	cmp	cx,cs:word ptr [si]
+	je	error_known
+	add	si,4
+	jmps	error_scan
 error_known:
-        mov dx,cs:word ptr 2[si]
+	mov	dx,cs:word ptr 2[si]
 error_show:
-        push dx
-        call shell_print_newline
-        mov dx,offset error_prefix
-        call shell_print_code_string
-        pop dx
-        call shell_print_code_string
-        jmps error_command
+	push	dx
+	call	print_code_newline
+	mov	dx,offset error_prefix
+	call	print_code_string
+	pop	dx
+	call	print_code_string
+	jmps	error_command
 error_unknown:
-        push cx
-        call shell_print_newline
-        mov dx,offset error_prefix
-        call shell_print_code_string
-        mov dx,offset error_unknown_text
-        call shell_print_code_string
-        pop ax
-        call error_number
+	push	cx
+	call	print_code_newline
+	mov	dx,offset error_prefix
+	call	print_code_string
+	mov	dx,offset error_unknown_text
+	call	print_code_string
+	pop	ax
+	call	error_number
 error_command:
-        call shell_print_newline
-        mov dx,offset error_command_text
-        call shell_print_code_string
-        mov dx,0245h
-        call print_data_string
-        call shell_print_newline
-        jmp shell_next_command
+	call	print_code_newline
+	mov	dx,offset error_command_text
+	call	print_code_string
+	mov	dx,0245h
+	call	print_data_string
+	call	print_code_newline
+	jmp	command_prompt_resume
 ; Native TMP's unsigned decimal conversion, including zero and 65535.
 error_number:
-        xor dx,dx
-        mov bx,10
-        div bx
-        push dx
-        or ax,ax
-        jz error_digit
-        call error_number
+	xor	dx,dx
+	mov	bx,10
+	div	bx
+	push	dx
+	or	ax,ax
+	jz	error_digit
+	call	error_number
 error_digit:
-        pop dx
-        add dl,'0'
-        jmp shell_print_character
+	pop	dx
+	add	dl,'0'
+	jmp	print_console_character
 error_table:
-        dw 3,offset error_memory
-        dw 12,offset error_pd
-        dw 23,offset error_drive
-        dw 24,offset error_name
-        dw 25,offset error_type
-        dw 38,offset error_password
-        dw 28,offset error_load
-        dw 29,offset error_read
-        dw 30,offset error_missing
-        dw 15,offset error_queue
-        dw 18,offset error_md
-        dw 17,offset error_ndp
-        dw 33,offset error_code
-        dw 41,offset error_fixup
-        dw 37,offset error_list
-        dw 44,offset error_submit
-        dw 43,offset error_tail
-        dw 40,offset error_abort
-        dw 19,offset error_console
-        dw 20,offset error_console
-        dw 21,offset error_console
-        dw 32,offset error_console
-        dw 36,offset error_console
-        dw 60,offset error_unsupported
-        dw 61,offset error_batch
-        dw 0ffffh,0
-error_prefix db 'Command error: $'
-error_command_text db 'Command = $'
-error_unknown_text db 'Unknown command error, code $'
-error_cmd_load db 'Invalid or empty CMD file$'
-error_cmd_read db 'Disk error while reading CMD file$'
-error_memory db 'Not enough memory$'
-error_pd db 'Too many active processes$'
-error_drive db 'Invalid drive (use A: through P:)$'
-error_name db 'Invalid name (max 8 characters)$'
-error_type db 'Invalid extension (max 3 characters)$'
-error_password db 'Invalid password (max 8 characters)$'
-error_load db 'Invalid or malformed executable file$'
-error_read db 'Invalid or unreadable executable file$'
-error_missing db 'Command not found. Use ? for help$'
-error_queue db 'Command queue full; retry$'
-error_md db 'Memory allocation table is full$'
-error_ndp db 'Command requires an 8087 coprocessor$'
-error_code db 'Invalid CMD file: missing code group$'
-error_fixup db 'Invalid CMD relocation data$'
-error_list db 'Invalid printer/list device$'
-error_submit db 'SUBMIT.CMD not found$'
-error_tail db 'Command tail too long for SUBMIT$'
-error_abort db 'Command cancelled$'
-error_console db 'Cannot assign console$'
-error_unsupported db 'Unsupported file type$'
-error_batch db 'BATCH.CMD not found$'
-        org (offset $+15) and 0fff0h
+	dw	3,offset error_memory
+	dw	12,offset error_pd
+	dw	23,offset error_drive
+	dw	24,offset error_name
+	dw	25,offset error_type
+	dw	38,offset error_password
+	dw	28,offset error_load
+	dw	29,offset error_read
+	dw	30,offset error_missing
+	dw	15,offset error_queue
+	dw	18,offset error_md
+	dw	17,offset error_ndp
+	dw	33,offset error_code
+	dw	41,offset error_fixup
+	dw	37,offset error_list
+	dw	44,offset error_submit
+	dw	43,offset error_tail
+	dw	40,offset error_abort
+	dw	19,offset error_console
+	dw	20,offset error_console
+	dw	21,offset error_console
+	dw	32,offset error_console
+	dw	36,offset error_console
+	dw	60,offset error_unsupported
+	dw	61,offset error_batch
+	dw	0ffffh,0
+error_prefix			db	'Command error: $'
+error_command_text		db	'Command = $'
+error_unknown_text		db	'Unknown command error, code $'
+error_cmd_load			db	'Invalid or empty CMD file$'
+error_cmd_read			db	'Disk error while reading CMD file$'
+error_memory			db	'Not enough memory$'
+error_pd			db	'Too many active processes$'
+error_drive			db	'Invalid drive (use A: through P:)$'
+error_name			db	'Invalid name (max 8 characters)$'
+error_type			db	'Invalid extension (max 3 characters)$'
+error_password			db	'Invalid password (max 8 characters)$'
+error_load			db	'Invalid or malformed executable file$'
+error_read			db	'Invalid or unreadable executable file$'
+error_missing			db	'Command not found. Use ? for help$'
+error_queue			db	'Command queue full; retry$'
+error_md			db	'Memory allocation table is full$'
+error_ndp			db	'Command requires an 8087 coprocessor$'
+error_code			db	'Invalid CMD file: missing code group$'
+error_fixup			db	'Invalid CMD relocation data$'
+error_list			db	'Invalid printer/list device$'
+error_submit			db	'SUBMIT.CMD not found$'
+error_tail			db	'Command tail too long for SUBMIT$'
+error_abort			db	'Command cancelled$'
+error_console			db	'Cannot assign console$'
+error_unsupported		db	'Unsupported file type$'
+error_batch			db	'BATCH.CMD not found$'
+	org	(offset $+15) and 0fff0h

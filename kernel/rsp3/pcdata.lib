@@ -1,180 +1,492 @@
+;*****************************************************************************
+;
+;	PCDATA - recovered PCTMP per-console DATA; reconstruction incomplete.
+;	Concurrent CP/M-86 3.1, project PC-MODE personality.
+;
+;*****************************************************************************
+
 ; Recovered normalized DATA, not a complete semantic reconstruction.
 ; Explicit initialization preserves all 0AF0h bytes, including per-console
 ; links, process/UDA fields, command/FCB buffers and initial private stack.
 ; Verified against the DATA group of inputs/pctmp.rsp; never resized.
 ; Original normalized PCTMP DATA, 2,800 bytes. No layout changes.
-        db 000h,000h,047h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,0c6h,003h,000h,050h,043h,054h,06dh,070h,020h,020h,020h
-        db 004h,000h,000h,000h,000h,000h,008h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,072h,001h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 001h,000h,000h,000h,000h,000h,000h,000h,000h,000h,0cch,0cch,0cch,0cch,0cch,0cch
-        db 0cch,0cch,0cch,0cch,0cch,0cch,0cch,0cch,0cch,0cch,0cch,0cch,0cch,0cch,0cch,0cch
-        db 0cch,0cch,0cch,0cch,0cch,0cch,0cch,0cch,0cch,0cch,0cch,0cch,0cch,0cch,0cch,0cch
-        db 0cch,0cch,0cch,0cch,0cch,0cch,0cch,0cch,0cch,0cch,0cch,0cch,0cch,0cch,0cch,0cch
-        db 0cch,0cch,0cch,0cch,0cch,0cch,0cch,0cch,0cch,0cch,0cch,0cch,0cch,0cch,0cch,0cch
-        db 0cch,0cch,0cch,0cch,0cch,0cch,0cch,0cch,0cch,0cch,0cch,0cch,0cch,0cch,0cch,0cch
-        db 0cch,0cch,0cch,0cch,0cch,0cch,0cch,0cch,0cch,0cch,0cch,0cch,0cch,0cch,0cch,0cch
-        db 0cch,0cch,0cch,0cch,0cch,0cch,0cch,0cch,0cch,0cch,0cch,0cch,0cch,0cch,0cch,0cch
-        db 0cch,0cch,0cch,0cch,0cch,0cch,0cch,0cch,0cch,0cch,0cch,0cch,0cch,0cch,0cch,0cch
-        db 0cch,0cch,0cch,0cch,0cch,0cch,0cch,0cch,0cch,0cch,0cch,0cch,0cch,0cch,0cch,0cch
-        db 0cch,0cch,0cch,0cch,0cch,0cch,0cch,0cch,0cch,0cch,0cch,0cch,0cch,0cch,0cch,0cch
-        db 0cch,0cch,0cch,0cch,0cch,0cch,0cch,0cch,0cch,0cch,0cch,0cch,0cch,0cch,0cch,0cch
-        db 0cch,0cch,0cch,0cch,0cch,0cch,0cch,0cch,0cch,0cch,0cch,0cch,0cch,0cch,0cch,0cch
-        db 0cch,0cch,044h,000h,000h,000h,000h,000h,003h,000h,000h,000h,000h,042h,041h,054h
-        db 000h,084h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,045h,002h,020h,002h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,053h,054h,041h,052h,054h,055h,050h,020h,020h,020h,020h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,024h,000h,020h,02ch,021h,05bh,05dh,03eh,03ch,03dh
-        db 03bh,02fh,000h,0c8h,002h,000h,000h,000h,00ch,00ch,000h,000h,000h,000h,000h,000h
-        db 000h,0ffh,043h,04dh,044h,043h,04fh,04dh,045h,058h,045h,042h,041h,054h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,009h,020h,03ah,02ch,02eh,03bh,02bh
-        db 02fh,05bh,05dh,03dh,022h,000h,000h,000h,000h,000h,020h,020h,020h,020h,020h,020h
-        db 020h,020h,020h,020h,020h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,055h,004h,000h,000h,05ch,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,07eh,000h,000h,000h,000h,000h,000h,000h,01fh,01ch,01fh,01eh,01fh,01eh,01fh
-        db 01fh,01eh,01fh,01eh,01fh,000h,000h,01fh,000h,03bh,000h,05ah,000h,078h,000h,097h
-        db 000h,0b5h,000h,0d4h,000h,0f3h,000h,011h,001h,030h,001h,04eh,001h,0ffh,0ffh,000h
-        db 000h,000h,000h,000h,000h,000h,000h,080h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,020h,020h,020h
-        db 020h,020h,020h,020h,020h,001h,000h,000h,000h,020h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,00dh,00ah
-        db 049h,06eh,076h,061h,06ch,069h,064h,020h,044h,04fh,053h,020h,031h,02eh,031h,020h
-        db 066h,075h,06eh,063h,074h,069h,06fh,06eh,020h,065h,06eh,063h,06fh,075h,06eh,074h
-        db 065h,072h,065h,064h,020h,02dh,020h,050h,072h,06fh,063h,065h,073h,073h,020h,074h
-        db 065h,072h,06dh,069h,06eh,061h,074h,065h,064h,02eh,00dh,00ah,024h,00dh,00ah,050h
-        db 072h,069h,06eh,074h,065h,072h,020h,042h,075h,073h,079h,00dh,00ah,024h,043h,04dh
-        db 044h,043h,04fh,04dh,045h,058h,045h,042h,041h,054h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
-        db 000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
+; Resident-system-process prefix, following the TMP/GENCCPM layout.
+; This normalized DATA is copied once per console; GENCCPM fixes segment links.
+rsp_system_link			dw	0
+rsp_sysdat_selector		dw	047h
+rsp_console_slot		db	0,0
+rsp_link_reserved		dw	0,0,0,0,0
+
+; Native process descriptor at 0010h.
+resident_process:
+	dw	0,0					; process links
+	db	0,198					; ready status, priority
+	dw	3					; system and keep flags
+	db	'PCTmp   '
+	dw	4					; UDA paragraph offset, DATA:0040h
+	db	0,0					; drive, user
+	db	0,0					; logical drive, logical user
+	dw	8					; resident memory-descriptor offset
+	dw	0,0					; compatibility mode/keep count, wait
+	db	0,0					; origin, network
+	dw	0					; parent
+	db	0,0					; console, abort
+	db	0,0					; console mode
+	db	0,0					; list device, state
+	db	0,0					; secondary flags
+	dw	0,0					; user dispatch vector
+	dw	0,0					; return code, scratch
+
+; UDA at 0040h. The initial private stack begins at DATA:00AAh.
+resident_uda:
+	dw	00000h,00000h,00000h,00000h		; UDA +00h
+	dw	00000h,00000h,00000h,00000h		; UDA +08h
+	dw	00000h,00000h,00000h,00000h		; UDA +10h
+	dw	00000h,00000h,00000h,00000h		; UDA +18h
+	dw	00000h,00000h,00000h,00000h		; UDA +20h
+	dw	00000h,00000h,00000h,00000h		; UDA +28h
+	dw	00000h,00000h,00172h,00000h		; UDA +30h
+	dw	00000h,00000h,00000h,00000h		; UDA +38h
+	dw	00000h,00000h,00000h,00000h		; UDA +40h
+	dw	00000h,00000h,00000h,00000h		; UDA +48h
+	dw	00000h,00000h,00000h,00000h		; UDA +50h
+	dw	00000h,00000h,00000h,00000h		; UDA +58h
+	db	1					; UDA +60h: INSYS
+	db	0					; UDA +61h
+	dw	0,0					; UDA +62h..65h
+	db	0					; UDA +66h
+	dw	0					; UDA +67h: extended error
+	db	0					; UDA +69h
+
+resident_stack:
+	dw	0cccch,0cccch,0cccch,0cccch
+	dw	0cccch,0cccch,0cccch,0cccch
+	dw	0cccch,0cccch,0cccch,0cccch
+	dw	0cccch,0cccch,0cccch,0cccch
+	dw	0cccch,0cccch,0cccch,0cccch
+	dw	0cccch,0cccch,0cccch,0cccch
+	dw	0cccch,0cccch,0cccch,0cccch
+	dw	0cccch,0cccch,0cccch,0cccch
+	dw	0cccch,0cccch,0cccch,0cccch
+	dw	0cccch,0cccch,0cccch,0cccch
+	dw	0cccch,0cccch,0cccch,0cccch
+	dw	0cccch,0cccch,0cccch,0cccch
+	dw	0cccch,0cccch,0cccch,0cccch
+	dw	0cccch,0cccch,0cccch,0cccch
+	dw	0cccch,0cccch,0cccch,0cccch
+	dw	0cccch,0cccch,0cccch,0cccch
+	dw	0cccch,0cccch,0cccch,0cccch
+	dw	0cccch,0cccch,0cccch,0cccch
+	dw	0cccch,0cccch,0cccch,0cccch
+	dw	0cccch,0cccch,0cccch,0cccch
+	dw	0cccch,0cccch,0cccch,0cccch
+	dw	0cccch,0cccch,0cccch,0cccch
+	dw	0cccch,0cccch,0cccch,0cccch
+	dw	0cccch,0cccch,0cccch,0cccch
+	dw	0cccch,0cccch,0cccch,0cccch
+resident_initial_frame:
+	dw	044h					; process_start IP
+	dw	0					; CODE segment fixed by GENCCPM
+	dw	0					; initial FLAGS fixed by GENCCPM
+
+
+; 0178h..017Bh: Private far service entry: CODE offset 3, segment fixed at startup.
+service_pointer_image:
+	dw	00003h,00000h
+
+; 017Ch..0180h: Native CLI prefix, reused as BATCH command control block.
+batch_prefix_image:
+	db	000h,'BAT',000h
+
+; 0181h..0181h: Native line-input maximum; aliases the expanded CLI prefix.
+command_capacity_image:
+	db	084h
+
+; 0182h..0182h: Returned input length / native CLI command prefix.
+command_count_image:
+	db	000h
+
+; 0183h..0207h: 132-byte command text plus terminating byte.
+command_text_image:
+	rb	133
+
+; 0208h..0208h: Command-submitted newline flag.
+command_sent_image:
+	db	000h
+
+; 0209h..020Ah: Parser tail pointer.
+command_tail_image:
+	dw	00000h
+
+; 020Bh..020Eh: BDOS 152 packet: saved text offset, output FCB offset.
+parser_packet_image:
+	dw	00245h,00220h
+
+; 020Fh..0216h: Private service 1: far FCB, far tail; option byte follows.
+load_packet_image:
+	dw	00000h,00000h,00000h,00000h
+
+; 0217h..0217h: Service packet option / source user-zero flag.
+load_user_zero_image:
+	db	000h
+
+; 0218h..0218h: Original zero byte, no direct reference in recovered code.
+shell_reserved_image:
+	rb	1
+
+; 0219h..021Fh: Seven-byte resident-process name buffer for BDOS 135 lookup.
+resident_name_image:
+	rb	7
+
+; 0220h..0244h: Startup/program FCB; 36 bytes plus original trailing zero.
+command_fcb_image:
+	db	000h,'STARTUP    ',000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
+
+; 0245h..02C4h: Saved command text, 128 bytes.
+saved_command_image:
+	rb	128
+
+; 02C5h..02C6h: Saved-text terminator and dollar-print sentinel.
+saved_command_tail_image:
+	db	000h,024h
+
+; 02C7h..02C7h: Native CLI error maps to missing BATCH when FFh.
+batch_pending_image:
+	db	000h
+
+; 02C8h..02D2h: Shell separator table, including terminating zero.
+shell_delimiters_image:
+	db	' ,![]><=;/',000h
+
+; 02D3h..02D4h: Pointer to shell delimiter table.
+shell_delimiter_pointer_image:
+	dw	002c8h
+
+; 02D5h..02D7h: Explicit-drive/search flags and selected one-based drive.
+search_explicit_image:
+	db	000h,000h,000h
+
+; 02D8h..02DAh: Original scan counts (12,12), numeric/parser scratch.
+shell_scan_limits_image:
+	db	00ch,00ch,000h
+
+; 02DBh..02DBh: Remaining historical extension attempts.
+search_count_image:
+	db	000h
+
+; 02DCh..02DFh: Original zero storage; no direct recovered reference.
+shell_spare_image:
+	rb	4
+
+; 02E0h..02E0h: Parser delimiter scratch byte.
+shell_delimiter_image:
+	db	000h
+
+; 02E1h..02E1h: Private settings packet direction: FFh copies settings out.
+search_packet_direction_image:
+	db	0ffh
+
+; 02E2h..02EDh: Four historical filename extensions, three bytes each.
+shell_extensions_image:
+	db	'CMDCOMEXEBAT'
+
+; 02EEh..02EEh: Set by DOS launch, consumed on shell return.
+dos_launch_pending_image:
+	db	000h
+
+; 02EFh..02EFh: Suppress leading zeroes in unsigned decimal output.
+decimal_started_image:
+	db	000h
+
+; 02F0h..02F1h: Buffered BIOS key AX.
+keyboard_pending_image:
+	dw	00000h
+
+; 02F2h..02F8h: Scan byte, output column/suppression, printer echo, line origin, device, COM flag.
+console_state_image:
+	db	000h,000h,000h,000h,000h,000h,000h
+
+; 02F9h..0304h: Twelve DOS filename delimiters.
+dos_delimiters_image:
+	db	009h,' :,.;+/[]="'
+
+; 0305h..0308h: Result and drive/name/type-present flags.
+parse_flags_image:
+	db	000h,000h,000h,000h
+
+; 0309h..0314h: Parsed drive and blank-padded eleven-character name/type.
+parse_fcb_image:
+	db	000h,'           '
+
+; 0315h..0384h: Original zero reserve; no direct recovered DATA references.
+original_spare_image:
+	rb	112
+
+; 0385h..0392h: First byte, leading span, first 24-bit record, last byte/record; each slot padded to words.
+transfer_boundaries_image:
+	dw	00000h,00000h,00000h,00000h
+	dw	00000h,00000h,00000h
+
+; 0393h..039Ch: Requested byte count, first byte offset (32-bit), last byte offset (32-bit).
+transfer_size_image:
+	dw	00000h,00000h,00000h,00000h
+	dw	00000h
+
+; 039Dh..039Dh: Nonzero when requested byte count exceeds 16 bits.
+transfer_overflow_image:
+	db	000h
+
+; 039Eh..039Fh: Requested application record count.
+transfer_records_image:
+	dw	00000h
+
+; 03A0h..03A3h: Cached native record number, 24 bits, followed by original padding.
+cache_record_image:
+	db	000h,000h,000h,000h
+
+; 03A4h..03A7h: Current transfer buffer far pointer.
+transfer_dma_image:
+	dw	00000h,00000h
+
+; 03A8h..03AAh: Current and working zero-based drive, partial-record indicator.
+drive_state_image:
+	db	000h,000h,000h
+
+; 03ABh..03ACh: Bytes transferred.
+transfer_done_image:
+	dw	00000h
+
+; 03ADh..03ADh: Block calls advance random position; single-record calls do not.
+transfer_advance_image:
+	db	000h
+
+; 03AEh..03B1h: Whole records remaining and first/last native record difference.
+transfer_span_image:
+	dw	00000h,00000h
+
+; 03B2h..03B3h: Cached user and dirty flag.
+cache_user_dirty_image:
+	db	000h,000h
+
+; 03B4h..03B5h: Owning private FCB slot.
+cache_fcb_image:
+	dw	00000h
+
+; 03B6h..03B7h: Cache-valid flag and native I/O result.
+cache_result_image:
+	db	000h,000h
+
+; 03B8h..03BBh: Original zero storage; +2 reset by DOS flush-input dispatcher.
+file_spare_image:
+	rb	4
+
+; 03BCh..03BFh: Extended-FCB flag, requested attributes, returned DOS attributes, padding.
+fcb_attribute_image:
+	db	000h,000h,000h,000h
+
+; 03C0h..03C3h: Native DMA offset/segment.
+native_dma_image:
+	dw	00000h,00000h
+
+; 03C4h..03C7h: Application DTA offset/segment.
+dos_dma_image:
+	dw	00000h,00000h
+
+; 03C8h..03CBh: Application FCB offset/segment.
+application_fcb_image:
+	dw	00000h,00000h
+
+; 03CCh..03CFh: Native allocation descriptor: base/size.
+allocation_image:
+	dw	00000h,00000h
+
+; 03D0h..03D0h: Original allocation flag byte.
+allocation_spare_image:
+	db	000h
+
+; 03D1h..03D8h: Child PD segment, PSP segment, allocation size, COM read offset.
+child_segments_image:
+	dw	00000h,00000h,00000h,00000h
+
+; 03D9h..0428h: Private interrupt/service stack below the saved register frame.
+dos_stack_image:
+	rb	80
+
+; 0429h..043Ah: Saved BP/DI/ES/SI/DX/DS/CX/BX/AX; first slot reused by entry AX.
+dos_frame_image:
+	dw	00000h,00000h,00000h,00000h
+	dw	00000h,00000h,00000h,00000h
+	dw	00000h
+
+; 043Bh..043Ch: DOS result AX.
+dos_result_image:
+	dw	00000h
+
+; 043Dh..043Dh: INT 24h nested-console flag.
+dos_nested_image:
+	db	000h
+
+; 043Eh..0447h: Saved child SS/SP, private SS/SP and error context.
+critical_stacks_image:
+	dw	00000h,00000h,00000h,00000h
+	dw	00000h
+
+; 0448h..044Fh: Child SP/SS and entry CS/IP.
+child_entry_image:
+	dw	00000h,00000h,00000h,00000h
+
+; 0450h..0451h: Calling service DS.
+service_ds_image:
+	dw	00000h
+
+; 0452h..0454h: User-zero option, compatibility bits, saved caller user.
+load_flags_image:
+	db	000h,000h,000h
+
+; 0455h..04D4h: 128-byte EXE header, directory DMA and file record cache (shared storage).
+record_buffer_image:
+	rb	128
+
+; 04D5h..04D7h: Original zero reserve following the 128-byte buffer.
+loader_spare_image:
+	rb	3
+
+; 04D8h..04DFh: Records remaining, DMA segment, image paragraphs, image load segment.
+exe_transfer_image:
+	dw	00000h,00000h,00000h,00000h
+
+; 04E0h..04E2h: EXE next record number, 24 bits.
+exe_record_image:
+	db	000h,000h,000h
+
+; 04E3h..04E6h: Far pointer to record buffer; DATA segment installed at initialization.
+cache_pointer_image:
+	dw	00455h,00000h
+
+; 04E7h..04EAh: Original offset 005Ch pointer; segment initialized to instance DATA.
+default_fcb_pointer_image:
+	dw	0005ch,00000h
+
+; 04EBh..04ECh: EXE relocation-record cursor.
+relocation_cursor_image:
+	dw	00000h
+
+; 04EDh..04F0h: Selected FCB slot and initialized instance DATA segment.
+slot_pointer_image:
+	dw	00000h,00000h
+
+; 04F1h..04F4h: Native clock at SYSDAT:007Eh; segment installed at initialization.
+clock_pointer_image:
+	dw	0007eh,00000h
+
+; 04F5h..04F8h: Vectors active, directory timestamp mode, console number, list number.
+runtime_flags_image:
+	db	000h,000h,000h,000h
+
+; 04F9h..0504h: Month lengths; February is changed by set-date validation.
+month_days_image:
+	db	01fh,01ch,01fh,01eh,01fh,01eh,01fh,01fh,01eh,01fh,01eh,01fh
+
+; 0505h..051Ch: Cumulative non-leap-year month starts.
+month_starts_image:
+	dw	00000h,0001fh,0003bh,0005ah
+	dw	00078h,00097h,000b5h,000d4h
+	dw	000f3h,00111h,00130h,0014eh
+
+; 051Dh..0523h: Original printer sentinel, BIOS function/character/device packet.
+printer_state_image:
+	db	0ffh,0ffh,000h,000h,000h,000h,000h
+
+; 0524h..0525h: Offset consumed from buffered console record.
+console_record_cursor_image:
+	dw	00000h
+
+; 0526h..0526h: Buffered line pending.
+console_record_flag_image:
+	db	000h
+
+; 0527h..0527h: DOS line-input maximum.
+console_record_capacity_image:
+	db	080h
+
+; 0528h..0528h: Line count including appended CR/LF during FCB input.
+console_record_count_image:
+	db	000h
+
+; 0529h..05AAh: 128-byte console line plus CR/LF.
+console_record_text_image:
+	rb	130
+
+; 05ABh..05ACh: Offset of command text used to build child PSP.
+launch_command_pointer_image:
+	dw	00000h
+
+; 05ADh..05ADh: Command text length.
+launch_command_count_image:
+	db	000h
+
+; 05AEh..05B5h: AX/BX/CX/DX for XIOS PC-MODE BIOS adapter.
+bios_register_packet_image:
+	dw	00000h,00000h,00000h,00000h
+
+; 05B6h..05B6h: Packet console number.
+bios_console_image:
+	db	000h
+
+; 05B7h..05C0h: Operation, drive, count/CHS or absolute sector, buffer offset/segment.
+raw_disk_packet_image:
+	db	000h,000h,000h,000h,000h,000h,000h,000h,000h,000h
+
+; 05C1h..05DCh: 28-byte saved native UDA directory state.
+directory_state_image:
+	rb	28
+
+; 05DDh..063Ah: 94-byte per-process active INT 10h..26h vector region.
+active_vectors_image:
+	rb	94
+
+; 063Bh..0698h: 94-byte original interrupt vector region restored on exit.
+original_vectors_image:
+	rb	94
+
+; 0699h..06A4h: Native attach packet: console, reserved bytes, eight-byte process name.
+attach_packet_image:
+	db	000h,000h,000h,000h,'        '
+
+; 06A5h..06A5h: Private SUSPEND/NDP bits; default SUSPEND enabled.
+private_service_flags_image:
+	db	001h
+
+; 06A6h..06A7h: Service 5 word: initialized/reset to zero, set FFFEh while launching.
+private_service_word_image:
+	dw	00000h
+
+; 06A8h..06A9h: Configured allocation paragraphs; default 2000h (128 KiB).
+memory_setting_image:
+	dw	02000h
+
+; 06AAh..06CDh: 36-byte FCB scratch for metadata, search and rename.
+metadata_fcb_image:
+	rb	36
+
+; 06CEh..070Ch: Historical unsupported-function message, CR/LF and dollar terminator.
+invalid_dos_message_image:
+	db	00dh,00ah,'Invalid DOS 1.1 function encountered - Process terminated.',00dh,00ah,024h
+
+; 070Dh..071Dh: Printer busy message, CR/LF and dollar terminator.
+printer_busy_message_image:
+	db	00dh,00ah,'Printer Busy',00dh,00ah,024h
+
+; 071Eh..0729h: Service 6 settings: CMD, COM, EXE, BAT.
+private_extensions_image:
+	db	'CMDCOMEXEBAT'
+
+; 072Ah..0AE9h: 24 private FCB slots, 40 bytes each; cleanup marks first bytes FFh.
+private_fcb_slots_image:
+	rb	960
+
+; 0AEAh..0AEFh: Six original trailing zero bytes; DATA ends at 0AF0h.
+data_padding_image:
+	db	0,0,0,0,0,0
+
+instance_data_end:

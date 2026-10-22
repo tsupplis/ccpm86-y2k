@@ -1,218 +1,225 @@
+;*****************************************************************************
+;
+;	PCGUARD - PCTMP executable bounds and relocation checks.
+;	Concurrent CP/M-86 3.1, project PC-MODE personality.
+;
+;*****************************************************************************
+
 ; Experimental PCTMP MZ checks. Included only with PCMODE_SAFE_LOADER.
 ; DS is the current console's DATA. Per-console lengths live in shared CODE
 ; because the recovered DATA stride is an ABI and must not be enlarged.
 ; The experimental build has exactly four PCTMP instances (checked by builder).
 validate_exe_file:
-        push ax
-        push bx
-        push cx
-        push dx
-        push si
-        push di
-        push bp
-        push es
-        cmp word ptr .exe_header,5a4dh
-        je mz_signature_valid
-        jmp exe_file_invalid
+	push	ax
+	push	bx
+	push	cx
+	push	dx
+	push	si
+	push	di
+	push	bp
+	push	es
+	cmp	word ptr .exe_header,5a4dh
+	je	mz_signature_valid
+	jmp	exe_file_invalid
 mz_signature_valid:
-        cmp byte ptr .rsp_console_instance,4
-        jb mz_console_valid
-        jmp exe_file_invalid
+	cmp	byte ptr .rsp_console_instance,4
+	jb	mz_console_valid
+	jmp	exe_file_invalid
 mz_console_valid:
-        mov ax,word ptr .exe_header+4
-        or ax,ax
-        jnz mz_pages_nonzero
-        jmp exe_file_invalid
+	mov	ax,word ptr .exe_header+4
+	or	ax,ax
+	jnz	mz_pages_nonzero
+	jmp	exe_file_invalid
 mz_pages_nonzero:
-        cmp ax,4000h
-        jb mz_pages_bounded
-        jmp exe_file_invalid
+	cmp	ax,4000h
+	jb	mz_pages_bounded
+	jmp	exe_file_invalid
 mz_pages_bounded:
-        mov bx,word ptr .exe_header+2
-        cmp bx,511
-        jbe mz_last_page_bounded
-        jmp exe_file_invalid
+	mov	bx,word ptr .exe_header+2
+	cmp	bx,511
+	jbe	mz_last_page_bounded
+	jmp	exe_file_invalid
 mz_last_page_bounded:
-        or bx,bx
-        jz exe_full_pages
-        dec ax
+	or	bx,bx
+	jz	exe_full_pages
+	dec	ax
 exe_full_pages:
-        mov dx,512
-        mul dx
-        add ax,bx
-        adc dx,0                     ; exact declared file length in DX:AX
-        mov si,ax
-        mov di,dx
-        mov ax,word ptr .exe_header_paragraphs
-        cmp ax,2                     ; fixed MZ fields require at least 28 bytes
-        jae mz_header_minimum_valid
-        jmp exe_file_invalid
+	mov	dx,512
+	mul	dx
+	add	ax,bx
+	adc	dx,0					; exact declared file length in DX:AX
+	mov	si,ax
+	mov	di,dx
+	mov	ax,word ptr .exe_header_paragraphs
+	cmp	ax,2					; fixed MZ fields require at least 28 bytes
+	jae	mz_header_minimum_valid
+	jmp	exe_file_invalid
 mz_header_minimum_valid:
-        mov dx,16
-        mul dx                       ; header bytes in DX:AX
-        push dx
-        push ax
-        sub si,ax
-        sbb di,dx
-        pop bx                       ; header low word
-        pop cx                       ; header high word
-        jnc mz_header_fits_file
-        jmp exe_file_invalid
+	mov	dx,16
+	mul	dx					; header bytes in DX:AX
+	push	dx
+	push	ax
+	sub	si,ax
+	sbb	di,dx
+	pop	bx					; header low word
+	pop	cx					; header high word
+	jnc	mz_header_fits_file
+	jmp	exe_file_invalid
 mz_header_fits_file:
-        mov ax,si
-        or ax,di
-        jnz mz_image_nonempty
-        jmp exe_file_invalid
+	mov	ax,si
+	or	ax,di
+	jnz	mz_image_nonempty
+	jmp	exe_file_invalid
 mz_image_nonempty:
-        push bx
-        xor bx,bx
-        mov bl,byte ptr .rsp_console_instance
-        shl bx,1
-        shl bx,1
-        mov cs:word ptr guard_image_bytes[bx],si
-        mov cs:word ptr guard_image_bytes+2[bx],di
-        pop bx
+	push	bx
+	xor	bx,bx
+	mov	bl,byte ptr .rsp_console_instance
+	shl	bx,1
+	shl	bx,1
+	mov	cs:word ptr guard_image_bytes[bx],si
+	mov	cs:word ptr guard_image_bytes+2[bx],di
+	pop	bx
 
 ; A nonempty relocation table must follow the fixed MZ fields and fit the
 ; declared header. The checked reader handles arbitrary byte alignment and
 ; starts beyond record zero; no legacy reader-layout restriction is needed.
-        mov ax,word ptr .exe_relocation_count
-        or ax,ax
-        jz exe_table_valid
-        mov bp,word ptr .exe_relocation_offset
-        cmp bp,1ch
-        jae mz_table_offset_valid
-        jmp exe_file_invalid
+	mov	ax,word ptr .exe_relocation_count
+	or	ax,ax
+	jz	exe_table_valid
+	mov	bp,word ptr .exe_relocation_offset
+	cmp	bp,1ch
+	jae	mz_table_offset_valid
+	jmp	exe_file_invalid
 mz_table_offset_valid:
-        mov dx,4
-        mul dx
-        add ax,bp
-        adc dx,0
-        cmp dx,cx
-        jbe mz_table_high_valid
-        jmp exe_file_invalid
+	mov	dx,4
+	mul	dx
+	add	ax,bp
+	adc	dx,0
+	cmp	dx,cx
+	jbe	mz_table_high_valid
+	jmp	exe_file_invalid
 mz_table_high_valid:
-        jb exe_table_valid
-        cmp ax,bx
-        jbe mz_table_end_valid
-        jmp exe_file_invalid
+	jb	exe_table_valid
+	cmp	ax,bx
+	jbe	mz_table_end_valid
+	jmp	exe_file_invalid
 mz_table_end_valid:
 exe_table_valid:
 ; Prevent wraparound in the original 16-bit paragraph allocation request.
-        mov ax,si
-        mov dx,di
-        add ax,15
-        adc dx,0
-        shr dx,1
-        rcr ax,1
-        shr dx,1
-        rcr ax,1
-        shr dx,1
-        rcr ax,1
-        shr dx,1
-        rcr ax,1
-        or dx,dx
-        jnz exe_file_invalid
-        add ax,2bh                   ; loader/PSP overhead used by original path
-        jc exe_file_invalid
-        add ax,word ptr .exe_header+0ah      ; minimum additional paragraphs
-        jc exe_file_invalid
+	mov	ax,si
+	mov	dx,di
+	add	ax,15
+	adc	dx,0
+	shr	dx,1
+	rcr	ax,1
+	shr	dx,1
+	rcr	ax,1
+	shr	dx,1
+	rcr	ax,1
+	shr	dx,1
+	rcr	ax,1
+	or	dx,dx
+	jnz	exe_file_invalid
+	add	ax,2bh					; loader/PSP overhead used by original path
+	jc	exe_file_invalid
+	add	ax,word ptr .exe_header+0ah		; minimum additional paragraphs
+	jc	exe_file_invalid
 
 ; Initial CS:IP must refer to a byte actually present in the image.
-        mov ax,word ptr .exe_initial_cs
-        mov dx,16
-        mul dx
-        add ax,word ptr .exe_initial_ip
-        adc dx,0
-        cmp dx,di
-        ja exe_file_invalid
-        jb exe_entry_valid
-        cmp ax,si
-        jae exe_file_invalid
+	mov	ax,word ptr .exe_initial_cs
+	mov	dx,16
+	mul	dx
+	add	ax,word ptr .exe_initial_ip
+	adc	dx,0
+	cmp	dx,di
+	ja	exe_file_invalid
+	jb	exe_entry_valid
+	cmp	ax,si
+	jae	exe_file_invalid
 exe_entry_valid:
-        mov ax,word ptr .exe_header+4
-        mov bx,word ptr .exe_header+2
-        or bx,bx
-        jz exe_count_pages
-        dec ax
+	mov	ax,word ptr .exe_header+4
+	mov	bx,word ptr .exe_header+2
+	or	bx,bx
+	jz	exe_count_pages
+	dec	ax
 exe_count_pages:
-        shl ax,1
-        shl ax,1
-        add bx,127
-        mov cl,7
-        shr bx,cl
-        add ax,bx
-        push ax
-        mov dx,program_fcb
-        mov cl,35                    ; actual CP/M record count, not byte EOF
-        call loader_bdos_call
-        pop bx
-        cmp al,0ffh
-        je exe_file_invalid
-        cmp byte ptr .program_fcb+fcb_random_record+2,0
-        jne exe_file_valid
-        cmp word ptr .program_fcb+fcb_random_record,bx
-        jb exe_file_invalid
+	shl	ax,1
+	shl	ax,1
+	add	bx,127
+	mov	cl,7
+	shr	bx,cl
+	add	ax,bx
+	push	ax
+	mov	dx,program_fcb
+	mov	cl,35					; actual CP/M record count, not byte EOF
+	call	loader_bdos_call
+	pop	bx
+	cmp	al,0ffh
+	je	exe_file_invalid
+	cmp	byte ptr .program_fcb+fcb_random_record+2,0
+	jne	exe_file_valid
+	cmp	word ptr .program_fcb+fcb_random_record,bx
+	jb	exe_file_invalid
 exe_file_valid:
-        pop es
-        pop bp
-        pop di
-        pop si
-        pop dx
-        pop cx
-        pop bx
-        pop ax
-        mov bx,word ptr .exe_header+2         ; displaced original instruction
-        jmp exe_size_arithmetic
+	pop	es
+	pop	bp
+	pop	di
+	pop	si
+	pop	dx
+	pop	cx
+	pop	bx
+	pop	ax
+	mov	bx,word ptr .exe_header+2		; displaced original instruction
+	jmp	exe_size_arithmetic
 exe_file_invalid:
-        pop es
-        pop bp
-        pop di
-        pop si
-        pop dx
-        pop cx
-        pop bx
-        pop ax
-        jmp loader_read_error
+	pop	es
+	pop	bp
+	pop	di
+	pop	si
+	pop	dx
+	pop	cx
+	pop	bx
+	pop	ax
+	jmp	loader_read_error
 
 ; Called after reading an offset:relative-segment relocation into ES:SI.
 ; Require both target bytes inside the file's image before adding the load
 ; base. No out-of-image write is permitted. Return AX=absolute target segment,
 ; as the displaced MOV/ADD did. Preserve the relocation loop's live registers.
 validate_exe_relocation:
-        push bx
-        push cx
-        push dx
-        xor bx,bx
-        mov bl,byte ptr .rsp_console_instance
-        shl bx,1
-        shl bx,1
-        mov ax,es
-        mov dx,16
-        mul dx
-        add ax,si
-        adc dx,0
-        add ax,1                     ; index of the word's second byte
-        adc dx,0
-        cmp dx,cs:word ptr guard_image_bytes+2[bx]
-        ja exe_relocation_invalid
-        jb exe_relocation_in_image
-        cmp ax,cs:word ptr guard_image_bytes[bx]
-        jae exe_relocation_invalid
+	push	bx
+	push	cx
+	push	dx
+	xor	bx,bx
+	mov	bl,byte ptr .rsp_console_instance
+	shl	bx,1
+	shl	bx,1
+	mov	ax,es
+	mov	dx,16
+	mul	dx
+	add	ax,si
+	adc	dx,0
+	add	ax,1					; index of the word's second byte
+	adc	dx,0
+	cmp	dx,cs:word ptr guard_image_bytes+2[bx]
+	ja	exe_relocation_invalid
+	jb	exe_relocation_in_image
+	cmp	ax,cs:word ptr guard_image_bytes[bx]
+	jae	exe_relocation_invalid
 exe_relocation_in_image:
-        mov ax,es
-        add ax,word ptr .exe_load_segment
-        jc exe_relocation_invalid
-        pop dx
-        pop cx
-        pop bx
-        ret
+	mov	ax,es
+	add	ax,word ptr .exe_load_segment
+	jc	exe_relocation_invalid
+	pop	dx
+	pop	cx
+	pop	bx
+	ret
 exe_relocation_invalid:
-        pop dx
-        pop cx
-        pop bx
-        add sp,2                     ; discard this helper's CALL return address
-        jmp loader_read_error   ; return to loader caller, not relocation loop
+	pop	dx
+	pop	cx
+	pop	bx
+	add	sp,2					; discard this helper's CALL return address
+	jmp	loader_read_error			; return to loader caller, not relocation loop
 
 ; Before construct_psp and prepare_dos_execution touch the child stack,
 ; validate the five WORD writes made by CODE:147Ch. SP=0 is valid: subtracting
@@ -221,222 +228,222 @@ exe_relocation_invalid:
 ; loader state); both bytes of every launch WORD must precede its upper end.
 ; This checks initial launch writes only, not later application stack growth.
 validate_exe_stack:
-        push bx
-        push cx
-        push dx
-        push si
-        push di
-        push bp
+	push	bx
+	push	cx
+	push	dx
+	push	si
+	push	di
+	push	bp
 ; Bound the image independently of SS:SP. The recovered MAXALLOC placement
 ; subtracts absolute segments and can land in the PSP/private loader area.
 ; Keep its placement when image plus MINALLOC fits; otherwise use the normal
 ; post-PSP base, provided the actual allocation can contain the request.
-        mov bx,word ptr .loader_memory_base
-        add bx,word ptr .loader_memory_size
-        jc exe_placement_invalid
-        mov ax,word ptr .loader_memory_base
-        add ax,2bh
-        jc exe_placement_invalid
-        cmp ax,bx
-        jae exe_placement_invalid
-        mov dx,word ptr .exe_load_segment
-        cmp dx,ax
-        jb exe_placement_low
-        cmp dx,bx
-        jae exe_placement_low
-        push bx
-        sub bx,dx
-        cmp bx,word ptr .exe_image_paragraphs
-        jb exe_placement_retry
-        sub bx,word ptr .exe_image_paragraphs
-        cmp bx,word ptr .exe_header+0ah
-        pop bx
-        jae exe_placement_ready
-        jmps exe_placement_low
+	mov	bx,word ptr .loader_memory_base
+	add	bx,word ptr .loader_memory_size
+	jc	exe_placement_invalid
+	mov	ax,word ptr .loader_memory_base
+	add	ax,2bh
+	jc	exe_placement_invalid
+	cmp	ax,bx
+	jae	exe_placement_invalid
+	mov	dx,word ptr .exe_load_segment
+	cmp	dx,ax
+	jb	exe_placement_low
+	cmp	dx,bx
+	jae	exe_placement_low
+	push	bx
+	sub	bx,dx
+	cmp	bx,word ptr .exe_image_paragraphs
+	jb	exe_placement_retry
+	sub	bx,word ptr .exe_image_paragraphs
+	cmp	bx,word ptr .exe_header+0ah
+	pop	bx
+	jae	exe_placement_ready
+	jmps	exe_placement_low
 exe_placement_retry:
-        pop bx
+	pop	bx
 exe_placement_low:
-        mov dx,ax
-        sub bx,dx
-        cmp bx,word ptr .exe_image_paragraphs
-        jb exe_placement_invalid
-        sub bx,word ptr .exe_image_paragraphs
-        cmp bx,word ptr .exe_header+0ah
-        jb exe_placement_invalid
+	mov	dx,ax
+	sub	bx,dx
+	cmp	bx,word ptr .exe_image_paragraphs
+	jb	exe_placement_invalid
+	sub	bx,word ptr .exe_image_paragraphs
+	cmp	bx,word ptr .exe_header+0ah
+	jb	exe_placement_invalid
 exe_placement_ready:
-        mov word ptr .exe_load_segment,dx
-        jmps exe_placement_valid
+	mov	word ptr .exe_load_segment,dx
+	jmps	exe_placement_valid
 exe_placement_invalid:
-        jmp exe_stack_invalid
+	jmp	exe_stack_invalid
 exe_placement_valid:
-        mov ax,word ptr .exe_load_segment
-        add ax,word ptr .exe_initial_ss
-        jc exe_stack_invalid         ; rebasing SS must not wrap to low memory
-        mov bp,ax                    ; success result: child's absolute SS
-        cmp ax,word ptr .child_psp_segment
-        jb exe_stack_invalid
-        mov bx,word ptr .loader_memory_base
-        add bx,word ptr .loader_memory_size
-        jc exe_stack_invalid
-        sub bx,ax                    ; paragraphs from SS to allocation end
-        jbe exe_stack_invalid
-        mov ax,bx
-        mov dx,16
-        mul dx
-        mov di,dx
-        mov bx,ax                    ; DI:BX = exclusive byte bound relative to SS
-        mov si,word ptr .exe_initial_sp
-        mov cx,5                     ; two far returns plus FLAGS: ten bytes
+	mov	ax,word ptr .exe_load_segment
+	add	ax,word ptr .exe_initial_ss
+	jc	exe_stack_invalid			; rebasing SS must not wrap to low memory
+	mov	bp,ax					; success result: child's absolute SS
+	cmp	ax,word ptr .child_psp_segment
+	jb	exe_stack_invalid
+	mov	bx,word ptr .loader_memory_base
+	add	bx,word ptr .loader_memory_size
+	jc	exe_stack_invalid
+	sub	bx,ax					; paragraphs from SS to allocation end
+	jbe	exe_stack_invalid
+	mov	ax,bx
+	mov	dx,16
+	mul	dx
+	mov	di,dx
+	mov	bx,ax					; DI:BX = exclusive byte bound relative to SS
+	mov	si,word ptr .exe_initial_sp
+	mov	cx,5					; two far returns plus FLAGS: ten bytes
 exe_stack_word:
-        sub si,2                     ; retain 16-bit offset wrap, including SP=0
-        mov ax,si
-        xor dx,dx
-        add ax,2                     ; exclusive end of the WORD (may be 10000h)
-        adc dx,0
-        cmp dx,di
-        ja exe_stack_invalid
-        jb exe_stack_word_valid
-        cmp ax,bx
-        ja exe_stack_invalid
+	sub	si,2					; retain 16-bit offset wrap, including SP=0
+	mov	ax,si
+	xor	dx,dx
+	add	ax,2					; exclusive end of the WORD (may be 10000h)
+	adc	dx,0
+	cmp	dx,di
+	ja	exe_stack_invalid
+	jb	exe_stack_word_valid
+	cmp	ax,bx
+	ja	exe_stack_invalid
 exe_stack_word_valid:
-        loop exe_stack_word
-        mov ax,bp
-        pop bp
-        pop di
-        pop si
-        pop dx
-        pop cx
-        pop bx
-        ret
+	loop	exe_stack_word
+	mov	ax,bp
+	pop	bp
+	pop	di
+	pop	si
+	pop	dx
+	pop	cx
+	pop	bx
+	ret
 exe_stack_invalid:
-        pop bp
-        pop di
-        pop si
-        pop dx
-        pop cx
-        pop bx
-        add sp,2                     ; discard helper CALL, return through loader
-        jmp loader_read_error
+	pop	bp
+	pop	di
+	pop	si
+	pop	dx
+	pop	cx
+	pop	bx
+	add	sp,2					; discard helper CALL, return through loader
+	jmp	loader_read_error
 
 ; Image data may start inside a CP/M record. Read each record into
 ; console-private scratch, skip the header tail and
 ; copy only declared image bytes. No header-buffer or DATA-stride change.
 ; State layout: record DWORD, remaining DWORD, destination segment WORD,
 ; source skip WORD, copy count WORD, two reserved bytes. Four console slots.
-reader_record           equ 0
-reader_record_high      equ 2
-reader_remaining        equ 4
-reader_remaining_high   equ 6
-reader_destination      equ 8
-reader_skip             equ 10
-reader_count            equ 12
+reader_record			equ	0
+reader_record_high		equ	2
+reader_remaining		equ	4
+reader_remaining_high		equ	6
+reader_destination		equ	8
+reader_skip			equ	10
+reader_count			equ	12
 ; Use the bounded reader for aligned images too: CP/M reads whole 128-byte
 ; records, but allocation is paragraph-rounded. Never DMA record padding into
 ; the child allocation, and reject EOF before all declared bytes are copied.
 load_exe_header_tail:
 load_exe_unaligned:
-        call exe_reader_slot         ; BX=current console state; AX clobbered
-        mov ax,word ptr .exe_header_paragraphs
-        mov dx,ax
-        and dx,7
-        shl dx,1
-        shl dx,1
-        shl dx,1
-        shl dx,1
-        mov cs:word ptr reader_skip[bx],dx            ; bytes to skip in first record
-        mov cl,3
-        shr ax,cl
-        mov cs:word ptr reader_record[bx],ax
-        mov cs:word ptr reader_record_high[bx],0
-        mov ax,word ptr .exe_load_segment
-        mov cs:word ptr reader_destination[bx],ax
-        xor si,si
-        mov dl,byte ptr .rsp_console_instance
-        xor dh,dh
-        mov si,dx
-        shl si,1
-        shl si,1
-        mov ax,cs:word ptr guard_image_bytes[si]
-        mov dx,cs:word ptr guard_image_bytes+2[si]
-        mov cs:word ptr reader_remaining[bx],ax
-        mov cs:word ptr reader_remaining_high[bx],dx
-        mov dx,1
-        call set_multi_record_count
+	call	exe_reader_slot				; BX=current console state; AX clobbered
+	mov	ax,word ptr .exe_header_paragraphs
+	mov	dx,ax
+	and	dx,7
+	shl	dx,1
+	shl	dx,1
+	shl	dx,1
+	shl	dx,1
+	mov	cs:word ptr reader_skip[bx],dx		; bytes to skip in first record
+	mov	cl,3
+	shr	ax,cl
+	mov	cs:word ptr reader_record[bx],ax
+	mov	cs:word ptr reader_record_high[bx],0
+	mov	ax,word ptr .exe_load_segment
+	mov	cs:word ptr reader_destination[bx],ax
+	xor	si,si
+	mov	dl,byte ptr .rsp_console_instance
+	xor	dh,dh
+	mov	si,dx
+	shl	si,1
+	shl	si,1
+	mov	ax,cs:word ptr guard_image_bytes[si]
+	mov	dx,cs:word ptr guard_image_bytes+2[si]
+	mov	cs:word ptr reader_remaining[bx],ax
+	mov	cs:word ptr reader_remaining_high[bx],dx
+	mov	dx,1
+	call	set_multi_record_count
 exe_partial_record:
-        call exe_reader_slot
-        mov ax,bx
-        sub ax,offset guard_reader_state
-        mov cl,3
-        shl ax,cl                    ; state stride 16 -> scratch stride 128
-        add ax,offset guard_image_scratch
-        mov dx,ax
-        push cs
-        pop es
-        push bx
-        call set_loader_dma          ; ES:DX scratch, offset and segment
-        pop bx
-        mov ax,cs:word ptr reader_record[bx]
-        mov word ptr .program_fcb+fcb_random_record,ax
-        mov ax,cs:word ptr reader_record_high[bx]
-        mov byte ptr .program_fcb+fcb_random_record+2,al
-        add cs:word ptr reader_record[bx],1
-        adc cs:word ptr reader_record_high[bx],0
-        mov dx,program_fcb
-        mov cl,33
-        push bx
-        call loader_bdos_call
-        pop bx
-        or al,al
-        jnz exe_partial_read_error
-        mov cx,128
-        sub cx,cs:word ptr reader_skip[bx]
-        cmp cs:word ptr reader_remaining_high[bx],0
-        jne exe_partial_count_ready
-        cmp cx,cs:word ptr reader_remaining[bx]
-        jbe exe_partial_count_ready
-        mov cx,cs:word ptr reader_remaining[bx]
+	call	exe_reader_slot
+	mov	ax,bx
+	sub	ax,offset guard_reader_state
+	mov	cl,3
+	shl	ax,cl					; state stride 16 -> scratch stride 128
+	add	ax,offset guard_image_scratch
+	mov	dx,ax
+	push	cs
+	pop	es
+	push	bx
+	call	set_loader_dma				; ES:DX scratch, offset and segment
+	pop	bx
+	mov	ax,cs:word ptr reader_record[bx]
+	mov	word ptr .program_fcb+fcb_random_record,ax
+	mov	ax,cs:word ptr reader_record_high[bx]
+	mov	byte ptr .program_fcb+fcb_random_record+2,al
+	add	cs:word ptr reader_record[bx],1
+	adc	cs:word ptr reader_record_high[bx],0
+	mov	dx,program_fcb
+	mov	cl,33
+	push	bx
+	call	loader_bdos_call
+	pop	bx
+	or	al,al
+	jnz	exe_partial_read_error
+	mov	cx,128
+	sub	cx,cs:word ptr reader_skip[bx]
+	cmp	cs:word ptr reader_remaining_high[bx],0
+	jne	exe_partial_count_ready
+	cmp	cx,cs:word ptr reader_remaining[bx]
+	jbe	exe_partial_count_ready
+	mov	cx,cs:word ptr reader_remaining[bx]
 exe_partial_count_ready:
-        mov cs:word ptr reader_count[bx],cx
-        mov ax,bx
-        sub ax,offset guard_reader_state
-        mov si,ax
-        shl si,1
-        shl si,1
-        shl si,1
-        add si,offset guard_image_scratch
-        add si,cs:word ptr reader_skip[bx]
-        mov es,cs:word ptr reader_destination[bx]
-        xor di,di
-        push ds
-        push cs
-        pop ds
-        cld
-        rep movsb
-        pop ds
-        mov ax,cs:word ptr reader_count[bx]
-        sub cs:word ptr reader_remaining[bx],ax
-        sbb cs:word ptr reader_remaining_high[bx],0
-        mov dx,cs:word ptr reader_remaining[bx]
-        or dx,cs:word ptr reader_remaining_high[bx]
-        jz exe_partial_done
-        mov cl,4
-        shr ax,cl                    ; non-final copies are whole paragraphs
-        add cs:word ptr reader_destination[bx],ax
-        mov cs:word ptr reader_skip[bx],0
-        jmp exe_partial_record
+	mov	cs:word ptr reader_count[bx],cx
+	mov	ax,bx
+	sub	ax,offset guard_reader_state
+	mov	si,ax
+	shl	si,1
+	shl	si,1
+	shl	si,1
+	add	si,offset guard_image_scratch
+	add	si,cs:word ptr reader_skip[bx]
+	mov	es,cs:word ptr reader_destination[bx]
+	xor	di,di
+	push	ds
+	push	cs
+	pop	ds
+	cld
+	rep	movsb
+	pop	ds
+	mov	ax,cs:word ptr reader_count[bx]
+	sub	cs:word ptr reader_remaining[bx],ax
+	sbb	cs:word ptr reader_remaining_high[bx],0
+	mov	dx,cs:word ptr reader_remaining[bx]
+	or	dx,cs:word ptr reader_remaining_high[bx]
+	jz	exe_partial_done
+	mov	cl,4
+	shr	ax,cl					; non-final copies are whole paragraphs
+	add	cs:word ptr reader_destination[bx],ax
+	mov	cs:word ptr reader_skip[bx],0
+	jmp	exe_partial_record
 exe_partial_done:
-        jmp relocate_exe        ; original header is still in DATA
+	jmp	relocate_exe				; original header is still in DATA
 exe_partial_read_error:
-        jmp loader_read_error
+	jmp	loader_read_error
 exe_reader_slot:
-        xor bx,bx
-        mov bl,byte ptr .rsp_console_instance
-        shl bx,1
-        shl bx,1
-        shl bx,1
-        shl bx,1
-        add bx,offset guard_reader_state
-        ret
+	xor	bx,bx
+	mov	bl,byte ptr .rsp_console_instance
+	shl	bx,1
+	shl	bx,1
+	shl	bx,1
+	shl	bx,1
+	add	bx,offset guard_reader_state
+	ret
 
 ; Checked relocation pass. Reuse the image reader's per-console sidecar only
 ; after image loading has completed. Relocation phase layout is deliberately
@@ -444,143 +451,143 @@ exe_reader_slot:
 ; assembled entry DWORD +8, bytes-assembled WORD +12, cached-record flag +14.
 ; There are no simultaneous image/relocation users within one load operation.
 ; No extra mutable storage or changes to the DATA stride are introduced.
-reloc_entries           equ 4
-reloc_source_offset     equ 6
-reloc_entry             equ 8
-reloc_assembled         equ 12
-reloc_cached            equ 14
+reloc_entries			equ	4
+reloc_source_offset		equ	6
+reloc_entry			equ	8
+reloc_assembled			equ	12
+reloc_cached			equ	14
 relocate_exe_checked:
-        call exe_reader_slot
-        mov ax,word ptr .exe_relocation_count
-        mov cs:word ptr reloc_entries[bx],ax
-        or ax,ax
-        jnz relocation_table_nonempty
-        jmp checked_relocations_done
+	call	exe_reader_slot
+	mov	ax,word ptr .exe_relocation_count
+	mov	cs:word ptr reloc_entries[bx],ax
+	or	ax,ax
+	jnz	relocation_table_nonempty
+	jmp	checked_relocations_done
 relocation_table_nonempty:
-        mov ax,word ptr .exe_relocation_offset
-        mov dx,ax
-        and dx,127
-        mov cs:word ptr reloc_source_offset[bx],dx
-        mov cl,7
-        shr ax,cl
-        mov cs:word ptr reader_record[bx],ax
-        mov cs:word ptr reader_record_high[bx],0
-        mov cs:word ptr reloc_cached[bx],0
-        mov dx,1
-        call set_multi_record_count
+	mov	ax,word ptr .exe_relocation_offset
+	mov	dx,ax
+	and	dx,127
+	mov	cs:word ptr reloc_source_offset[bx],dx
+	mov	cl,7
+	shr	ax,cl
+	mov	cs:word ptr reader_record[bx],ax
+	mov	cs:word ptr reader_record_high[bx],0
+	mov	cs:word ptr reloc_cached[bx],0
+	mov	dx,1
+	call	set_multi_record_count
 checked_relocation_next:
-        call exe_reader_slot
-        mov cs:word ptr reloc_assembled[bx],0
+	call	exe_reader_slot
+	mov	cs:word ptr reloc_assembled[bx],0
 checked_relocation_byte:
-        cmp cs:word ptr reloc_cached[bx],0
-        jne checked_relocation_cached
-        mov ax,bx
-        sub ax,offset guard_reader_state
-        mov cl,3
-        shl ax,cl
-        add ax,offset guard_image_scratch
-        mov dx,ax
-        push cs
-        pop es
-        push bx
-        call set_loader_dma
-        pop bx
-        mov ax,cs:word ptr reader_record[bx]
-        mov word ptr .program_fcb+fcb_random_record,ax
-        mov ax,cs:word ptr reader_record_high[bx]
-        mov byte ptr .program_fcb+fcb_random_record+2,al
-        mov dx,program_fcb
-        mov cl,33
-        push bx
-        call loader_bdos_call
-        pop bx
-        or al,al
-        jz checked_relocation_record_ok
-        jmp checked_relocation_error
+	cmp	cs:word ptr reloc_cached[bx],0
+	jne	checked_relocation_cached
+	mov	ax,bx
+	sub	ax,offset guard_reader_state
+	mov	cl,3
+	shl	ax,cl
+	add	ax,offset guard_image_scratch
+	mov	dx,ax
+	push	cs
+	pop	es
+	push	bx
+	call	set_loader_dma
+	pop	bx
+	mov	ax,cs:word ptr reader_record[bx]
+	mov	word ptr .program_fcb+fcb_random_record,ax
+	mov	ax,cs:word ptr reader_record_high[bx]
+	mov	byte ptr .program_fcb+fcb_random_record+2,al
+	mov	dx,program_fcb
+	mov	cl,33
+	push	bx
+	call	loader_bdos_call
+	pop	bx
+	or	al,al
+	jz	checked_relocation_record_ok
+	jmp	checked_relocation_error
 checked_relocation_record_ok:
-        mov cs:word ptr reloc_cached[bx],1
+	mov	cs:word ptr reloc_cached[bx],1
 checked_relocation_cached:
-        mov si,bx
-        sub si,offset guard_reader_state
-        shl si,1
-        shl si,1
-        shl si,1
-        add si,offset guard_image_scratch
-        add si,cs:word ptr reloc_source_offset[bx]
-        mov al,cs:byte ptr [si]
-        mov di,cs:word ptr reloc_assembled[bx]
-        mov cs:byte ptr reloc_entry[bx+di],al
-        inc cs:word ptr reloc_assembled[bx]
-        inc cs:word ptr reloc_source_offset[bx]
-        cmp cs:word ptr reloc_source_offset[bx],128
-        jne checked_relocation_assembled
-        mov cs:word ptr reloc_source_offset[bx],0
-        mov cs:word ptr reloc_cached[bx],0
-        add cs:word ptr reader_record[bx],1
-        adc cs:word ptr reader_record_high[bx],0
+	mov	si,bx
+	sub	si,offset guard_reader_state
+	shl	si,1
+	shl	si,1
+	shl	si,1
+	add	si,offset guard_image_scratch
+	add	si,cs:word ptr reloc_source_offset[bx]
+	mov	al,cs:byte ptr [si]
+	mov	di,cs:word ptr reloc_assembled[bx]
+	mov	cs:byte ptr reloc_entry[bx+di],al
+	inc	cs:word ptr reloc_assembled[bx]
+	inc	cs:word ptr reloc_source_offset[bx]
+	cmp	cs:word ptr reloc_source_offset[bx],128
+	jne	checked_relocation_assembled
+	mov	cs:word ptr reloc_source_offset[bx],0
+	mov	cs:word ptr reloc_cached[bx],0
+	add	cs:word ptr reader_record[bx],1
+	adc	cs:word ptr reader_record_high[bx],0
 checked_relocation_assembled:
-        cmp cs:word ptr reloc_assembled[bx],4
-        jae relocation_entry_complete
-        jmp checked_relocation_byte
+	cmp	cs:word ptr reloc_assembled[bx],4
+	jae	relocation_entry_complete
+	jmp	checked_relocation_byte
 relocation_entry_complete:
-        les si,cs:dword ptr reloc_entry[bx]    ; assemble before interpreting segment:offset
-        call validate_exe_relocation  ; validates both bytes; no live pushed state
-        mov es,ax
-        mov ax,word ptr .exe_load_segment
-        add es:word ptr [si],ax
-        dec cs:word ptr reloc_entries[bx]
-        jz relocation_entries_finished
-        jmp checked_relocation_next
+	les	si,cs:dword ptr reloc_entry[bx]		; assemble before interpreting segment:offset
+	call	validate_exe_relocation			; validates both bytes; no live pushed state
+	mov	es,ax
+	mov	ax,word ptr .exe_load_segment
+	add	es:word ptr [si],ax
+	dec	cs:word ptr reloc_entries[bx]
+	jz	relocation_entries_finished
+	jmp	checked_relocation_next
 relocation_entries_finished:
 checked_relocations_done:
-        jmp prepare_dos_execution
+	jmp	prepare_dos_execution
 checked_relocation_error:
-        jmp loader_read_error   ; no nested helper return address to discard
+	jmp	loader_read_error			; no nested helper return address to discard
 
-        org (offset $+1) and 0fffeh
+	org	(offset $+1) and 0fffeh
 guard_reader_state:
 ; Initialized zero storage: 64 bytes; retained in GENCMD CODE extent.
-        db 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-        db 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-        db 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-        db 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
 guard_image_scratch:
 ; Initialized zero storage: 512 bytes; retained in GENCMD CODE extent.
-        db 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-        db 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-        db 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-        db 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-        db 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-        db 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-        db 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-        db 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-        db 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-        db 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-        db 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-        db 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-        db 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-        db 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-        db 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-        db 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-        db 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-        db 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-        db 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-        db 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-        db 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-        db 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-        db 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-        db 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-        db 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-        db 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-        db 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-        db 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-        db 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-        db 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-        db 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-        db 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
 
-        org (offset $+1) and 0fffeh
+	org	(offset $+1) and 0fffeh
 guard_image_bytes:
 ; Initialized zero storage: 16 bytes; retained in GENCMD CODE extent.
-        db 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-        org (offset $+15) and 0fff0h
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	org	(offset $+15) and 0fff0h

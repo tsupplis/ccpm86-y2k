@@ -1,87 +1,91 @@
+;*****************************************************************************
+;
+;	PCHELP - PCTMP quick help and HELP command expansion.
+;	Concurrent CP/M-86 3.1, project PC-MODE personality.
+;
+;*****************************************************************************
+
 ; Quick help adapted from kernel/rsp1/tmp.a86's clicall/quick_help.
 ; Hook before PCTMP's FCB parse at 01A8h: the original parser treats '?' as
 ; a filename wildcard, so this must run before the built-in dispatch hook.
 ; DS selects the existing console DATA; no buffer or mutable state is added.
-help_parse_resume equ code_origin+01abh
-help_next_command equ code_origin+00e0h
-help_print_code_string equ code_origin+06feh
 
 shell_help_command:
-        ; Startup-file commands can still end in CR here. Match the original
-        ; parser's upcoming length-based NUL write before testing/scanning help.
-        xor bx,bx
-        mov bl,byte ptr .command_length
-        mov byte ptr command_text[bx],0
-        cmp byte ptr .command_text,'?'
-        jne help_original_parse
-        mov al,byte ptr .command_text+1
-        or al,al
-        jz help_quick
-        cmp al,' '
-        je help_find_topic
-        cmp al,9
-        jne help_original_parse      ; ?FOO / ?.CMD keep filename semantics
+; Startup-file commands can still end in CR here. Match the original
+; parser's upcoming length-based NUL write before testing/scanning help.
+	xor	bx,bx
+	mov	bl,byte ptr .command_length
+	mov	byte ptr command_text[bx],0
+	cmp	byte ptr .command_text,'?'
+	jne	help_original_parse
+	mov	al,byte ptr .command_text+1
+	or	al,al
+	jz	help_quick
+	cmp	al,' '
+	je	help_find_topic
+	cmp	al,9
+	jne	help_original_parse			; ?FOO / ?.CMD keep filename semantics
 help_find_topic:
-        mov si,command_text+1
-        cld
+	mov	si,command_text+1
+	cld
 help_skip_space:
-        lodsb
-        cmp al,' '
-        je help_skip_space
-        cmp al,9
-        je help_skip_space
-        or al,al
-        jz help_quick                ; '?' plus only whitespace is bare help
-        ; PCTMP strips leading whitespace without shortening command_length.
-        ; Measure the normalized, zero-terminated text so the bound applies
-        ; to the actual command, including all topic/trailing whitespace.
-        mov si,command_text
-        xor cx,cx
+	lodsb
+	cmp	al,' '
+	je	help_skip_space
+	cmp	al,9
+	je	help_skip_space
+	or	al,al
+	jz	help_quick				; '?' plus only whitespace is bare help
+; PCTMP strips leading whitespace without shortening command_length.
+; Measure the normalized, zero-terminated text so the bound applies
+; to the actual command, including all topic/trailing whitespace.
+	mov	si,command_text
+	xor	cx,cx
 help_measure:
-        cmp byte ptr [si],0
-        je help_have_length
-        inc si
-        inc cx
-        cmp cx,128
-        jb help_measure
+	cmp	byte ptr [si],0
+	je	help_have_length
+	inc	si
+	inc	cx
+	cmp	cx,128
+	jb	help_measure
 help_have_length:
-        cmp cx,125                   ; replacing '?' by 'HELP' adds three bytes
-        ja help_too_long
-        mov byte ptr .command_length,cl
-        ; Move backwards including the terminator, just as native TMP does.
-        ; A maximum result of 128 bytes ends at 0203h, inside the old buffer.
-        mov di,si
-        add di,3
-        inc cx
-        push ds
-        pop es
-        std
-        rep movsb
-        cld
-        mov word ptr .command_text,04548h
-        mov word ptr .command_text+2,0504ch
-        add byte ptr .command_length,3
+	cmp	cx,125					; replacing '?' by 'HELP' adds three bytes
+	ja	help_too_long
+	mov	byte ptr .command_length,cl
+; Move backwards including the terminator, just as native TMP does.
+; A maximum result of 128 bytes ends at 0203h, inside the old buffer.
+	mov	di,si
+	add	di,3
+	inc	cx
+	push	ds
+	pop	es
+	std
+	rep	movsb
+	cld
+	mov	word ptr .command_text,04548h
+	mov	word ptr .command_text+2,0504ch
+	add	byte ptr .command_length,3
 help_original_parse:
-        mov bx,command_text           ; displaced original instruction
-        jmp help_parse_resume    ; retain existing lookup/CLI/DOS paths
+	mov	bx,command_text				; displaced original instruction
+	jmp	command_parse_tail			; retain existing lookup/CLI/DOS paths
 help_quick:
-        mov dx,offset help_quick_text
-        call help_print_code_string
-        jmp help_next_command
+	mov	dx,offset help_quick_text
+	call	print_code_string
+	jmp	command_prompt_resume
 help_too_long:
-        mov dx,offset help_length_error
-        call help_print_code_string
-        jmp help_next_command
+	mov	dx,offset help_length_error
+	call	print_code_string
+	jmp	command_prompt_resume
 
 ; List a small set of utilities, and distinguish the installed DOS personality.
 ; The help database describes CP/M utilities; it is not a DOS compatibility list.
 help_quick_text:
-        db 'Common commands:',13,10
-        db '  DIR  TYPE  PIP  ERA  REN  SUBMIT  SETDEF',13,10
-        db 'Shell commands: CLS  SYSDISK  USER  MEM  PRINTER',13,10
-        db 'DOS programs: COM and EXE files on CP/M disks.',13,10
-        db '? topic opens HELP, for example ? PIP or ? COMMANDS.',13,10
-        db 'Some utilities and HELP files may be on another disk.',13,10,'$'
+	db	'Common commands:',13,10
+	db	'  DIR  TYPE  PIP  ERA  REN  SUBMIT  SETDEF',13,10
+	db	'Shell commands: CLS  SYSDISK  USER  MEM  PRINTER',13,10
+	db	'DOS programs: COM and EXE files on CP/M disks.',13,10
+	db	'? topic opens HELP, for example ? PIP or ? COMMANDS.',13,10
+	db	'Some utilities and HELP files may be on another disk.',13,10,'$'
 help_length_error:
-        db 'Help request too long (max 125 characters)',13,10,'$'
-        org (offset $+15) and 0fff0h
+	db	'Help request too long (max 125 characters)',13,10,'$'
+	org	(offset $+15) and 0fff0h

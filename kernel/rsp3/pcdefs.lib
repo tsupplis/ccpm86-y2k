@@ -1,2 +1,9 @@
+;*****************************************************************************
+;
+;	PCDEFS - PCTMP build selection.
+;	Concurrent CP/M-86 3.1, project PC-MODE personality.
+;
+;*****************************************************************************
+
 ; Supported PCTMP extensions; set to 0 only in reconstruction checks.
-PCMODE_BUILD equ 0ffffh
+PCMODE_BUILD			equ	0ffffh

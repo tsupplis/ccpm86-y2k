@@ -1,3 +1,10 @@
+;*****************************************************************************
+;
+;	PCSEARCH - PCTMP per-console command path and order.
+;	Concurrent CP/M-86 3.1, project PC-MODE personality.
+;
+;*****************************************************************************
+
 ; SETDEF v3 drive-by-drive search. Included only with PCMODE_SEARCH.
 ; Replaces the original external pre-search entry at 04C1h, after built-ins.
 ; DS=this console DATA; four explicit CS-owned 128-byte sidecars isolate prompt
@@ -5,358 +12,354 @@
 ; Native CMD/SUB execution still belongs to BDOS 150; DOS/BAT dispatch stays
 ; in the recovered PCTMP. Probe before calling CLI so an untyped DOS program
 ; does not need an otherwise unused native process descriptor.
-sp_packet       equ 0                ; 'SD',3,op,count,entries[4],sys,order
-sp_fcb          equ 16               ; pristine parsed 37-byte FCB/password
-sp_default      equ 53
-sp_user         equ 54
-sp_error        equ 55
-sp_index        equ 56
-sp_seen         equ 58               ; 16-bit drive-visited mask
-sp_system       equ 60
-sp_type         equ 61               ; CMD,SUB,COM,EXE,BAT = 0..4
-sp_wanted       equ 62               ; FFh = untyped
-sp_disk         equ 63               ; zero based candidate drive
-sp_retry        equ 64               ; explicit user-zero SYS retry
-sp_stride       equ 128
-search_open equ code_origin+06d2h            ; existing read-only FCB open wrapper
-search_close    equ 06cah
-search_error equ code_origin+07ddh
-search_dos equ code_origin+05c5h            ; dispatch already-open FCB by extension
+sp_packet			equ	0		; 'SD',3,op,count,entries[4],sys,order
+sp_fcb				equ	16		; pristine parsed 37-byte FCB/password
+sp_default			equ	53
+sp_user				equ	54
+sp_error			equ	55
+sp_index			equ	56
+sp_seen				equ	58		; 16-bit drive-visited mask
+sp_system			equ	60
+sp_type				equ	61		; CMD,SUB,COM,EXE,BAT = 0..4
+sp_wanted			equ	62		; FFh = untyped
+sp_disk				equ	63		; zero based candidate drive
+sp_retry			equ	64		; explicit user-zero SYS retry
+sp_stride			equ	128
 
 search_command:
-        mov dl,byte ptr .program_fcb
-        or dl,dl
-        jz search_explicit_valid
-        dec dl
-        call shell_check_drive
-        or al,al
-        jz search_explicit_valid
-        jmp shell_bad_drive
+	mov	dl,byte ptr .program_fcb
+	or	dl,dl
+	jz	search_explicit_valid
+	dec	dl
+	call	shell_check_drive
+	or	al,al
+	jz	search_explicit_valid
+	jmp	shell_bad_drive
 search_explicit_valid:
-        cld
-        xor bx,bx
-        mov bl,byte ptr .rsp_console_instance
-        cmp bl,4
-        jb search_slot_valid
-        mov cx,30
-        jmp search_error
+	cld
+	xor	bx,bx
+	mov	bl,byte ptr .rsp_console_instance
+	cmp	bl,4
+	jb	search_slot_valid
+	mov	cx,30
+	jmp	command_error_entry
 search_slot_valid:
-        mov cl,7
-        shl bx,cl
-        add bx,offset search_sidecars
-        mov bp,bx
-        push cs
-        pop es
-        mov di,bp
-        xor ax,ax
-        mov cx,sp_stride
-        rep stosb
-        mov si,program_fcb
-        lea di,word ptr sp_fcb[bp]
-        mov cx,37
-        rep movsb
-        push ds
-        pop es
-        mov cl,25
-        call search_bdos
-        mov cs:byte ptr sp_default[bp],al
-        mov dl,0ffh
-        mov cl,32
-        call search_bdos
-        mov cs:byte ptr sp_user[bp],al
-        mov es,word ptr .rsp_sysdat_segment
-        mov bx,es:word ptr .sd_running_process
-        mov es,es:word ptr pd_uda_segment[bx]
-        mov al,es:byte ptr .10h
-        mov cs:byte ptr sp_error[bp],al
-        push ds
-        pop es
+	mov	cl,7
+	shl	bx,cl
+	add	bx,offset search_sidecars
+	mov	bp,bx
+	push	cs
+	pop	es
+	mov	di,bp
+	xor	ax,ax
+	mov	cx,sp_stride
+	rep	stosb
+	mov	si,program_fcb
+	lea	di,word ptr sp_fcb[bp]
+	mov	cx,37
+	rep	movsb
+	push	ds
+	pop	es
+	mov	cl,25
+	call	search_bdos
+	mov	cs:byte ptr sp_default[bp],al
+	mov	dl,0ffh
+	mov	cl,32
+	call	search_bdos
+	mov	cs:byte ptr sp_user[bp],al
+	mov	es,word ptr .rsp_sysdat_segment
+	mov	bx,es:word ptr .sd_running_process
+	mov	es,es:word ptr pd_uda_segment[bx]
+	mov	al,es:byte ptr .10h
+	mov	cs:byte ptr sp_error[bp],al
+	push	ds
+	pop	es
 
-        mov cs:byte ptr sp_wanted[bp],0ffh
-        cmp word ptr .program_fcb+9,02020h
-        jne search_typed
-        cmp byte ptr .program_fcb+11,' '
-        jne search_typed
-        ; Original QPB at 0219h deliberately overlaps FCB.name at +8.
-        ; Preserve resident-command priority, without allocating a child PD.
-        cmp byte ptr .program_fcb,0
-        jne search_query
-        mov dx,0219h
-        mov cl,135
-        call search_bdos
-        inc al
-        jz search_query
-        jmp search_native
+	mov	cs:byte ptr sp_wanted[bp],0ffh
+	cmp	word ptr .program_fcb+9,02020h
+	jne	search_typed
+	cmp	byte ptr .program_fcb+11,' '
+	jne	search_typed
+; Original QPB at 0219h deliberately overlaps FCB.name at +8.
+; Preserve resident-command priority, without allocating a child PD.
+	cmp	byte ptr .program_fcb,0
+	jne	search_query
+	mov	dx,0219h
+	mov	cl,135
+	call	search_bdos
+	inc	al
+	jz	search_query
+	jmp	search_native
 search_typed:
-        xor bx,bx
+	xor	bx,bx
 search_match_type:
-        mov si,bx
-        shl si,1
-        add si,bx
-        mov ax,cs:word ptr search_types[si]
-        cmp ax,word ptr .program_fcb+9
-        jne search_match_next
-        mov al,cs:byte ptr search_types+2[si]
-        cmp al,byte ptr .program_fcb+11
-        je search_match_found
+	mov	si,bx
+	shl	si,1
+	add	si,bx
+	mov	ax,cs:word ptr search_types[si]
+	cmp	ax,word ptr .program_fcb+9
+	jne	search_match_next
+	mov	al,cs:byte ptr search_types+2[si]
+	cmp	al,byte ptr .program_fcb+11
+	je	search_match_found
 search_match_next:
-        inc bx
-        cmp bx,5
-        jb search_match_type
-        mov cx,60                    ; existing unsupported-extension error
-        jmp search_error
+	inc	bx
+	cmp	bx,5
+	jb	search_match_type
+	mov	cx,60					; existing unsupported-extension error
+	jmp	command_error_entry
 search_match_found:
-        mov cs:byte ptr sp_wanted[bp],bl
+	mov	cs:byte ptr sp_wanted[bp],bl
 search_query:
-        mov cs:word ptr sp_packet[bp],04453h
-        mov cs:byte ptr sp_packet+2[bp],3
-        lea dx,word ptr sp_packet[bp]
-        push ds
-        push cs
-        pop ds
-        mov cl,165
-        call search_bdos
-        pop ds
-        or bx,bx
-        jz search_policy_valid
-        jmp search_error
+	mov	cs:word ptr sp_packet[bp],04453h
+	mov	cs:byte ptr sp_packet+2[bp],3
+	lea	dx,word ptr sp_packet[bp]
+	push	ds
+	push	cs
+	pop	ds
+	mov	cl,240
+	call	search_bdos
+	pop	ds
+	or	bx,bx
+	jz	search_policy_valid
+	jmp	command_error_entry
 search_policy_valid:
-        mov dl,0ffh                  ; silent errors during configured search
-        mov cl,45
-        call search_bdos
-        cmp cs:byte ptr sp_fcb[bp],0
-        je search_next_drive
-        mov al,cs:byte ptr sp_fcb[bp]
-        dec al
-        jmps search_drive             ; explicit drive bypasses path/fallback
+	mov	dl,0ffh					; silent errors during configured search
+	mov	cl,45
+	call	search_bdos
+	cmp	cs:byte ptr sp_fcb[bp],0
+	je	search_next_drive
+	mov	al,cs:byte ptr sp_fcb[bp]
+	dec	al
+	jmps	search_drive				; explicit drive bypasses path/fallback
 search_next_drive:
-        xor bx,bx
-        mov bl,cs:byte ptr sp_index[bp]
-        cmp bl,cs:byte ptr sp_packet+4[bp]
-        jae search_system_drive
-        inc cs:byte ptr sp_index[bp]
-        mov si,bx
-        mov al,cs:byte ptr sp_packet+5[bp+si]
-        cmp al,0ffh
-        jne search_mark_drive
-        mov al,cs:byte ptr sp_default[bp]
-        jmps search_mark_drive
+	xor	bx,bx
+	mov	bl,cs:byte ptr sp_index[bp]
+	cmp	bl,cs:byte ptr sp_packet+4[bp]
+	jae	search_system_drive
+	inc	cs:byte ptr sp_index[bp]
+	mov	si,bx
+	mov	al,cs:byte ptr sp_packet+5[bp+si]
+	cmp	al,0ffh
+	jne	search_mark_drive
+	mov	al,cs:byte ptr sp_default[bp]
+	jmps	search_mark_drive
 search_system_drive:
-        cmp cs:byte ptr sp_system[bp],0
-        je search_system_unvisited
-        jmp search_missing
+	cmp	cs:byte ptr sp_system[bp],0
+	je	search_system_unvisited
+	jmp	search_missing
 search_system_unvisited:
-        mov cs:byte ptr sp_system[bp],1
-        mov al,cs:byte ptr sp_packet+9[bp]
+	mov	cs:byte ptr sp_system[bp],1
+	mov	al,cs:byte ptr sp_packet+9[bp]
 search_mark_drive:
-        mov cl,al
-        mov dx,1
-        shl dx,cl
-        test cs:word ptr sp_seen[bp],dx
-        jz search_drive_unvisited
-        jmp search_drive_finished
+	mov	cl,al
+	mov	dx,1
+	shl	dx,cl
+	test	cs:word ptr sp_seen[bp],dx
+	jz	search_drive_unvisited
+	jmp	search_drive_finished
 search_drive_unvisited:
-        or cs:word ptr sp_seen[bp],dx
+	or	cs:word ptr sp_seen[bp],dx
 search_drive:
-        mov cs:byte ptr sp_disk[bp],al
-        mov cs:byte ptr sp_type[bp],0
-        cmp cs:byte ptr sp_wanted[bp],0ffh
-        je search_type_allowed
-        mov al,cs:byte ptr sp_wanted[bp]
-        mov cs:byte ptr sp_type[bp],al
-        jmps search_try_type
+	mov	cs:byte ptr sp_disk[bp],al
+	mov	cs:byte ptr sp_type[bp],0
+	cmp	cs:byte ptr sp_wanted[bp],0ffh
+	je	search_type_allowed
+	mov	al,cs:byte ptr sp_wanted[bp]
+	mov	cs:byte ptr sp_type[bp],al
+	jmps	search_try_type
 search_type_allowed:
-        mov al,cs:byte ptr sp_type[bp]
-        or al,al
-        jz search_try_type
-        cmp al,1
-        jne search_allow_dos
-        test cs:byte ptr sp_packet+10[bp],1
-        jnz search_sub_permitted
-        jmp search_next_type
+	mov	al,cs:byte ptr sp_type[bp]
+	or	al,al
+	jz	search_try_type
+	cmp	al,1
+	jne	search_allow_dos
+	test	cs:byte ptr sp_packet+10[bp],1
+	jnz	search_sub_permitted
+	jmp	search_next_type
 search_sub_permitted:
-        jmps search_try_type
+	jmps	search_try_type
 search_allow_dos:
-        test cs:byte ptr sp_packet+10[bp],2
-        jz search_dos_permitted
-        jmp search_next_type
+	test	cs:byte ptr sp_packet+10[bp],2
+	jz	search_dos_permitted
+	jmp	search_next_type
 search_dos_permitted:
 search_try_type:
-        mov cs:byte ptr sp_retry[bp],0
+	mov	cs:byte ptr sp_retry[bp],0
 search_open_attempt:
-        mov dl,cs:byte ptr sp_user[bp]
-        cmp cs:byte ptr sp_retry[bp],0
-        je search_set_user
-        xor dl,dl
+	mov	dl,cs:byte ptr sp_user[bp]
+	cmp	cs:byte ptr sp_retry[bp],0
+	je	search_set_user
+	xor	dl,dl
 search_set_user:
-        mov cl,32
-        call search_bdos
-        ; Restore before every open: BDOS changes FCB attributes/reserved bytes.
-        push ds
-        push cs
-        pop ds
-        lea si,word ptr sp_fcb[bp]
-        mov di,program_fcb
-        mov cx,37
-        rep movsb
-        pop ds
-        mov al,cs:byte ptr sp_disk[bp]
-        inc al
-        mov byte ptr .program_fcb,al
-        xor bx,bx
-        mov bl,cs:byte ptr sp_type[bp]
-        mov si,bx
-        shl si,1
-        add si,bx
-        mov ax,cs:word ptr search_types[si]
-        mov word ptr .program_fcb+9,ax
-        mov al,cs:byte ptr search_types+2[si]
-        mov byte ptr .program_fcb+11,al
-        mov dx,program_fcb
-        push bp
-        push si
-        push di
-        push es
-        call search_open
-        pop es
-        pop di
-        pop si
-        pop bp
-        cmp al,0ffh
-        je search_open_failed
-        cmp cs:byte ptr sp_system[bp],0
-        je search_found
-        test byte ptr .program_fcb+10,80h
-        jnz search_found
-        call search_close_fcb
-        cmp cs:byte ptr sp_retry[bp],0
-        jne search_next_type
-        cmp cs:byte ptr sp_user[bp],0
-        je search_next_type
-        mov cs:byte ptr sp_retry[bp],1
-        jmp search_open_attempt
+	mov	cl,32
+	call	search_bdos
+; Restore before every open: BDOS changes FCB attributes/reserved bytes.
+	push	ds
+	push	cs
+	pop	ds
+	lea	si,word ptr sp_fcb[bp]
+	mov	di,program_fcb
+	mov	cx,37
+	rep	movsb
+	pop	ds
+	mov	al,cs:byte ptr sp_disk[bp]
+	inc	al
+	mov	byte ptr .program_fcb,al
+	xor	bx,bx
+	mov	bl,cs:byte ptr sp_type[bp]
+	mov	si,bx
+	shl	si,1
+	add	si,bx
+	mov	ax,cs:word ptr search_types[si]
+	mov	word ptr .program_fcb+9,ax
+	mov	al,cs:byte ptr search_types+2[si]
+	mov	byte ptr .program_fcb+11,al
+	mov	dx,program_fcb
+	push	bp
+	push	si
+	push	di
+	push	es
+	call	open_command_file
+	pop	es
+	pop	di
+	pop	si
+	pop	bp
+	cmp	al,0ffh
+	je	search_open_failed
+	cmp	cs:byte ptr sp_system[bp],0
+	je	search_found
+	test	byte ptr .program_fcb+10,80h
+	jnz	search_found
+	call	search_close_fcb
+	cmp	cs:byte ptr sp_retry[bp],0
+	jne	search_next_type
+	cmp	cs:byte ptr sp_user[bp],0
+	je	search_next_type
+	mov	cs:byte ptr sp_retry[bp],1
+	jmp	search_open_attempt
 search_open_failed:
-        or ah,ah
-        jz search_next_type
-        cmp ah,4                     ; absent/unavailable configured drive
-        je search_drive_finished
-        jmps search_missing     ; other I/O failures must not select a shadow
+	or	ah,ah
+	jz	search_next_type
+	cmp	ah,4					; absent/unavailable configured drive
+	je	search_drive_finished
+	jmps	search_missing				; other I/O failures must not select a shadow
 search_next_type:
-        cmp cs:byte ptr sp_wanted[bp],0ffh
-        jne search_drive_finished
-        inc cs:byte ptr sp_type[bp]
-        cmp cs:byte ptr sp_type[bp],5
-        jae search_types_exhausted
-        jmp search_type_allowed
+	cmp	cs:byte ptr sp_wanted[bp],0ffh
+	jne	search_drive_finished
+	inc	cs:byte ptr sp_type[bp]
+	cmp	cs:byte ptr sp_type[bp],5
+	jae	search_types_exhausted
+	jmp	search_type_allowed
 search_types_exhausted:
 search_drive_finished:
-        cmp cs:byte ptr sp_fcb[bp],0
-        jne search_missing
-        cmp cs:byte ptr sp_system[bp],0
-        jne search_system_exhausted
-        jmp search_next_drive
+	cmp	cs:byte ptr sp_fcb[bp],0
+	jne	search_missing
+	cmp	cs:byte ptr sp_system[bp],0
+	jne	search_system_exhausted
+	jmp	search_next_drive
 search_system_exhausted:
 search_missing:
-        call search_restore
-        mov cx,30
-        jmp search_error
+	call	search_restore
+	mov	cx,30
+	jmp	command_error_entry
 search_found:
-        cmp cs:byte ptr sp_type[bp],1
-        jbe search_found_native
-        mov al,cs:byte ptr sp_disk[bp]
-        inc al
-        mov byte ptr .02d7h,al               ; selected DOS/BAT load drive
-        mov byte ptr .02d5h,0
-        cmp cs:byte ptr sp_fcb[bp],0
-        je search_dos_unqualified
-        mov byte ptr .02d5h,0ffh
+	cmp	cs:byte ptr sp_type[bp],1
+	jbe	search_found_native
+	mov	al,cs:byte ptr sp_disk[bp]
+	inc	al
+	mov	byte ptr .02d7h,al			; selected DOS/BAT load drive
+	mov	byte ptr .02d5h,0
+	cmp	cs:byte ptr sp_fcb[bp],0
+	je	search_dos_unqualified
+	mov	byte ptr .02d5h,0ffh
 search_dos_unqualified:
-        mov byte ptr .0217h,0
-        cmp cs:byte ptr sp_retry[bp],0
-        je search_dos_ready
-        mov byte ptr .0217h,0ffh        ; original loader's user-zero source flag
+	mov	byte ptr .0217h,0
+	cmp	cs:byte ptr sp_retry[bp],0
+	je	search_dos_ready
+	mov	byte ptr .0217h,0ffh			; original loader's user-zero source flag
 search_dos_ready:
-        call search_restore
-        jmp search_dos          ; retain open FCB for the recovered loader
+	call	search_restore
+	jmp	original_dispatch_type			; retain open FCB for the recovered loader
 search_found_native:
-        call search_close_fcb
+	call	search_close_fcb
 search_native:
-        call search_restore
-        ; Let CLI repeat native resolution from the original command, preserving
-        ; password, tail, default drive/user and SYS user-zero semantics. Earlier
-        ; drives had no eligible winner, so the native winner is unchanged.
-        xor ax,ax
-        mov al,byte ptr .command_length
-        push ax
-        mov byte ptr .command_length,0  ; CLI net byte immediately before command
-        mov byte ptr .command_sent,0ffh
-        mov dx,command_length
-        mov cl,150
-        call search_bdos
-        pop ax
-        mov byte ptr .command_length,al
-        or bx,bx
-        jnz search_native_error
-        jmp native_cli_success
+	call	search_restore
+; Let CLI repeat native resolution from the original command, preserving
+; password, tail, default drive/user and SYS user-zero semantics. Earlier
+; drives had no eligible winner, so the native winner is unchanged.
+	xor	ax,ax
+	mov	al,byte ptr .command_length
+	push	ax
+	mov	byte ptr .command_length,0		; CLI net byte immediately before command
+	mov	byte ptr .command_sent,0ffh
+	mov	dx,command_length
+	mov	cl,150
+	call	search_bdos
+	pop	ax
+	mov	byte ptr .command_length,al
+	or	bx,bx
+	jnz	search_native_error
+	jmp	native_cli_success
 search_native_error:
-        jmp shell_native_error        ; found-but-invalid native command is final
+	jmp	shell_native_error			; found-but-invalid native command is final
 search_close_fcb:
-        mov dx,program_fcb
-        mov cl,16
-        jmps search_bdos
+	mov	dx,program_fcb
+	mov	cl,16
+	jmps	search_bdos
 search_restore:
-        mov dl,cs:byte ptr sp_user[bp]
-        mov cl,32
-        call search_bdos
-        mov dl,cs:byte ptr sp_error[bp]
-        mov cl,45
-        call search_bdos
-        ret
+	mov	dl,cs:byte ptr sp_user[bp]
+	mov	cl,32
+	call	search_bdos
+	mov	dl,cs:byte ptr sp_error[bp]
+	mov	cl,45
+	call	search_bdos
+	ret
 search_bdos:
-        push bp
-        push si
-        push di
-        push es
-        call ccpm_call
-        pop es
-        pop di
-        pop si
-        pop bp
-        ret
-search_types db 'CMDSUBCOMEXEBAT'
-        org (offset $+15) and 0fff0h
+	push	bp
+	push	si
+	push	di
+	push	es
+	call	ccpm_call
+	pop	es
+	pop	di
+	pop	si
+	pop	bp
+	ret
+search_types			db	'CMDSUBCOMEXEBAT'
+	org	(offset $+15) and 0fff0h
 search_sidecars:
 ; Initialized zero storage: 512 bytes; retained in GENCMD CODE extent.
-        db 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-        db 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-        db 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-        db 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-        db 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-        db 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-        db 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-        db 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-        db 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-        db 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-        db 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-        db 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-        db 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-        db 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-        db 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-        db 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-        db 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-        db 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-        db 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-        db 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-        db 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-        db 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-        db 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-        db 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-        db 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-        db 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-        db 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-        db 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-        db 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-        db 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-        db 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-        db 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-        org (offset $+15) and 0fff0h
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	org	(offset $+15) and 0fff0h

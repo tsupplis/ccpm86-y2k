@@ -1,253 +1,253 @@
+;*****************************************************************************
+;
+;	PCSHELL - PCTMP CLS, SYSDISK and drive-command extensions.
+;	Concurrent CP/M-86 3.1, project PC-MODE personality.
+;
+;*****************************************************************************
+
 ; CLS and SYSDISK adapted from kernel/rsp1/tmp.a86, not a new parser.
 ; Enter after PCTMP's BDOS 152 parse and explicit-drive bypass. DS selects
 ; this console's unchanged DATA. Existing FCB/tail storage is reused; no
 ; mutable CODE state is added. Explicit extensions retain external lookup.
-shell_original_user_dispatch equ code_origin+020bh
-shell_original_user_name     equ 0ba0h
-shell_next_command equ code_origin+00e0h
-shell_print_code_string equ code_origin+06feh
-shell_print_character equ code_origin+0708h
-shell_print_newline equ code_origin+08d7h
-sd_open_file_vector          equ 0088h
-uda_error_mode               equ 0010h
+sd_open_file_vector		equ	0088h
+uda_error_mode			equ	0010h
 
 shell_extensions:
-        cmp word ptr .program_fcb+9,02020h
-        jne shell_original
-        cmp byte ptr .program_fcb+11,' '
-        jne shell_original
-        mov di,offset shell_cls_name
-        call shell_match
-        je shell_cls
-        mov di,offset shell_sysdisk_name
-        call shell_match
-        je shell_sysdisk
+	cmp	word ptr .program_fcb+9,02020h
+	jne	shell_original
+	cmp	byte ptr .program_fcb+11,' '
+	jne	shell_original
+	mov	di,offset shell_cls_name
+	call	shell_match
+	je	shell_cls
+	mov	di,offset shell_sysdisk_name
+	call	shell_match
+	je	shell_sysdisk
 shell_original:
-        mov di,shell_original_user_name                 ; displaced original USER table address
-        jmp shell_original_user_dispatch
+	mov	di,offset original_name_user		; displaced original USER table address
+	jmp	original_user_dispatch
 
 shell_match:
-        mov si,program_fcb+1
-        push cs
-        pop es
-        mov cx,4
-        cld
-        repe cmpsw
-        ret
+	mov	si,program_fcb+1
+	push	cs
+	pop	es
+	mov	cx,4
+	cld
+	repe	cmpsw
+	ret
 
 shell_cls:
-        mov dx,offset shell_cls_sequence
-        call shell_print_code_string                   ; existing CS-string print gateway
-        jmp shell_next_command               ; normal next-command/console attach path
+	mov	dx,offset shell_cls_sequence
+	call	print_code_string			; existing CS-string print gateway
+	jmp	command_prompt_resume			; normal next-command/console attach path
 
 shell_sysdisk:
-        ; BDOS 152 can return a zero parseret for a bare ':' argument.
-        ; Use the preserved, normalized command text after the seven-byte
-        ; name so malformed tails cannot silently become a query.
-        mov si,command_text+7
+; BDOS 152 can return a zero parseret for a bare ':' argument.
+; Use the preserved, normalized command text after the seven-byte
+; name so malformed tails cannot silently become a query.
+	mov	si,command_text+7
 shell_sysdisk_space:
-        lodsb
-        cmp al,' '
-        je shell_sysdisk_space
-        cmp al,9
-        je shell_sysdisk_space
-        or al,al
-        jz shell_sysdisk_show
-        and al,5fh
-        sub al,'A'
-        cmp al,15
-        jbe shell_drive_in_range
-        jmp shell_sysdisk_syntax
+	lodsb
+	cmp	al,' '
+	je	shell_sysdisk_space
+	cmp	al,9
+	je	shell_sysdisk_space
+	or	al,al
+	jz	shell_sysdisk_show
+	and	al,5fh
+	sub	al,'A'
+	cmp	al,15
+	jbe	shell_drive_in_range
+	jmp	shell_sysdisk_syntax
 shell_drive_in_range:
-        mov byte ptr .program_fcb,al         ; TMP also reuses the parsed drive byte
-        lodsb
-        cmp al,':'
-        jne shell_sysdisk_syntax
+	mov	byte ptr .program_fcb,al		; TMP also reuses the parsed drive byte
+	lodsb
+	cmp	al,':'
+	jne	shell_sysdisk_syntax
 shell_sysdisk_tail:
-        lodsb
-        cmp al,' '
-        je shell_sysdisk_tail
-        cmp al,9
-        je shell_sysdisk_tail
-        or al,al
-        jne shell_sysdisk_syntax
-        mov es,word ptr .rsp_sysdat_segment
-        cmp es:word ptr .sd_open_file_vector,0        ; SYSDAT open-file vector, native TMP policy
-        jne shell_sysdisk_busy
-        ; Native TMP reads its local UDA. PCTMP's UDA is selected through
-        ; the running PD; preserve its error mode and the caller's drive
-        ; across the temporary BDOS 14 validation, including failure.
-        mov bx,es:word ptr .sd_running_process
-        mov es,es:word ptr pd_uda_segment[bx]
-        push es:word ptr .uda_error_mode
-        mov cl,25
-        call ccpm_call
-        push bx
-        mov cl,45
-        mov dl,0ffh
-        call ccpm_call
-        mov dl,byte ptr .program_fcb
-        call current_disk_set
-        pop dx                      ; original default disk
-        pop cx                      ; original error mode in CL
-        push ax                     ; validation result
-        push cx
-        call current_disk_set
-        pop dx
-        mov cl,45
-        call ccpm_call
-        pop ax
-        or al,al
-        jne shell_sysdisk_device
-        mov es,word ptr .rsp_sysdat_segment
-        mov al,byte ptr .program_fcb
-        mov es:byte ptr .sd_system_disk,al
+	lodsb
+	cmp	al,' '
+	je	shell_sysdisk_tail
+	cmp	al,9
+	je	shell_sysdisk_tail
+	or	al,al
+	jne	shell_sysdisk_syntax
+	mov	es,word ptr .rsp_sysdat_segment
+	cmp	es:word ptr .sd_open_file_vector,0	; SYSDAT open-file vector, native TMP policy
+	jne	shell_sysdisk_busy
+; Native TMP reads its local UDA. PCTMP's UDA is selected through
+; the running PD; preserve its error mode and the caller's drive
+; across the temporary BDOS 14 validation, including failure.
+	mov	bx,es:word ptr .sd_running_process
+	mov	es,es:word ptr pd_uda_segment[bx]
+	push	es:word ptr .uda_error_mode
+	mov	cl,25
+	call	ccpm_call
+	push	bx
+	mov	cl,45
+	mov	dl,0ffh
+	call	ccpm_call
+	mov	dl,byte ptr .program_fcb
+	call	current_disk_set
+	pop	dx					; original default disk
+	pop	cx					; original error mode in CL
+	push	ax					; validation result
+	push	cx
+	call	current_disk_set
+	pop	dx
+	mov	cl,45
+	call	ccpm_call
+	pop	ax
+	or	al,al
+	jne	shell_sysdisk_device
+	mov	es,word ptr .rsp_sysdat_segment
+	mov	al,byte ptr .program_fcb
+	mov	es:byte ptr .sd_system_disk,al
 shell_sysdisk_show:
-        mov dx,offset shell_sysdisk_message
-        call shell_print_code_string
-        mov es,word ptr .rsp_sysdat_segment
-        mov dl,es:byte ptr .sd_system_disk
-        add dl,'A'
-        call shell_print_character                  ; native BDOS console output, not INT 10h
-        mov dl,':'
-        call shell_print_character
-        call shell_print_newline                  ; existing CR/LF
-        jmp shell_next_command
+	mov	dx,offset shell_sysdisk_message
+	call	print_code_string
+	mov	es,word ptr .rsp_sysdat_segment
+	mov	dl,es:byte ptr .sd_system_disk
+	add	dl,'A'
+	call	print_console_character			; native BDOS console output, not INT 10h
+	mov	dl,':'
+	call	print_console_character
+	call	print_code_newline			; existing CR/LF
+	jmp	command_prompt_resume
 shell_sysdisk_syntax:
-        mov dx,offset shell_sysdisk_badsyntax
-        jmps shell_sysdisk_error
+	mov	dx,offset shell_sysdisk_badsyntax
+	jmps	shell_sysdisk_error
 shell_sysdisk_busy:
-        mov dx,offset shell_sysdisk_openfiles
-        jmps shell_sysdisk_error
+	mov	dx,offset shell_sysdisk_openfiles
+	jmps	shell_sysdisk_error
 shell_sysdisk_device:
-        mov dx,offset shell_sysdisk_nodevice
+	mov	dx,offset shell_sysdisk_nodevice
 shell_sysdisk_error:
-        call shell_print_code_string
-        call shell_print_newline
-        jmp shell_next_command
+	call	print_code_string
+	call	print_code_newline
+	jmp	command_prompt_resume
 
-shell_cls_name db 'CLS     '
-shell_sysdisk_name db 'SYSDISK '
-shell_cls_sequence db 27,'E','$'
-shell_sysdisk_message db 'System disk is $'
-shell_sysdisk_badsyntax db 'Invalid drive code, use SYSDISK A:$'
-shell_sysdisk_openfiles db 'Unable to set new system disk because of open files$'
-shell_sysdisk_nodevice db 'Specified device does not exist$'
-        org (offset $+15) and 0fff0h
+shell_cls_name			db	'CLS     '
+shell_sysdisk_name		db	'SYSDISK '
+shell_cls_sequence		db	27,'E','$'
+shell_sysdisk_message		db	'System disk is $'
+shell_sysdisk_badsyntax		db	'Invalid drive code, use SYSDISK A:$'
+shell_sysdisk_openfiles		db	'Unable to set new system disk because of open files$'
+shell_sysdisk_nodevice		db	'Specified device does not exist$'
+	org	(offset $+15) and 0fff0h
 
 ; Drive commands follow native TMP, including the X : form produced by SUBMIT.
 ; Hook at 0171h receives BX -> text after leading whitespace removal.
 ; Unlike interactive BDOS input, STARTUP commands still carry CR here. Bound
 ; normalization by the supplied length, terminate the actual text and update
 ; the length (the recovered whitespace copy does not shorten it).
-shell_external_parse equ code_origin+01a8h
 shell_drive_command:
-        mov di,bx
-        xor cx,cx
-        mov cl,byte ptr .command_length
+	mov	di,bx
+	xor	cx,cx
+	mov	cl,byte ptr .command_length
 shell_normalize_scan:
-        jcxz shell_normalize_done
-        cmp byte ptr [di],0
-        je shell_normalize_done
-        cmp byte ptr [di],13
-        je shell_normalize_done
-        inc di
-        loop shell_normalize_scan
+	jcxz	shell_normalize_done
+	cmp	byte ptr [di],0
+	je	shell_normalize_done
+	cmp	byte ptr [di],13
+	je	shell_normalize_done
+	inc	di
+	loop	shell_normalize_scan
 shell_normalize_done:
-        mov byte ptr [di],0
-        mov ax,di
-        sub ax,bx
-        mov byte ptr .command_length,al
-        or ax,ax
-        jnz shell_drive_nonempty
-        jmp shell_next_command
+	mov	byte ptr [di],0
+	mov	ax,di
+	sub	ax,bx
+	mov	byte ptr .command_length,al
+	or	ax,ax
+	jnz	shell_drive_nonempty
+	jmp	command_prompt_resume
 shell_drive_nonempty:
-        cmp byte ptr 1[bx],':'
-        jne shell_drive_spaced
-        cmp byte ptr 2[bx],0
-        je shell_drive_select
-        jmp shell_external_parse
+	cmp	byte ptr 1[bx],':'
+	jne	shell_drive_spaced
+	cmp	byte ptr 2[bx],0
+	je	shell_drive_select
+	jmp	command_parse_entry
 shell_drive_spaced:
-        cmp byte ptr 1[bx],' '
-        jne shell_drive_external
-        cmp byte ptr 2[bx],':'
-        jne shell_drive_external
-        cmp byte ptr 3[bx],0
-        je shell_drive_select
+	cmp	byte ptr 1[bx],' '
+	jne	shell_drive_external
+	cmp	byte ptr 2[bx],':'
+	jne	shell_drive_external
+	cmp	byte ptr 3[bx],0
+	je	shell_drive_select
 shell_drive_external:
-        jmp shell_external_parse
+	jmp	command_parse_entry
 shell_drive_select:
-        mov dl,byte ptr [bx]
-        and dl,5fh
-        sub dl,'A'
-        cmp dl,15
-        ja shell_drive_invalid
-        call shell_check_drive
-        or al,al
-        jne shell_bad_drive
-        call current_disk_set
-        jmp shell_next_command
+	mov	dl,byte ptr [bx]
+	and	dl,5fh
+	sub	dl,'A'
+	cmp	dl,15
+	ja	shell_drive_invalid
+	call	shell_check_drive
+	or	al,al
+	jne	shell_bad_drive
+	call	current_disk_set
+	jmp	command_prompt_resume
 shell_drive_invalid:
-        mov dx,offset shell_invalid_drive_message
-        call shell_print_code_string
-        call shell_print_newline
-        jmp shell_next_command
+	mov	dx,offset shell_invalid_drive_message
+	call	print_code_string
+	call	print_code_newline
+	jmp	command_prompt_resume
 shell_bad_drive:
-        push dx
-        mov dx,offset shell_unavailable_message
-        call shell_print_code_string
-        pop dx
-        add dl,'A'
-        call shell_print_character
-        mov dl,':'
-        call shell_print_character
-        call shell_print_newline
-        jmp shell_next_command
+	push	dx
+	mov	dx,offset shell_unavailable_message
+	call	print_code_string
+	pop	dx
+	add	dl,'A'
+	call	print_console_character
+	mov	dl,':'
+	call	print_console_character
+	call	print_code_newline
+	jmp	command_prompt_resume
 
 ; Adapt native TMP check_drive to PCTMP's per-console UDA. DL=drive, AL=status.
 ; Preserve caller registers, default disk and error mode; no mutable CODE state.
 shell_check_drive:
-        push bx
-        push cx
-        push dx
-        push si
-        push di
-        push bp
-        push es
-        push dx
-        mov es,word ptr .rsp_sysdat_segment
-        mov bx,es:word ptr .sd_running_process
-        mov es,es:word ptr pd_uda_segment[bx]
-        push es:word ptr .uda_error_mode
-        mov cl,25
-        call ccpm_call
-        pop cx
-        pop dx
-        push cx
-        push bx
-        push dx
-        mov cl,45
-        mov dl,0ffh
-        call ccpm_call
-        pop dx
-        call current_disk_set
-        pop dx
-        pop cx
-        push ax
-        push cx
-        call current_disk_set
-        pop dx
-        mov cl,45
-        call ccpm_call
-        pop ax
-        pop es
-        pop bp
-        pop di
-        pop si
-        pop dx
-        pop cx
-        pop bx
-        ret
-shell_invalid_drive_message db 'Command error: Invalid drive (use A: through P:)$'
-shell_unavailable_message db 'Drive unavailable: $'
-        org (offset $+15) and 0fff0h
+	push	bx
+	push	cx
+	push	dx
+	push	si
+	push	di
+	push	bp
+	push	es
+	push	dx
+	mov	es,word ptr .rsp_sysdat_segment
+	mov	bx,es:word ptr .sd_running_process
+	mov	es,es:word ptr pd_uda_segment[bx]
+	push	es:word ptr .uda_error_mode
+	mov	cl,25
+	call	ccpm_call
+	pop	cx
+	pop	dx
+	push	cx
+	push	bx
+	push	dx
+	mov	cl,45
+	mov	dl,0ffh
+	call	ccpm_call
+	pop	dx
+	call	current_disk_set
+	pop	dx
+	pop	cx
+	push	ax
+	push	cx
+	call	current_disk_set
+	pop	dx
+	mov	cl,45
+	call	ccpm_call
+	pop	ax
+	pop	es
+	pop	bp
+	pop	di
+	pop	si
+	pop	dx
+	pop	cx
+	pop	bx
+	ret
+shell_invalid_drive_message	db	'Command error: Invalid drive (use A: through P:)$'
+shell_unavailable_message	db	'Drive unavailable: $'
+	org	(offset $+15) and 0fff0h
