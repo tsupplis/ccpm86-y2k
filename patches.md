@@ -219,3 +219,47 @@ During repair validation, moving CODE exposed two remaining literal table-end
 addresses. EXE launch hung; the device-name scan had the same dependency. Both
 now use labels (PCT-07). This was a repair-pass regression, caught and corrected
 before completion, not a failure observed before the repairs.
+
+
+## PCTMP bounds, cache and address repairs — 23 October 2026
+
+- COM stack limits exclude the native process prefix; reject undersized
+  allocations and load-offset overflow.
+- Delete, file-size lookup and CREATE stop after a failed cache flush,
+  preserving pending data and restoring the application DMA.
+- Whole-record transfers stop at the segment boundary, never issue a zero-count
+  native batch, and report completed records on partial writes.
+- FCB device output keeps private DS while reading application data through ES.
+- DEL/RENAME expansion checks its destination size and moves the actual tail.
+- Zero-count ordinary FCB block writes reach truncation. Native errors propagate;
+  BDOS 99 receives the last retained record index. Empty truncation uses native
+  close/delete/create; close preserves the exact partial-record byte count.
+- Input flushing clears private pending keys and drains extended native keys.
+- Startup, service and PSP handler pointers use labels. The DOS CALL trampoline
+  has enforced paragraph alignment. XIOS selectors remain named protocol values.
+- Private DATA offsets derive from storage labels; hardware vector constants stay
+  separate. File-slot bounds derive from the table and permit release of slot 24
+  while rejecting pointers between slots.
+
+Two source-review passes completed. Validation passed 176 focused assertions and
+13 live QEMU checks, including MEM 32, CALL 5, persisted truncation to 256/129/0
+bytes, segment-boundary transfers, and CMD/COM/EXE execution. Native TMP and XIOS
+implementations are unchanged by this repair pass.
+
+### PCTMP: accept a full 512-byte final EXE page — 23 October 2026
+
+The MZ guard rejected the six supplied base EXEs because their last-page
+byte count is 512. Accept 0 through 512; both 0 and 512 describe a full final
+page. Existing length and allocation arithmetic already handles both forms.
+The earlier small executable probes did not cover the supplied base binaries.
+
+Rebuilt RSP and kernel. The supplied DIR.EXE lists a file and returns to the
+prompt in QEMU; the existing COM and EXE probes also pass. The repository's
+MSMASM.EXE assembles HELLO with zero warnings and zero severe errors. The user subsequently confirmed MSMASM is working on their setup.
+Boundary checks also pass: final-page count 0 loads; 513 is rejected.
+
+Additional validation of the 512-byte-page fix: COPY copied a disposable file,
+ERASE deleted it (DIR verified absence), and TIME displayed the time and returned
+after Enter. LINKCMD and LINKEXE now load but produce corrupt output without returning.
+Their runtime compatibility remains unresolved; loader acceptance is not reported
+as application compatibility.
