@@ -558,9 +558,9 @@ user_show:
 	call	current_user_get
 	mov	dl,bl
 	call	print_small_decimal
-	call	print_code_newline
-	mov	dx,offset original_msg_user_note
-	call	print_code_string
+	;call	print_code_newline
+	;mov	dx,offset original_msg_user_note
+	;call	print_code_string
 	jmp	command_prompt_resume
 
 ; MEM: parse decimal KiB, convert to paragraphs and use private service 2.
