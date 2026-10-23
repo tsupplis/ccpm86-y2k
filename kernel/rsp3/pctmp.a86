@@ -1334,6 +1334,8 @@ print_command_error:
 	call	print_code_string
 	mov	dx,saved_command_text
 	call	print_data_string
+	call	print_code_newline
+	call	print_code_newline
 	jmp	command_prompt_resume
 
 ; DI initially precedes the input. Skip spaces, tabs and equals signs; return DI on token.
