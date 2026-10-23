@@ -41,7 +41,7 @@ DEV_COMMANDS = ../dev/rasm86.cmd ../dev/link86.cmd ../dev/lib86.cmd \
     ../dev/pbasic.cmd ../dev/mbasic.cmd ../commands/asm80/asm80.cmd \
     ../commands/hexcom/hexcom.cmd ../commands/ddt86/gentab.cmd
 
-DOS_COMMANDS = ../dev/exe2bin.exe ../dev/linkcmd.exe ../dev/linkexe.exe \
+DOS_COMMANDS = ../dev/exe2bin.exe \
     ../dev/mslib.exe ../dev/mslink.exe ../dev/msmasm.exe ../dev/mbasic.com
 
 # Commands, kernel and boot are built by the top-level Makefile.
