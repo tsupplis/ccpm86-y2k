@@ -36,41 +36,41 @@ console_data_bytes		equ	offset instance_data_end
 
 ; EXE loader state, in this instance's DATA group. The first 128-byte
 ; header record is read into exe_header and subsequently reused for fixups.
-program_fcb		equ	offset command_fcb_image
+program_fcb			equ	offset command_fcb_image
 fcb_random_record		equ	0021h		; 24-bit CP/M random record number
 loader_memory_base		equ	offset allocation_image		; BDOS 55 allocation descriptor, segment
 loader_memory_size		equ	offset allocation_image+2		; allocated paragraphs returned by BDOS 55
 child_psp_segment		equ	offset child_segments_image+2		; allocation base + 1Bh private paragraphs
 child_memory_size		equ	offset child_segments_image+4		; allocation size minus those private paragraphs
-exe_header		equ	offset record_buffer_image
+exe_header			equ	offset record_buffer_image
 exe_relocation_count		equ	exe_header+6
 exe_header_paragraphs		equ	exe_header+8
 exe_initial_ss			equ	exe_header+0eh
 exe_initial_sp			equ	exe_header+10h
 exe_initial_ip			equ	exe_header+14h
 exe_initial_cs			equ	exe_header+16h
-dos_saved_ax		equ	offset dos_result_image		; return AX in private INT 21h frame
+dos_saved_ax			equ	offset dos_result_image		; return AX in private INT 21h frame
 child_stack_offset		equ	offset child_entry_image
 child_stack_segment		equ	offset child_entry_image+2
 child_entry_segment		equ	offset child_entry_image+4
 child_entry_offset		equ	offset child_entry_image+6
-child_is_com		equ	offset console_state_image+6
+child_is_com			equ	offset console_state_image+6
 exe_records_left		equ	offset exe_transfer_image
-exe_dma_segment		equ	offset exe_transfer_image+2
+exe_dma_segment			equ	offset exe_transfer_image+2
 exe_image_paragraphs		equ	offset exe_transfer_image+4
 
 exe_relocation_offset		equ	exe_header+18h
 exe_load_segment		equ	offset exe_transfer_image+6
-exe_next_record		equ	offset exe_record_image		; low word followed by high byte
+exe_next_record			equ	offset exe_record_image		; low word followed by high byte
 exe_relocation_cursor		equ	offset relocation_cursor_image		; byte offset into current header record
 
 
-command_buffer		equ	offset command_capacity_image
-command_length		equ	offset command_count_image
-command_text		equ	offset command_text_image
-command_buffer_end		equ	offset command_text_image+132
+command_buffer			equ	offset command_capacity_image
+command_length			equ	offset command_count_image
+command_text			equ	offset command_text_image
+command_buffer_end		equ	offset command_sent_image-1
 bios_keyboard_pending		equ	offset keyboard_pending_image
-command_sent		equ	offset command_sent_image
+command_sent			equ	offset command_sent_image
 
 ; Stable SYSDAT/PD fields. DS must select SYSDAT before using sd_* fields.
 sd_supervisor_segment		equ	0040h
@@ -84,43 +84,43 @@ pd_console_number		equ	0020h
 
 ; Saved INT 10h register-frame slots and packet ABI, selected per console.
 pd_uda_segment			equ	010h
-bios_frame_ax		equ	offset dos_frame_image+16
-bios_frame_bx		equ	offset dos_frame_image+14
-bios_frame_bh		equ	offset dos_frame_image+15
-bios_frame_cx		equ	offset dos_frame_image+12
-bios_frame_dx		equ	offset dos_frame_image+8
-bios_packet_ax		equ	offset bios_register_packet_image
-bios_packet_bx		equ	offset bios_register_packet_image+2
-bios_packet_cx		equ	offset bios_register_packet_image+4
-bios_packet_dx		equ	offset bios_register_packet_image+6
+bios_frame_ax			equ	offset dos_frame_image+16
+bios_frame_bx			equ	offset dos_frame_image+14
+bios_frame_bh			equ	offset dos_frame_image+15
+bios_frame_cx			equ	offset dos_frame_image+12
+bios_frame_dx			equ	offset dos_frame_image+8
+bios_packet_ax			equ	offset bios_register_packet_image
+bios_packet_bx			equ	offset bios_register_packet_image+2
+bios_packet_cx			equ	offset bios_register_packet_image+4
+bios_packet_dx			equ	offset bios_register_packet_image+6
 bios_packet_console		equ	offset bios_console_image
 
 dos_output_column		equ	offset console_state_image+1
 dos_output_suppressed		equ	offset console_state_image+2
 dos_printer_echo		equ	offset console_state_image+3
-dos_line_origin		equ	offset console_state_image+4
+dos_line_origin			equ	offset console_state_image+4
 dos_scan_pending		equ	offset console_state_image
 
 dos_console_number		equ	offset runtime_flags_image+2
-dos_list_number		equ	offset runtime_flags_image+3
+dos_list_number			equ	offset runtime_flags_image+3
 
 service_caller_ds		equ	offset service_ds_image
-service_memory_paragraphs		equ	offset memory_setting_image
-service_flags		equ	offset private_service_flags_image
+service_memory_paragraphs	equ	offset memory_setting_image
+service_flags			equ	offset private_service_flags_image
 
-dos_dta_offset		equ	offset dos_dma_image
-dos_dta_segment		equ	offset dos_dma_image+2
-dos_saved_es		equ	offset dos_frame_image+4
+dos_dta_offset			equ	offset dos_dma_image
+dos_dta_segment			equ	offset dos_dma_image+2
+dos_saved_es			equ	offset dos_frame_image+4
 
 dos_vectors_active		equ	offset runtime_flags_image
-dos_file_slots		equ	offset private_fcb_slots_image
+dos_file_slots			equ	offset private_fcb_slots_image
 
 
 critical_context		equ	offset critical_stacks_image+8
 
 ; Decoded interrupt-frame and direct-BIOS packet fields.
-dos_entry_ax		equ	offset dos_frame_image
-dos_caller_ds		equ	offset dos_frame_image+10
+dos_entry_ax			equ	offset dos_frame_image
+dos_caller_ds			equ	offset dos_frame_image+10
 dos_nested_console		equ	offset dos_nested_image
 dos_nested_stack		equ	offset critical_stacks_image+6
 printer_bios_function		equ	offset printer_state_image+2
@@ -128,29 +128,29 @@ printer_bios_character		equ	offset printer_state_image+3
 printer_bios_device		equ	offset printer_state_image+5
 dos_saved_function		equ	offset dos_frame_image+17
 raw_disk_operation		equ	offset raw_disk_packet_image
-raw_disk_drive		equ	offset raw_disk_packet_image+1
-raw_disk_count		equ	offset raw_disk_packet_image+2
-raw_disk_head		equ	offset raw_disk_packet_image+3
-raw_disk_sector		equ	offset raw_disk_packet_image+4
+raw_disk_drive			equ	offset raw_disk_packet_image+1
+raw_disk_count			equ	offset raw_disk_packet_image+2
+raw_disk_head			equ	offset raw_disk_packet_image+3
+raw_disk_sector			equ	offset raw_disk_packet_image+4
 raw_disk_cylinder		equ	offset raw_disk_packet_image+5
-raw_disk_buffer		equ	offset raw_disk_packet_image+6
+raw_disk_buffer			equ	offset raw_disk_packet_image+6
 raw_disk_segment		equ	offset raw_disk_packet_image+8
 
 
 saved_command_text		equ	offset saved_command_image
 command_tail_pointer		equ	offset command_tail_image
-service_entry		equ	offset service_pointer_image
+service_entry			equ	offset service_pointer_image
 
-original_search_explicit		equ	offset search_explicit_image
-original_search_drive_number		equ	offset search_explicit_image+2
-original_search_types_left		equ	offset search_count_image
-original_search_user_zero		equ	offset load_user_zero_image
+original_search_explicit	equ	offset search_explicit_image
+original_search_drive_number	equ	offset search_explicit_image+2
+original_search_types_left	equ	offset search_count_image
+original_search_user_zero	equ	offset load_user_zero_image
 
 dos_extended_fcb		equ	offset fcb_attribute_image
 dos_fcb_attribute		equ	offset fcb_attribute_image+1
-dos_fcb_offset		equ	offset application_fcb_image
-dos_fcb_segment		equ	offset application_fcb_image+2
-dos_fcb_slot		equ	offset slot_pointer_image
+dos_fcb_offset			equ	offset application_fcb_image
+dos_fcb_segment			equ	offset application_fcb_image+2
+dos_fcb_slot			equ	offset slot_pointer_image
 
 critical_private_ss		equ	offset critical_stacks_image+4
 critical_child_ss		equ	offset critical_stacks_image
@@ -161,12 +161,12 @@ native_dma_offset		equ	offset native_dma_image
 native_dma_segment		equ	offset native_dma_image+2
 dos_current_drive		equ	offset drive_state_image
 dos_working_drive		equ	offset drive_state_image+1
-dos_device_id		equ	offset console_state_image+5
+dos_device_id			equ	offset console_state_image+5
 
-cached_fcb_slot		equ	offset cache_fcb_image
+cached_fcb_slot			equ	offset cache_fcb_image
 record_cache_dirty		equ	offset cache_user_dirty_image+1
 record_cache_valid		equ	offset cache_result_image
-directory_timestamp_mode		equ	offset runtime_flags_image+1
+directory_timestamp_mode	equ	offset runtime_flags_image+1
 
 record_cache_result		equ	offset cache_result_image+1
 record_cache_user		equ	offset cache_user_dirty_image
@@ -174,21 +174,21 @@ record_cache_number		equ	offset cache_record_image
 record_cache_buffer		equ	offset cache_pointer_image
 
 loader_user_zero		equ	offset load_flags_image
-loader_compatibility_flags		equ	offset load_flags_image+1
+loader_compatibility_flags	equ	offset load_flags_image+1
 loader_saved_user		equ	offset load_flags_image+2
 loader_command_text		equ	offset launch_command_pointer_image
 
-directory_dos_attributes		equ	offset fcb_attribute_image+2
+directory_dos_attributes	equ	offset fcb_attribute_image+2
 
-dos_saved_si		equ	offset dos_frame_image+6
-dos_saved_di		equ	offset dos_frame_image+2
-parse_status		equ	offset parse_flags_image
+dos_saved_si			equ	offset dos_frame_image+6
+dos_saved_di			equ	offset dos_frame_image+2
+parse_status			equ	offset parse_flags_image
 parse_drive_present		equ	offset parse_flags_image+1
 parse_name_present		equ	offset parse_flags_image+2
 parse_type_present		equ	offset parse_flags_image+3
 
 transfer_advance_random		equ	offset transfer_advance_image
-transfer_requested_records		equ	offset transfer_records_image
+transfer_requested_records	equ	offset transfer_records_image
 transfer_buffer_offset		equ	offset transfer_dma_image
 transfer_whole_records		equ	offset transfer_span_image
 transfer_record_span		equ	offset transfer_span_image+2
@@ -222,30 +222,28 @@ command_fcb_offset_11		equ	offset command_fcb_image+11
 command_fcb_offset_16		equ	offset command_fcb_image+16
 batch_pending_offset		equ	offset batch_pending_image
 shell_delimiter_pointer		equ	offset shell_delimiter_pointer_image
-shell_scan_limits_offset		equ	offset shell_scan_limits_image
+shell_scan_limits_offset	equ	offset shell_scan_limits_image
 shell_delimiter_offset		equ	offset shell_delimiter_image
 search_packet_direction		equ	offset search_packet_direction_image
 shell_extensions_offset		equ	offset shell_extensions_image
-shell_extensions_offset_2		equ	offset shell_extensions_image+2
-shell_extensions_offset_3		equ	offset shell_extensions_image+3
-shell_extensions_offset_6		equ	offset shell_extensions_image+6
-shell_extensions_offset_9		equ	offset shell_extensions_image+9
-dos_launch_pending_offset		equ	offset dos_launch_pending_image
+shell_extensions_offset_2	equ	offset shell_extensions_image+2
+shell_extensions_offset_3	equ	offset shell_extensions_image+3
+shell_extensions_offset_6	equ	offset shell_extensions_image+6
+shell_extensions_offset_9	equ	offset shell_extensions_image+9
+dos_launch_pending_offset	equ	offset dos_launch_pending_image
 decimal_started_offset		equ	offset decimal_started_image
 dos_delimiters_offset		equ	offset dos_delimiters_image
 parse_fcb_offset		equ	offset parse_fcb_image
 parse_fcb_offset_1		equ	offset parse_fcb_image+1
 parse_fcb_offset_9		equ	offset parse_fcb_image+9
-original_spare_offset_107		equ	offset original_spare_image+107
-original_spare_offset_109		equ	offset original_spare_image+109
-transfer_boundaries_offset_2		equ	offset transfer_boundaries_image+2
-transfer_boundaries_offset_6		equ	offset transfer_boundaries_image+6
-transfer_boundaries_offset_10		equ	offset transfer_boundaries_image+10
-transfer_boundaries_offset_12		equ	offset transfer_boundaries_image+12
+transfer_boundaries_offset_2	equ	offset transfer_boundaries_image+2
+transfer_boundaries_offset_6	equ	offset transfer_boundaries_image+6
+transfer_boundaries_offset_10	equ	offset transfer_boundaries_image+10
+transfer_boundaries_offset_12	equ	offset transfer_boundaries_image+12
 transfer_size_offset		equ	offset transfer_size_image
 transfer_size_offset_6		equ	offset transfer_size_image+6
 transfer_size_offset_8		equ	offset transfer_size_image+8
-transfer_overflow_offset		equ	offset transfer_overflow_image
+transfer_overflow_offset	equ	offset transfer_overflow_image
 cache_record_offset_1		equ	offset cache_record_image+1
 cache_record_offset_2		equ	offset cache_record_image+2
 transfer_dma_offset_2		equ	offset transfer_dma_image+2
@@ -256,35 +254,40 @@ record_buffer_offset_4		equ	offset record_buffer_image+4
 record_buffer_offset_8		equ	offset record_buffer_image+8
 record_buffer_offset_10		equ	offset record_buffer_image+10
 cache_pointer_offset_2		equ	offset cache_pointer_image+2
-default_fcb_pointer_offset_2		equ	offset default_fcb_pointer_image+2
+default_fcb_pointer_offset_2	equ	offset default_fcb_pointer_image+2
 slot_pointer_offset_2		equ	offset slot_pointer_image+2
 clock_pointer_offset_2		equ	offset clock_pointer_image+2
+month_days_offset		equ	offset month_days_image
 month_days_offset_1		equ	offset month_days_image+1
 month_starts_offset		equ	offset month_starts_image
-console_record_capacity_offset		equ	offset console_record_capacity_image
-console_record_text_offset		equ	offset console_record_text_image
-launch_command_count_offset		equ	offset launch_command_count_image
+console_record_capacity_offset	equ	offset console_record_capacity_image
+console_record_text_offset	equ	offset console_record_text_image
+launch_command_count_offset	equ	offset launch_command_count_image
 directory_state_offset		equ	offset directory_state_image
 active_vectors_offset		equ	offset active_vectors_image
 original_vectors_offset		equ	offset original_vectors_image
 attach_packet_offset		equ	offset attach_packet_image
-private_service_word_offset		equ	offset private_service_word_image
+private_service_word_offset	equ	offset private_service_word_image
 metadata_fcb_offset		equ	offset metadata_fcb_image
 metadata_fcb_offset_1		equ	offset metadata_fcb_image+1
 metadata_fcb_offset_32		equ	offset metadata_fcb_image+32
-invalid_dos_message_offset		equ	offset invalid_dos_message_image
-printer_busy_message_offset		equ	offset printer_busy_message_image
-private_extensions_offset		equ	offset private_extensions_image
+invalid_dos_message_offset	equ	offset invalid_dos_message_image
+printer_busy_message_offset	equ	offset printer_busy_message_image
+private_extensions_offset	equ	offset private_extensions_image
+
+; Hardware interrupt vector locations in segment zero.
+ivt_bdos_offset			equ	0e0h*4
+ivt_bdos_segment		equ	ivt_bdos_offset+2
 
 ; Native XIOS header and packed PC-MODE operation selectors.
-xios_service_entry equ 0c03h
-xios_console_table equ 0c14h
-xios_list_table equ 0c16h
-xios_disk_table equ 0c18h
-xios_pixel_write equ 0c1fh
-fcb_slot_bytes equ 40
-fcb_slot_count equ (offset data_padding_image-offset private_fcb_slots_image)/fcb_slot_bytes
-fcb_slots_end equ offset data_padding_image
+xios_service_entry		equ	0c03h
+xios_console_table		equ	0c14h
+xios_list_table			equ	0c16h
+xios_disk_table			equ	0c18h
+xios_pixel_write		equ	0c1fh
+fcb_slot_bytes			equ	40
+fcb_slot_count			equ	(offset data_padding_image-offset private_fcb_slots_image)/fcb_slot_bytes
+fcb_slots_end			equ	offset data_padding_image
 
 ; Two public entry jumps precede the vendor/version identification bytes.
 	jmp	process_start
@@ -1637,9 +1640,9 @@ initialize_bdos_vector:
 	push	ds
 	mov	ax,0
 	mov	ds,ax
-	mov	ax,word ptr .original_spare_offset_107
+	mov	ax,word ptr .ivt_bdos_offset
 	mov	cs:word ptr shared_bdos_vector,ax
-	mov	ax,word ptr .original_spare_offset_109
+	mov	ax,word ptr .ivt_bdos_segment
 	mov	cs:word ptr shared_bdos_vector+2,ax
 	pop	ds
 initialize_wait_console_zero:
@@ -2579,7 +2582,7 @@ psp_copy_process_name:
 	and	ax,07f7fh
 	db	026h					; ES override; original addressing
 	mov	08h[di],ax
-	mov	069dh[di],ax
+	mov	attach_packet_offset+4[di],ax
 	inc	di
 	inc	di
 	loop	psp_copy_process_name
@@ -2673,13 +2676,13 @@ install_child_vectors:
 	mov	es:byte ptr .010h,0ffh
 	popf
 	mov	es,cx
-	mov	cx,es:word ptr .original_spare_offset_107
+	mov	cx,es:word ptr .ivt_bdos_offset
 	mov	cs:word ptr shared_previous_dispatch,cx
-	mov	cx,es:word ptr .original_spare_offset_109
+	mov	cx,es:word ptr .ivt_bdos_segment
 	mov	cs:word ptr shared_previous_dispatch+2,cx
 	mov	cx,offset child_native_dispatch
-	mov	es:word ptr .original_spare_offset_107,cx
-	mov	es:word ptr .original_spare_offset_109,cs
+	mov	es:word ptr .ivt_bdos_offset,cx
+	mov	es:word ptr .ivt_bdos_segment,cs
 	mov	si,offset interrupt_vectors
 	mov	cx,(offset interrupt_vectors_end-offset interrupt_vectors)/3
 install_child_vector:
@@ -6277,39 +6280,93 @@ truncate_size_convert:
 	call	multiply_record_offset
 	push	ax
 	push	bx
-	db	08bh,0d3h				; mov dx,bx (original encoding)
+; BDOS 99 keeps the selected record: translate byte length to its last index.
+	mov	dx,bx
+	or	bx,ax
+	jz	truncate_close_empty
+	sub	ax,1
+	sbb	dx,0
 	call	bytes_to_records
 	mov	023h[di],dl
 	mov	021h[di],ax
-	db	08bh,0d7h				; mov dx,di (original encoding)
+	mov	dx,di
 	mov	cl,010h
 	mov	al,[di]
 	dec	al
 	mov	ah,05h
 	call	file_bdos_checked
 	cmp	al,0ffh
-	je	truncate_failed
-	db	08bh,0d7h				; mov dx,di (original encoding)
+	je	truncate_error
+	mov	dx,di
 	mov	cl,063h
 	mov	al,[di]
 	dec	al
 	mov	ah,05h
 	call	file_bdos_checked
 	cmp	al,0ffh
-	je	truncate_failed
-	db	08bh,0d7h				; mov dx,di (original encoding)
+	je	truncate_error
+	mov	dx,di
 	mov	cl,0fh
 	mov	al,[di]
 	dec	al
 	mov	ah,04h
 	call	file_bdos_checked
 	cmp	al,0ffh
-	je	truncate_failed
+	je	truncate_error
+	jmps	truncate_store_size
+truncate_error:
+	jmp	truncate_failed
+; Native truncate always retains a record. Empty files need close/delete/create.
+truncate_close_empty:
+	mov	dx,di
+	mov	cl,010h
+	mov	al,[di]
+	dec	al
+	mov	ah,05h
+	call	file_bdos_checked
+	cmp	al,0ffh
+	je	truncate_error
+	mov	dx,di
+	mov	cl,013h
+	mov	al,[di]
+	dec	al
+	mov	ah,05h
+	call	file_bdos_checked
+	cmp	al,0ffh
+	je	truncate_error
+	cmp	di,.cached_fcb_slot
+	jne	truncate_empty_clear
+	mov	byte ptr .record_cache_valid,0
+truncate_empty_clear:
+	push	di
+	push	es
+	push	ds
+	pop	es
+	add	di,12
+	xor	ax,ax
+	mov	cx,12
+	cld
+	rep	stosw
+	pop	es
+	pop	di
+	mov	dx,di
+	mov	cl,016h
+	mov	al,[di]
+	dec	al
+	mov	ah,05h
+	call	file_bdos_checked
+	cmp	al,0ffh
+	jne	truncate_store_size
+	call	release_fcb_slot
+	jmps	truncate_failed
+truncate_store_size:
 	pop	bx
 	pop	ax
 	les	si,dword ptr .dos_fcb_offset
 	mov	es:010h[si],ax
 	mov	es:012h[si],bx
+; Ensure close records the exact final-byte count, including partial records.
+	or	byte ptr 0eh[di],040h
 	cmp	di,.cached_fcb_slot
 	jne	truncate_success
 	mov	byte ptr .record_cache_valid,0
@@ -6950,7 +7007,7 @@ set_date_check_month:
 	jnc	set_date_return
 	cmp	dl,01h
 	jc	set_date_return
-	cmp	04f9h[bx],dl
+	cmp	month_days_offset[bx],dl
 	jc	set_date_return
 	db	003h,0dbh				; add bx,bx (original encoding)
 	mov	ax,month_starts_offset[bx]

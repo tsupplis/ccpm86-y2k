@@ -36,7 +36,8 @@ mz_pages_nonzero:
 	jmp	exe_file_invalid
 mz_pages_bounded:
 	mov	bx,word ptr .exe_header+2
-	cmp	bx,511
+; Early tools also encode a full final page as 512 rather than zero.
+	cmp	bx,512
 	jbe	mz_last_page_bounded
 	jmp	exe_file_invalid
 mz_last_page_bounded:
