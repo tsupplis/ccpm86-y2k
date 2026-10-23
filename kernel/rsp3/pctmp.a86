@@ -1334,7 +1334,6 @@ print_command_error:
 	call	print_code_string
 	mov	dx,saved_command_text
 	call	print_data_string
-	call	print_code_newline
 	jmp	command_prompt_resume
 
 ; DI initially precedes the input. Skip spaces, tabs and equals signs; return DI on token.
@@ -1554,7 +1553,7 @@ original_msg_command_prefix:
 original_msg_user_invalid:
 	db	13,10,'Invalid User Number, IGNORED',13,10,'$'
 original_msg_user_value:
-	db	13,10,'User Number = $'
+	db	'User Number = $'
 original_msg_user_note:
 	db	13,10,'Note:  User numbers only apply to CP/M media.',13,10,'$'
 original_msg_memory_invalid:

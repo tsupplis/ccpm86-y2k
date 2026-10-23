@@ -188,6 +188,15 @@
     The  above  command causes CHSET to respond with a display of the
     current settings of the fields in RECTIFY.CMD's command header.
 
+
+///1CLS
+    CLS clears the screen.
+
+    CLS is a built-in shell command available at the prompt in both
+    the native TMP and PC-MODE. It sends the terminal clear-screen
+    sequence (ESC E) and does not require an external file.
+
+
 ///1cntrlchars
 
   Control Character                      Function

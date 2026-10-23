@@ -456,12 +456,6 @@ sl_norm:
 	lea si,p_name[si]	;offset of process name
 	mov di,offset smsg_pd
 	mov cx,4 ! rep movsw
-	; TMP is the idle command interpreter: show Terminal.
-	cmp word ptr smsg_pd,'mT' ! jne s_nopd
-	cmp byte ptr smsg_pd+2,'p' ! jne s_nopd
-	mov si,offset console_name
-	mov di,offset smsg_pd
-	mov cx,4 ! rep movsw
 
 s_nopd:
 s_ctrlS:
@@ -775,10 +769,8 @@ sl_error_key	rb	1	; response key
 
 ;	status line message image
 
-console_name db 'Terminal'
-
 status_msg		rb	0
-			db	'Console='	;0-7	
+			db	'Console='	;0-7
 smsg_cnum		rb	1		;8
 			db	' '		;9
 smsg_mode		rb	8		;10-17
