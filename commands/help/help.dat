@@ -242,6 +242,9 @@
     HELP.CMD and HELP.HLP; bare ? is built into the shell. A ? topic line
     may contain at most 125 characters including the question mark.
 
+    PUT, GET and RDR redirect the console output and/or input of a
+    program to or from a disk file. See HELP PUT, HELP GET and HELP RDR.
+
     SETDEF displays or changes the command drive search list for this
     console. The default is the current drive, followed by the fixed
     system fallback. See HELP SETDEF for drive-list syntax and examples.
@@ -1084,6 +1087,36 @@
 
     All values represented by n are hexadecimal paragraph addresses.
 
+///1GET
+    Syntax:
+
+    GET [infile{,E|EI}] command-line
+
+    Explanation:
+
+    GET feeds the console input of a program from a text file instead
+    of the keyboard.  The infile is read in 128-byte records until a
+    CTRL-Z or the end of the file, after which the program reads the
+    keyboard again.  The program and any programs it starts on this
+    virtual console receive the characters; other consoles are not
+    affected.
+
+    E or EI echoes the characters supplied from the file to the screen.
+
+    The command-line must name a program (a .CMD file).  Commands built
+    into the shell, such as DIR, TYPE and CLS, are not redirected; use
+    the program forms such as SDIR.CMD or TYPE.CMD.
+    DOS programs (.COM, .EXE) run by PC-MODE cannot be redirected.
+
+    ///2EXAMPLES
+    Examples:
+
+    A>GET [SCRIPT.IN] ED MYFILE.TXT
+    A>GET [CMDS.DAT] PIP
+    A>GET [BATCH.IN,E] DDT86 PROG.CMD
+
+    See also: PUT, RDR
+
 ///1HDMAINT
     Syntax:
 
@@ -1402,6 +1435,65 @@
 
     A>PRINTER 3          ; sets the current printer number
     Printer Number = 3
+
+///1PUT
+    Syntax:
+
+    PUT [outfile{,A}{,E|EO}] command-line
+
+    Explanation:
+
+    PUT writes everything a program sends to the console (BDOS
+    functions 2, 6 and 9) to a disk file instead of showing it.  The
+    program and any programs it starts on this virtual console are
+    captured; other consoles are not affected.  An existing outfile is
+    replaced.
+
+    A       appends to outfile instead of replacing it.
+    E or EO also shows the output on the screen.
+
+    The command-line must name a program (a .CMD file).  Commands built
+    into the shell, such as DIR, TYPE and CLS, are not redirected; use
+    the program forms such as SDIR.CMD or TYPE.CMD.
+    DOS programs (.COM, .EXE) run by PC-MODE cannot be redirected.
+
+    ///2EXAMPLES
+    Examples:
+
+    A>PUT [SDIR.TXT] SDIR.CMD
+    A>PUT [BUILD.LOG,A] LINK86 MYPROG
+    A>PUT [BUILD.LOG,A,EO] LIB86 MYLIB
+
+    See also: GET, RDR
+
+///1RDR
+    Syntax:
+
+    RDR [infile,outfile{,A}{,E|EI|EO}] command-line
+
+    Explanation:
+
+    RDR redirects the console input and the console output of a program
+    at the same time: input is read from infile (as with GET) and
+    output is written to outfile (as with PUT).
+
+    A       appends to outfile instead of replacing it.
+    EI      echoes the input read from infile to the screen.
+    EO      echoes the output written to outfile to the screen.
+    E       echoes both.
+
+    The command-line must name a program (a .CMD file).  Commands built
+    into the shell, such as DIR, TYPE and CLS, are not redirected.
+    DOS programs (.COM, .EXE) run by PC-MODE cannot be redirected.
+
+    ///2EXAMPLES
+    Examples:
+
+    A>RDR [SCRIPT.IN,BUILD.LOG] ED MYFILE.TXT
+    A>RDR [COMMANDS.DAT,PIP.LOG,EO] PIP
+    A>RDR [NEXTCMD.IN,MASTER.LOG,A,EO] PIP
+
+    See also: GET, PUT
 
 ///1REN
     Syntax:

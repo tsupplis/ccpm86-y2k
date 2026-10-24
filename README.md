@@ -62,7 +62,7 @@ and verification details, and [distributions](#distributions) for all six disks.
 Alongside PC-MODE, the current version includes:
 - CP/M Plus mapped and direction keys command line recall and editing,
 - CP/M Plus setdef style configurability
-- CP/M Plus style Input/Ouput with put/get/rdr commands
+- CP/M Plus style Input/Ouput redirection with put/get/rdr commands
 - Support for CGA, EGA modes even on VGA card,
 - Y2K compliance,
 - CLIs for floppy copy, format and more
@@ -118,6 +118,28 @@ order. Native TMP accepts the same settings and ignores DOS entries.
 Loading commands from other drives preserves the working drive and user.
 See `HELP SETDEF` and [Patches](patches.md) for details and limitations.
 
+`PUT`, `GET` and `RDR` redirect a program's console output, input or both,
+using a bracket prefix like the other Digital Research tools (`ccpmext.img`):
+
+| Command | Effect |
+| --- | --- |
+| `PUT [out{,A}{,E\|EO}] cmd` | Write the program's console output to `out`; `A` appends, `E`/`EO` also shows it |
+| `GET [in{,E\|EI}] cmd` | Read the program's console input from `in`; `E`/`EI` echoes it |
+| `RDR [in,out{,A}{,E\|EI\|EO}] cmd` | Both at once |
+
+```
+B>PUT [DIR.TXT] SDIR.CMD *.CMD
+B>PUT [BUILD.LOG,A,EO] ASM86.CMD MYPROG
+B>GET [KEYS.IN] PIP.CMD
+B>RDR [KEYS.IN,PIP.LOG] PIP.CMD
+```
+
+`cmd` must be a native `.CMD` program: shell built-ins such as `DIR`, `TYPE`
+and `CLS` are not redirected (use `SDIR.CMD`, `TYPE.CMD`). DOS programs
+(`.COM`, `.EXE`) run by PC-MODE cannot be redirected, because PC-MODE
+handles their console calls itself. Only the console of the caller is
+affected. See `HELP PUT`, `HELP GET` and `HELP RDR`.
+
 ## Distributions
 
 | Image | Bootable | Contents |
@@ -171,11 +193,14 @@ Format: [cpm86-kernel](../cpm86-kernel/README.md). **3.1** = rebuildable sources
 | `gencmd` | Convert H86 output into CMD executables | — | Recompiled from CCP/M-86 3.1 and adapted | ✓ |
 | `genccpm` | Generate and configure the system image | — | Recompiled from CCP/M-86 3.1 and adapted; flag-table fix |  |
 | `gentab` | Generate disassembler opcode tables | — | Recompiled from CCP/M-86 3.1 and adapted |  |
+| `get` | Feed a program's console input from a text file (`GET [file{,E\|EI}] cmd`) | — | New; shares the `putget.lib` engine with PUT and RDR |  |
 | `hdmaint` | Hard-disk maintenance | Original | — |  |
 | `help` / `help.hlp` | Browse indexed command help | — | Recompiled from CCP/M-86 3.1 and adapted; indexed from `help.dat` | ✓ |
 | `initdir` | Enable directory date/time stamps | — | Recompiled from CCP/M-86 3.1 and adapted |  |
 | `pcetime` | Synchronize time with the PCE host | Original | — |  |
 | `pip` | Copy and transfer files | — | Recompiled from CDOS 4.1 and adapted |  |
+| `put` | Capture a program's console output into a file (`PUT [file{,A}{,E\|EO}] cmd`) | — | New; shares the `putget.lib` engine with GET and RDR |  |
+| `rdr` | Redirect a program's console input and output together (`RDR [in,out{,A}{,E\|EI\|EO}] cmd`) | — | New; shares the `putget.lib` engine with PUT and GET |  |
 | `ren` | Rename files | — | 3.1 |  |
 | `sdir` | Detailed, sorted directory listing | — | Recompiled from CCP/M-86 3.1 and adapted, Y2K/DPB/tail fixes |  |
 | `set` | Set file and drive attributes | — | Recompiled from CCP/M-86 3.1 and adapted |  |

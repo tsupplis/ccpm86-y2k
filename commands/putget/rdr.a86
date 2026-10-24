@@ -187,7 +187,15 @@ dseg
 org 100h
 
 msg_require_ccpm    db 'RDR requires Concurrent CP/M-86 3.1',13,10,'$'
-msg_syntax          db 'Syntax: RDR [infile,outfile{,A}{,E}{,EI}{,EO}] command_line',13,10,'$'
+msg_syntax          db 13,10,'CCP/M-86 RDR VER 1.0',13,10,13,10
+                    db 'USAGE: RDR [infile,outfile{,A}{,E|EI|EO}] command',13,10
+                    db '  infile   file supplying the console input of command',13,10
+                    db '  outfile  file receiving the console output of command',13,10
+                    db '  A        append to outfile instead of replacing it',13,10
+                    db '  EI       also show the input on the screen',13,10
+                    db '  EO       also show the output on the screen',13,10
+                    db '  E        both EI and EO',13,10
+                    db '  command  program (.CMD) to run, with its own tail',13,10,'$'
 msg_open_err        db 'RDR: Unable to open input file',13,10,'$'
 msg_create_err      db 'RDR: Unable to create or open output file',13,10,'$'
 msg_cli_err         db 'RDR: CLI command execution failed',13,10,'$'

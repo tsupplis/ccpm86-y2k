@@ -126,7 +126,11 @@ dseg
 org 100h
 
 msg_require_ccpm    db 'GET requires Concurrent CP/M-86 3.1',13,10,'$'
-msg_syntax          db 'Syntax: GET [infile{,E}{,EI}] command_line',13,10,'$'
+msg_syntax          db 13,10,'CCP/M-86 GET VER 1.0',13,10,13,10
+                    db 'USAGE: GET [infile{,E|EI}] command',13,10
+                    db '  infile   file supplying the console input of command',13,10
+                    db '  E, EI    also show the input on the screen',13,10
+                    db '  command  program (.CMD) to run, with its own tail',13,10,'$'
 msg_open_err        db 'GET: Unable to open input file',13,10,'$'
 msg_cli_err         db 'GET: CLI command execution failed',13,10,'$'
 

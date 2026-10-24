@@ -140,7 +140,12 @@ dseg
 org 100h
 
 msg_require_ccpm    db 'PUT requires Concurrent CP/M-86 3.1',13,10,'$'
-msg_syntax          db 'Syntax: PUT [outfile{,A}{,E}{,EO}] command_line',13,10,'$'
+msg_syntax          db 13,10,'CCP/M-86 PUT VER 1.0',13,10,13,10
+                    db 'USAGE: PUT [outfile{,A}{,E|EO}] command',13,10
+                    db '  outfile  file receiving the console output of command',13,10
+                    db '  A        append to outfile instead of replacing it',13,10
+                    db '  E, EO    also show the output on the screen',13,10
+                    db '  command  program (.CMD) to run, with its own tail',13,10,'$'
 msg_create_err      db 'PUT: Unable to create or open output file',13,10,'$'
 msg_cli_err         db 'PUT: CLI command execution failed',13,10,'$'
 
