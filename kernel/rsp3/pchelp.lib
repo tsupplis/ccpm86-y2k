@@ -82,7 +82,7 @@ help_too_long:
 help_quick_text:
 	db	'Common commands:',13,10
 	db	'  DIR  TYPE  PIP  ERA  REN  SUBMIT  SETDEF',13,10
-	db	'Shell commands: CLS  SYSDISK  USER  MEM  PRINTER',13,10
+	db	'Shell commands: CLS  SYSDISK  USER  DOSMEM  DOS8087  DOSUSPND  PRINTER',13,10
 	db	'DOS programs: COM and EXE files on CP/M disks.',13,10
 	db	'? topic opens HELP, for example ? PIP or ? COMMANDS.',13,10
 	db	'Some utilities and HELP files may be on another disk.',13,10,'$'

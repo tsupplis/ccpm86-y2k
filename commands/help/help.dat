@@ -695,6 +695,71 @@
     buffered mode if you anticipate  a  program  outputting more than
     one screen of data, and you do not wish to miss it.
 
+///1DOS8087
+    Syntax:
+
+    DOS8087
+    DOS8087 {ON | OFF}
+
+    Explanation:
+
+    DOS8087 enables or disables 8087 numeric coprocessor support for DOS
+    applications running on the current virtual console.
+
+    When entered without an argument, DOS8087 displays the current 8087 state.
+    Setting DOS8087 ON requires an 8087 math coprocessor to be installed.
+
+    ///2EXAMPLES
+    Examples:
+
+        A>DOS8087          ; displays 8087 = ON or OFF
+        A>DOS8087 ON       ; enables 8087 coprocessor support
+        A>DOS8087 OFF      ; disables 8087 coprocessor support
+
+///1DOSMEM
+    Syntax:
+
+    DOSMEM
+    DOSMEM {size_in_kib}
+
+    Explanation:
+
+    DOSMEM displays or sets the default memory partition size (in KiB)
+    allocated for DOS (.COM and .EXE) processes running on the current
+    virtual console.
+
+    When entered without an argument, DOSMEM displays the current allocation.
+    The default is 128 KiB.
+
+    ///2EXAMPLES
+    Examples:
+
+        A>DOSMEM           ; displays DOS Memory Allocation (e.g. 128K)
+        A>DOSMEM 256       ; sets DOS process memory size to 256 KiB
+        A>DOSMEM 64        ; sets DOS process memory size to 64 KiB
+
+///1DOSUSPND
+    Syntax:
+
+    DOSUSPND
+    DOSUSPND {ON | OFF}
+
+    Explanation:
+
+    DOSUSPND controls whether background DOS processes continue executing
+    or are suspended when switching away from their virtual console.
+
+    When entered without an argument, DOSUSPND displays the current state.
+    Setting DOSUSPND ON suspends background DOS tasks; OFF allows them to
+    continue running in the background.
+
+    ///2EXAMPLES
+    Examples:
+
+        A>DOSUSPND         ; displays Suspend = ON or OFF
+        A>DOSUSPND ON      ; suspends DOS tasks when switched out
+        A>DOSUSPND OFF     ; keeps DOS tasks running in background
+
 ///1ED
     Syntax:
 

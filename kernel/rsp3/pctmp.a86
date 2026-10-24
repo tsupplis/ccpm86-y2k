@@ -563,7 +563,7 @@ user_show:
 	;call	print_code_string
 	jmp	command_prompt_resume
 
-; MEM: parse decimal KiB, convert to paragraphs and use private service 2.
+; DOSMEM: parse decimal KiB, convert to paragraphs and use private service 2.
 ; A query passes DX=FFFFh, then formats the returned paragraph count in KiB.
 original_memory_dispatch:
 	mov	di,offset original_name_memory
@@ -613,7 +613,7 @@ original_ndp_dispatch:
 	mov	di,offset original_name_ndp
 	call	match_original_builtin
 	jz	ndp_argument
-	jmp	original_del_dispatch
+	jmp	original_rem_dispatch
 ndp_argument:
 	mov	si,program_fcb
 	mov	di,.command_tail_pointer
@@ -673,73 +673,6 @@ ndp_show_done:
 	call	print_code_newline
 	jmp	command_prompt_resume
 
-; DEL rewrites the command to ERASE.EXE and reparses it.
-original_del_dispatch:
-	mov	di,offset original_name_del
-	call	match_original_builtin
-	jnz	original_rename_dispatch
-	cmp	byte ptr .command_length,121
-	ja	command_expansion_error
-	push	es
-	push	ds
-	push	ds
-	pop	es
-	xor	cx,cx
-	mov	cl,.command_length
-	mov	si,offset command_text
-	add	si,cx
-	mov	di,si
-	add	di,6
-	sub	cx,3
-	inc	cx
-	std
-	rep	movsb
-	add	byte ptr .command_length,6
-	cld
-	push	cs
-	pop	ds
-	mov	si,offset original_erase_command
-	mov	di,command_text
-	mov	cx,0ah
-	rep	movsb
-	pop	ds
-	pop	es
-	jmp	command_normalize
-
-command_expansion_error:
-	mov	cx,62
-	jmp	shell_command_error
-
-; RENAME inserts .EXE into the command and reparses it.
-original_rename_dispatch:
-	mov	di,offset original_name_rename
-	call	match_original_builtin
-	jnz	original_rem_dispatch
-	cmp	byte ptr .command_length,126
-	ja	command_expansion_error
-	push	es
-	push	ds
-	push	ds
-	pop	es
-	db	033h,0c0h				; xor ax,ax (original encoding)
-	mov	al,.command_length
-	inc	byte ptr .command_length
-	mov	si,command_text
-	db	003h,0f0h				; add si,ax (original encoding)
-	db	08bh,0feh				; mov di,si (original encoding)
-	inc	di
-	db	08bh,0c8h				; mov cx,ax (original encoding)
-	sub	cx,05h
-	std
-	rep	movsb
-	cld
-	mov	word ptr [si],04558h
-	dec	si
-	dec	si
-	mov	word ptr [si],0452eh
-	pop	ds
-	pop	es
-	jmp	command_normalize
 
 ; REM and SYS return directly to the prompt in this recovered shell.
 original_rem_dispatch:
@@ -1559,9 +1492,9 @@ original_msg_user_value:
 original_msg_user_note:
 	db	13,10,'Note:  User numbers only apply to CP/M media.',13,10,'$'
 original_msg_memory_invalid:
-	db	13,10,'Invalid Memory Allocation Size, IGNORED',13,10,'$'
+	db	13,10,'Invalid DOS Memory Allocation, IGNORED',13,10,'$'
 original_msg_memory_value:
-	db	13,10,'Memory Allocation Size = $'
+	db	'DOS Memory = $'
 original_msg_printer_invalid:
 	db	13,10,'Invalid Printer Number, IGNORED',13,10,'$'
 original_msg_printer_value:
@@ -1571,37 +1504,31 @@ original_msg_ndp_absent:
 original_msg_ndp_invalid:
 	db	13,10,'Invalid 8087 State, IGNORED',13,10,'$'
 original_msg_ndp_value:
-	db	13,10,'8087 = $'
+	db	'8087 = $'
 original_msg_suspend_invalid:
 	db	13,10,'Invalid Suspend State, IGNORED',13,10,'$'
 original_msg_suspend_value:
-	db	13,10,'Suspend = $'
+	db	'Suspend = $'
 original_msg_pause:
-	db	'Strike a key when ready . . .$'
+	db	'Press any key to continue...$'
 
 ; Built-in names are nine-byte FCB comparison keys (name plus first type byte).
 original_name_user:
 	db	'USER     '
 original_name_memory:
-	db	'MEM      '
+	db	'DOSMEM   '
 original_name_printer:
 	db	'PRINTER  '
 original_name_ndp:
-	db	'8087     '
+	db	'DOS8087  '
 original_name_suspend:
-	db	'SUSPEND  '
+	db	'DOSUSPND '
 original_name_rem:
 	db	'REM      '
 original_name_sys:
 	db	'SYS      '
 original_name_pause:
 	db	'PAUSE    '
-original_name_del:
-	db	'DEL      '
-original_name_rename:
-	db	'RENAME   '
-original_erase_command:
-	db	'ERASE.EXE'
 original_command_separator:
 	db	' '
 original_on:
