@@ -1,6 +1,6 @@
-# PUT / GET / REDIR: Console I/O Redirection for Concurrent CP/M-86
+# PUT / GET / RDR: Console I/O Redirection for Concurrent CP/M-86
 
-Comprehensive architecture, syntax specification, and implementation plan for Digital Research bracket-style console input, output, and dual redirection utilities (`PUT`, `GET`, and `REDIR`) in Concurrent CP/M-86.
+Comprehensive architecture, syntax specification, and implementation plan for Digital Research bracket-style console input, output, and dual redirection utilities (`PUT`, `GET`, and `RDR`) in Concurrent CP/M-86.
 
 ---
 
@@ -12,9 +12,9 @@ The bracket prefix `[...]` cleanly separates the redirection parameters from the
 
 ### Flag Conventions:
 * **`A`** : **Append** to output file instead of overwriting.
-* **`E`** : **Echo** to screen (applies to both streams in `REDIR`, or standard echo in `PUT`/`GET`).
-* **`EO`**: **Echo Output** to screen only (in `PUT` and `REDIR`).
-* **`EI`**: **Echo Input** to screen only (in `GET` and `REDIR`).
+* **`E`** : **Echo** to screen (applies to both streams in `RDR`, or standard echo in `PUT`/`GET`).
+* **`EO`**: **Echo Output** to screen only (in `PUT` and `RDR`).
+* **`EI`**: **Echo Input** to screen only (in `GET` and `RDR`).
 
 ---
 
@@ -55,21 +55,21 @@ Feeds sequential input from a text file into console input (`BDOS 1, 6, 10` and 
 
 ---
 
-### C. `REDIR.CMD` (Unified Dual Redirection / `<` and `>`)
+### C. `RDR.CMD` (Unified Dual Redirection / `<` and `>`)
 
 Simultaneously redirects console input and output for a single child process.
 
 * **Syntax:**
   ```text
-  REDIR [infile, outfile{,flags}] command_line
+  RDR [infile, outfile{,flags}] command_line
   ```
 * **Examples:**
   ```text
-  A>REDIR [SCRIPT.IN, BUILD.LOG] ED MYFILE.TXT
-  A>REDIR [COMMANDS.DAT, PIP.LOG, EO] PIP
-  A>REDIR [SCRIPT.IN, ED.LOG, EI] ED MYFILE.TXT
-  A>REDIR [NEXTCMD.IN, MASTER.LOG, A, EO] PIP
-  A>REDIR [TEST.IN, TEST.LOG, A, E] TESTSUITE
+  A>RDR [SCRIPT.IN, BUILD.LOG] ED MYFILE.TXT
+  A>RDR [COMMANDS.DAT, PIP.LOG, EO] PIP
+  A>RDR [SCRIPT.IN, ED.LOG, EI] ED MYFILE.TXT
+  A>RDR [NEXTCMD.IN, MASTER.LOG, A, EO] PIP
+  A>RDR [TEST.IN, TEST.LOG, A, E] TESTSUITE
   ```
 
 ---
@@ -77,7 +77,7 @@ Simultaneously redirects console input and output for a single child process.
 ## 2. Technical Architecture & Concurrency Rules
 
 ### A. Concurrency Isolation (Virtual Console & Subchildren)
-Overwriting `INT E0h` globally in real mode would affect background tasks and other virtual consoles. `PUT`, `GET`, and `REDIR` ensure safety through two fields in `SYSDAT` and process descriptors:
+Overwriting `INT E0h` globally in real mode would affect background tasks and other virtual consoles. `PUT`, `GET`, and `RDR` ensure safety through two fields in `SYSDAT` and process descriptors:
 
 1. **Virtual Console Check:**
    Every process descriptor (`PD`) has a console index `p_cns` (`PD + 24h` / `SYSDAT:[0068h]->p_cns`).
@@ -99,44 +99,44 @@ The parent/child execution flow follows the standard `cpm86-make` / `execproc.c`
 sequenceDiagram
     autonumber
     actor User
-    participant REDIR as REDIR.CMD (Parent)
+    participant RDR as RDR.CMD (Parent)
     participant Kernel as BDOS (SUP/RTM)
     participant Child as Child / Subchild Process
     participant DiskIn as Input File
     participant DiskOut as Output File
 
-    User->>REDIR: REDIR [IN.DAT, OUT.LOG, A, EO] SUBMIT BUILD
-    REDIR->>REDIR: Parse bracket prefix [IN.DAT, OUT.LOG, A, EO]
-    REDIR->>DiskIn: Open input file (BDOS 15)
-    REDIR->>DiskOut: Open/Seek (Append) or Create output file (BDOS 15/22)
-    REDIR->>REDIR: Install INT E0h interceptor (with console/PD filter)
-    REDIR->>Kernel: Call BDOS 150 (p_cli) with child command line
-    Note over Kernel,REDIR: p_cli transfers console ownership to child; parent loses console
-    REDIR->>Kernel: Call BDOS 140 (p_attach) to wait for child
-    Note over REDIR,Kernel: Parent blocks (sleeps) until child & subchildren release console
+    User->>RDR: RDR [IN.DAT, OUT.LOG, A, EO] SUBMIT BUILD
+    RDR->>RDR: Parse bracket prefix [IN.DAT, OUT.LOG, A, EO]
+    RDR->>DiskIn: Open input file (BDOS 15)
+    RDR->>DiskOut: Open/Seek (Append) or Create output file (BDOS 15/22)
+    RDR->>RDR: Install INT E0h interceptor (with console/PD filter)
+    RDR->>Kernel: Call BDOS 150 (p_cli) with child command line
+    Note over Kernel,RDR: p_cli transfers console ownership to child; parent loses console
+    RDR->>Kernel: Call BDOS 140 (p_attach) to wait for child
+    Note over RDR,Kernel: Parent blocks (sleeps) until child & subchildren release console
 
     loop While Child / Subchildren Run
         Child->>Kernel: INT E0h (BDOS 1/6/10: Console In or 2/6/9: Console Out)
-        Kernel->>REDIR: Filter matches active console & child PD
+        Kernel->>RDR: Filter matches active console & child PD
         alt Console Input Request
-            REDIR->>DiskIn: Read sector & supply character (BDOS 20)
+            RDR->>DiskIn: Read sector & supply character (BDOS 20)
             opt If EI or E set
-                REDIR->>Kernel: Echo input char to screen (XIOS)
+                RDR->>Kernel: Echo input char to screen (XIOS)
             end
         else Console Output Request
-            REDIR->>DiskOut: Buffer & write sector (BDOS 21)
+            RDR->>DiskOut: Buffer & write sector (BDOS 21)
             opt If EO or E set
-                REDIR->>Kernel: Echo output char to screen (XIOS)
+                RDR->>Kernel: Echo output char to screen (XIOS)
             end
         end
     end
 
     Child->>Kernel: Child exits & releases console (BDOS 143)
-    Kernel-->>REDIR: p_attach unblocks; control returns to REDIR.CMD
-    REDIR->>DiskOut: Flush final sector (Ctrl-Z padded) & Close file (BDOS 16)
-    REDIR->>DiskIn: Close input file (BDOS 16)
-    REDIR->>REDIR: Restore original INT E0h vector
-    REDIR->>User: Return to prompt
+    Kernel-->>RDR: p_attach unblocks; control returns to RDR.CMD
+    RDR->>DiskOut: Flush final sector (Ctrl-Z padded) & Close file (BDOS 16)
+    RDR->>DiskIn: Close input file (BDOS 16)
+    RDR->>RDR: Restore original INT E0h vector
+    RDR->>User: Return to prompt
 ```
 
 1. **`p_cli` (BDOS 150):** Submits the child command line. The kernel supervisor parses the `.CMD`, allocates child memory, sets child priority (`p_pri = 200`), transfers console ownership to the child, and starts the child.
@@ -164,7 +164,7 @@ commands/putget/
 ├── Makefile       # Standard build rules (cpm86_asm86 + cpm86_gencmd)
 ├── put.a86        # Output redirection command (PUT [file,flags] cmd)
 ├── get.a86        # Input redirection command (GET [file,flags] cmd)
-├── redir.a86      # Unified input/output redirection (REDIR [in,out,flags] cmd)
+├── rdr.a86      # Unified input/output redirection (RDR [in,out,flags] cmd)
 └── README.md      # Architecture, specification, and design documentation
 ```
 
@@ -198,12 +198,12 @@ commands/putget/
   - Handle screen echo if `E` or `EI` set.
 - [ ] **Execution & Cleanup:** Launch child via `BDOS 150`, wait via `BDOS 140`, close file, restore vectors.
 
-### Phase 4: `REDIR.CMD` (Unified Dual Redirection)
+### Phase 4: `RDR.CMD` (Unified Dual Redirection)
 - [ ] Dual-parser: parse `[infile, outfile, flags]`.
 - [ ] Combine input reader and output accumulator.
 - [ ] Support `A`, `EI`, `EO`, and `E` flag matrix.
 
 ### Phase 5: Help & Media Integration
-- [ ] Update [`commands/help/help.dat`](commands/help/help.dat) with `///1PUT`, `///1GET`, and `///1REDIR` entries.
+- [ ] Update [`commands/help/help.dat`](commands/help/help.dat) with `///1PUT`, `///1GET`, and `///1RDR` entries.
 - [ ] Package tools into [`media/Makefile`](media/Makefile).
 - [ ] Full regression testing under QEMU / PCE.

@@ -19,5 +19,7 @@ clicb:
 clicb_net           db 0
 clicb_cmd           rb 128
 
+hook_stack         rb 512
+hook_stack_top      equ offset $
 stack_space         rb 512
 stack_top           equ offset $

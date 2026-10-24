@@ -1,5 +1,5 @@
 ; =============================================================================
-; PUTGET.LIB - Unified Engine for CP/M-86 I/O Redirection (PUT, GET, REDIR)
+; PUTGET.LIB - Unified Engine for CP/M-86 I/O Redirection (PUT, GET, RDR)
 ;
 ; Data segment layout (see putget.dat): each tool declares
 ;     dseg / org 100h / <its messages> / include putget.dat
@@ -369,6 +369,19 @@ unhook_int_e0:
 ; INT E0h Interception Hook (resides in CSEG)
 ; =============================================================================
 int_e0_hook:
+if debug
+    push    bx                          ; DEBUG: log CL of every call
+    mov     bl, cs:dbg_n
+    cmp     bl, 80
+    jae     dbg_skip
+    xor     bh, bh
+    mov     cs:dbg_log[bx], cl
+    mov     cs:dbg_log+1[bx], dl
+    inc     cs:dbg_n
+    inc     cs:dbg_n
+dbg_skip:
+    pop     bx
+endif
     cmp     cs:in_interceptor, 0
     jne     pass_kernel
 
@@ -444,10 +457,23 @@ chk_constat:
     je      pass_kernel
     jmp     trap_constat
 
+; Common exit: back to the caller's stack, return to the child
+hook_exit:
+    cli
+    mov     ss, cs:save_ss
+    mov     sp, cs:save_sp
+    iret
+
 ; =============================================================================
 ; Trap BDOS Function 2: Console Output
 ; =============================================================================
 trap_conout:
+    cli
+    mov     cs:save_sp, sp
+    mov     cs:save_ss, ss
+    mov     ss, cs:my_dseg              ; run on our own stack, not the child's
+    mov     sp, offset hook_stack_top
+    sti
     push    ax
     push    bx
     push    cx
@@ -472,12 +498,18 @@ trap_conout:
     pop     cx
     pop     bx
     pop     ax
-    iret
+    jmp     hook_exit
 
 ; =============================================================================
 ; Trap BDOS Function 9: Print String
 ; =============================================================================
 trap_prtstr:
+    cli
+    mov     cs:save_sp, sp
+    mov     cs:save_ss, ss
+    mov     ss, cs:my_dseg              ; run on our own stack, not the child's
+    mov     sp, offset hook_stack_top
+    sti
     push    ax
     push    bx
     push    cx
@@ -510,12 +542,18 @@ prtstr_done:
     pop     cx
     pop     bx
     pop     ax
-    iret
+    jmp     hook_exit
 
 ; =============================================================================
 ; Trap BDOS Function 1: Console Input
 ; =============================================================================
 trap_conin:
+    cli
+    mov     cs:save_sp, sp
+    mov     cs:save_ss, ss
+    mov     ss, cs:my_dseg              ; run on our own stack, not the child's
+    mov     sp, offset hook_stack_top
+    sti
     push    bx
     push    cx
     push    dx
@@ -544,12 +582,18 @@ conin_done:
     pop     dx
     pop     cx
     pop     bx
-    iret
+    jmp     hook_exit
 
 ; =============================================================================
 ; Trap BDOS Function 11: Get Console Status
 ; =============================================================================
 trap_constat:
+    cli
+    mov     cs:save_sp, sp
+    mov     cs:save_ss, ss
+    mov     ss, cs:my_dseg              ; run on our own stack, not the child's
+    mov     sp, offset hook_stack_top
+    sti
     push    bx
     push    cx
     push    dx
@@ -574,12 +618,18 @@ constat_done:
     pop     dx
     pop     cx
     pop     bx
-    iret
+    jmp     hook_exit
 
 ; =============================================================================
 ; Trap BDOS Function 10: Read Console Buffer
 ; =============================================================================
 trap_readbuf:
+    cli
+    mov     cs:save_sp, sp
+    mov     cs:save_ss, ss
+    mov     ss, cs:my_dseg              ; run on our own stack, not the child's
+    mov     sp, offset hook_stack_top
+    sti
     push    ax
     push    bx
     push    cx
@@ -643,7 +693,7 @@ readbuf_eol:
     pop     cx
     pop     bx
     pop     ax
-    iret
+    jmp     hook_exit
 
 ; =============================================================================
 ; Read next 128-byte record of the input file
@@ -904,3 +954,48 @@ sysdat_seg          dw 0
 old_int_e0          dw 0, 0
 saved_dma_off       dw 0
 saved_dma_seg       dw 0
+save_sp             dw 0
+save_ss             dw 0
+
+if debug
+; DEBUG (set debug equ 1 in putget.def) -----------------------------------------------------------
+dbg_n               db 0
+dbg_log             rb 82
+
+dbg_dump:
+    mov     al, '#'
+    call    dbg_ch
+    xor     bx, bx
+dd_loop:
+    cmp     bl, cs:dbg_n
+    jae     dd_done
+    mov     al, cs:dbg_log[bx]
+    push    bx
+    call    dbg_hex
+    mov     al, ' '
+    call    dbg_ch
+    pop     bx
+    inc     bx
+    jmp     dd_loop
+dd_done:
+    ret
+
+dbg_hex:
+    push    ax
+    mov     cl, 4
+    shr     al, cl
+    call    dbg_nib
+    pop     ax
+    and     al, 0fh
+dbg_nib:
+    cmp     al, 10
+    jb      dn1
+    add     al, 7
+dn1:
+    add     al, '0'
+dbg_ch:
+    mov     dl, al
+    mov     cl, f_conout
+    int     bdos
+    ret
+endif

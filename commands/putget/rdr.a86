@@ -1,6 +1,6 @@
-title 'REDIR - Concurrent CP/M-86 Dual Console I/O Redirection'
+title 'RDR - Concurrent CP/M-86 Dual Console I/O Redirection'
 ;
-; Syntax: REDIR [infile,outfile{,flags}] command_line
+; Syntax: RDR [infile,outfile{,flags}] command_line
 ; Flags:
 ;   A  = Append to existing output file
 ;   EI = Echo input characters to screen
@@ -68,7 +68,7 @@ print_error_str:
     ret
 
 ; =============================================================================
-; REDIR Parser: [infile,outfile{,flags}]
+; RDR Parser: [infile,outfile{,flags}]
 ; =============================================================================
 parse_redir_cmdline:
     call    extract_bracket_and_cmd     ; SI -> bracket_buf
@@ -186,11 +186,11 @@ p_ok:
 dseg
 org 100h
 
-msg_require_ccpm    db 'REDIR requires Concurrent CP/M-86 3.1',13,10,'$'
-msg_syntax          db 'Syntax: REDIR [infile,outfile{,A}{,E}{,EI}{,EO}] command_line',13,10,'$'
-msg_open_err        db 'REDIR: Unable to open input file',13,10,'$'
-msg_create_err      db 'REDIR: Unable to create or open output file',13,10,'$'
-msg_cli_err         db 'REDIR: CLI command execution failed',13,10,'$'
+msg_require_ccpm    db 'RDR requires Concurrent CP/M-86 3.1',13,10,'$'
+msg_syntax          db 'Syntax: RDR [infile,outfile{,A}{,E}{,EI}{,EO}] command_line',13,10,'$'
+msg_open_err        db 'RDR: Unable to open input file',13,10,'$'
+msg_create_err      db 'RDR: Unable to create or open output file',13,10,'$'
+msg_cli_err         db 'RDR: CLI command execution failed',13,10,'$'
 
     include putget.dat
 

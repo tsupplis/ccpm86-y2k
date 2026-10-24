@@ -1,8 +1,9 @@
 ; =============================================================================
-; PUTGET.DEF - Unified Definitions for PUT, GET, and REDIR
+; PUTGET.DEF - Unified Definitions for PUT, GET, and RDR
 ; =============================================================================
 
 bdos            equ 0e0h
+debug           equ 0           ; 1 = log BDOS calls seen by the hook, dump at exit (PUT)
 
 ; BDOS Functions
 f_exit          equ 0

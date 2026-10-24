@@ -32,7 +32,7 @@ TOOLS_COMMANDS = ../commands/asm86/asm86.cmd ../commands/ddt86/ddt86.cmd \
 
 # Extension disk: console redirection and DREDIX.
 EXT_COMMANDS = ../commands/putget/put.cmd ../commands/putget/get.cmd \
-    ../commands/putget/redir.cmd ../commands/dredix/dredix.cmd
+    ../commands/putget/rdr.cmd ../commands/dredix/dredix.cmd
 
 MAINT_COMMANDS = ../commands/dskmaint/dskmaint.cmd ../commands/dskmaint/dform.cmd \
     ../commands/disk/dcopy.cmd ../commands/disk/dcomp.cmd \

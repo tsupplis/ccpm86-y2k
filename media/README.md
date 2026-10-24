@@ -9,7 +9,7 @@ Root `make dist` copies the six distribution images to the root alongside
 | `ccpm86.img` | Yes | PC-MODE/PCTMP kernel, core commands, ED, full HELP, BATCH, SYSDISK, SETDEF, PIP |
 | `ccpmnative.img` | Yes | Native TMP/XIOS alternative, with the same core commands and shared kernel fixes |
 | `ccpmtools.img` | No | ASM86, DDT86, GENCMD, GENCCPM, WINDOW/WMENU, sample SUB files, PIP, TOD |
-| `ccpmext.img` | No | PUT, GET, REDIR (console redirection), DREDIX, PIP |
+| `ccpmext.img` | No | PUT, GET, RDR (console redirection), DREDIX, PIP |
 | `ccpmmaint.img` | Yes | PC-MODE kernel, disk maintenance tools, CONFIG, FUNCTION, SETUP, SYSTAT, PIP, TOD |
 | `ccpmdev.img` | No | Native DR development/BASIC tools, Microsoft BASIC CMD, ASM80, HEXCOM, GENTAB |
 | `ccpmdos.img` | No | DOS MASM, LIB, LINK, LINKCMD, LINKEXE, EXE2BIN and Microsoft BASIC COM |
@@ -78,7 +78,7 @@ B>A:SUBMIT CARDDECK
 B>A:SUBMIT CLEAR
 ```
 
-For DREDIX, PUT, GET and REDIR, mount `ccpmext.img` in B: and run e.g. `B:DREDIX`.
+For DREDIX, PUT, GET and RDR, mount `ccpmext.img` in B: and run e.g. `B:DREDIX`.
 Mount `ccpmdev.img` as a data disk after booting any system disk.
 `STARTUP.0` runs `A:TOD`; kernel RTC support supplies startup date/time.
 Drive defaults, allocation settings and buffers are in

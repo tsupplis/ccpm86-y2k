@@ -1,7 +1,7 @@
 ASM86=cpm86_asm86
 GENCMD=cpm86_gencmd
 
-TOOLS=put.cmd get.cmd redir.cmd
+TOOLS=put.cmd get.cmd rdr.cmd
 
 all: $(TOOLS)
 

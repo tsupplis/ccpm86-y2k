@@ -44,6 +44,9 @@ run_child:
     call    print_error_str
 
 run_done:
+if debug
+    call    dbg_dump
+endif
     call    flush_and_close_output
     mov     cl, f_exit
     int     bdos
