@@ -1,0 +1,44 @@
+; =============================================================================
+; PUTGET.DEF - Unified Definitions for PUT, GET, and REDIR
+; =============================================================================
+
+bdos            equ 0e0h
+
+; BDOS Functions
+f_exit          equ 0
+f_conin         equ 1
+f_conout        equ 2
+f_rawcon        equ 6
+f_prtstr        equ 9
+f_readbuf       equ 10
+f_constat       equ 11
+f_version       equ 12
+f_open          equ 15
+f_close         equ 16
+f_delete        equ 19
+f_read_seq      equ 20
+f_write_seq     equ 21
+f_make          equ 22
+f_set_dma       equ 26
+f_read_rand     equ 33
+f_write_rand    equ 34
+f_file_size     equ 35
+f_dma_seg       equ 51
+f_dma_get       equ 52
+f_setprior      equ 145
+f_conattach     equ 146
+f_condetach     equ 147
+f_cli           equ 150
+f_parse_fn      equ 152
+f_getdefcon     equ 153
+f_sysdat        equ 154
+f_getpdadr      equ 156
+
+; Process Descriptor Offsets (see kernel/con/pd.def)
+p_prior         equ 0005h
+p_parent        equ 001eh
+p_cns           equ 0020h
+
+; SYSDAT offsets
+sys_active_pd   equ 0068h       ; rlr: first entry is the running process
+int_e0_vec      equ 0380h

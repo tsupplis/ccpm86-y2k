@@ -1,0 +1,197 @@
+title 'REDIR - Concurrent CP/M-86 Dual Console I/O Redirection'
+;
+; Syntax: REDIR [infile,outfile{,flags}] command_line
+; Flags:
+;   A  = Append to existing output file
+;   EI = Echo input characters to screen
+;   EO = Echo output characters to screen
+;   E  = Echo both input and output characters to screen
+;
+
+    include putget.def
+
+cseg
+org 0
+
+start:
+    cli
+    mov     ax, ds
+    mov     ss, ax
+    mov     sp, offset stack_top
+    sti
+    mov     cs:my_dseg, ds
+
+    call    init_environment
+    jnc     env_ok
+    mov     dx, offset msg_require_ccpm
+    jmp     fatal_error
+
+env_ok:
+    call    parse_redir_cmdline
+    jnc     setup_streams
+    mov     dx, offset msg_syntax
+    jmp     fatal_error
+
+setup_streams:
+    call    setup_input_file
+    jnc     setup_out
+    mov     dx, offset msg_open_err
+    jmp     fatal_error
+
+setup_out:
+    call    setup_output_file
+    jnc     run_child
+    mov     dx, offset msg_create_err
+    jmp     fatal_error
+
+run_child:
+    call    execute_child_and_wait
+    jnc     run_done
+    mov     dx, offset msg_cli_err
+    call    print_error_str
+
+run_done:
+    call    close_input_file
+    call    flush_and_close_output
+    mov     cl, f_exit
+    int     bdos
+
+fatal_error:
+    call    print_error_str
+    call    close_input_file
+    mov     cl, f_exit
+    int     bdos
+
+print_error_str:
+    mov     cl, f_prtstr
+    int     bdos
+    ret
+
+; =============================================================================
+; REDIR Parser: [infile,outfile{,flags}]
+; =============================================================================
+parse_redir_cmdline:
+    call    extract_bracket_and_cmd     ; SI -> bracket_buf
+    jnc     p_have_bracket
+p_err:
+    stc
+    ret
+
+p_have_bracket:
+    ; --- Infile ---
+p_skip_in_sp:
+    lodsb
+    cmp     al, ' '
+    je      p_skip_in_sp
+    cmp     al, 9
+    je      p_skip_in_sp
+    or      al, al
+    jz      p_err
+    dec     si
+
+    mov     di, offset source_fcb
+    call    parse_filename
+    jc      p_err
+
+p_find_comma:
+    lodsb
+    or      al, al
+    jz      p_err
+    cmp     al, ' '
+    je      p_find_comma
+    cmp     al, 9
+    je      p_find_comma
+    cmp     al, ','
+    je      p_skip_out_sp
+    dec     si                          ; parser already consumed the comma
+
+    ; --- Outfile ---
+p_skip_out_sp:
+    lodsb
+    cmp     al, ' '
+    je      p_skip_out_sp
+    cmp     al, 9
+    je      p_skip_out_sp
+    or      al, al
+    jz      p_err
+    dec     si
+
+    mov     di, offset target_fcb
+    call    parse_filename
+    jc      p_err
+
+p_flags_loop:
+    lodsb
+    or      al, al
+    jz      p_ok
+    cmp     al, ','
+    je      p_flags_loop
+    cmp     al, ' '
+    je      p_flags_loop
+    cmp     al, 9
+    je      p_flags_loop
+
+    cmp     al, 'a'
+    je      set_flg_a
+    cmp     al, 'A'
+    je      set_flg_a
+
+    cmp     al, 'e'
+    je      chk_flg_e
+    cmp     al, 'E'
+    je      chk_flg_e
+    jmp     p_flags_loop
+
+set_flg_a:
+    mov     cs:flag_append, 1
+    jmp     p_flags_loop
+
+chk_flg_e:
+    cmp     byte ptr [si], 'i'
+    je      set_flg_ei
+    cmp     byte ptr [si], 'I'
+    je      set_flg_ei
+    cmp     byte ptr [si], 'o'
+    je      set_flg_eo
+    cmp     byte ptr [si], 'O'
+    je      set_flg_eo
+
+    ; Bare 'E' -> Echo both in and out
+    mov     cs:flag_echo_in, 1
+    mov     cs:flag_echo_out, 1
+    jmp     p_flags_loop
+
+set_flg_ei:
+    inc     si
+    mov     cs:flag_echo_in, 1
+    jmp     p_flags_loop
+
+set_flg_eo:
+    inc     si
+    mov     cs:flag_echo_out, 1
+    jmp     p_flags_loop
+
+p_ok:
+    clc
+    ret
+
+; =============================================================================
+; Shared Engine (CSEG & DSEG)
+; =============================================================================
+    include putget.lib
+
+; =============================================================================
+; Tool-Specific Messages
+; =============================================================================
+dseg
+org 100h
+
+msg_require_ccpm    db 'REDIR requires Concurrent CP/M-86 3.1',13,10,'$'
+msg_syntax          db 'Syntax: REDIR [infile,outfile{,A}{,E}{,EI}{,EO}] command_line',13,10,'$'
+msg_open_err        db 'REDIR: Unable to open input file',13,10,'$'
+msg_create_err      db 'REDIR: Unable to create or open output file',13,10,'$'
+msg_cli_err         db 'REDIR: CLI command execution failed',13,10,'$'
+
+    include putget.dat
+
+end

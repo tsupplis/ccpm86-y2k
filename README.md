@@ -62,6 +62,7 @@ and verification details, and [distributions](#distributions) for all six disks.
 Alongside PC-MODE, the current version includes:
 - CP/M Plus mapped and direction keys command line recall and editing,
 - CP/M Plus setdef style configurability
+- CP/M Plus style Input/Ouput with put/get/redir commands
 - Support for CGA, EGA modes even on VGA card,
 - Y2K compliance,
 - CLIs for floppy copy, format and more
@@ -123,7 +124,8 @@ See `HELP SETDEF` and [Patches](patches.md) for details and limitations.
 | --- | --- | --- |
 | `ccpm86.img` | Yes | PC-MODE/PCTMP kernel, core commands, ED, full HELP, BATCH, SYSDISK, SETDEF, PIP |
 | `ccpmnative.img` | Yes | Native TMP/XIOS alternative, with the same core commands and shared kernel fixes |
-| `ccpmtools.img` | No | DREDIX, ASM86, DDT86, GENCMD, GENCCPM, WINDOW/WMENU, sample SUB files, PIP, TOD |
+| `ccpmtools.img` | No | ASM86, DDT86, GENCMD, GENCCPM, WINDOW/WMENU, sample SUB files, PIP, TOD |
+| `ccpmext.img` | No | PUT, GET, REDIR (console redirection), DREDIX, PIP |
 | `ccpmmaint.img` | Yes | PC-MODE kernel, disk maintenance tools, CONFIG, FUNCTION, SETUP, SYSTAT, PIP, TOD |
 | `ccpmdev.img` | No | Native DR development/BASIC tools, Microsoft BASIC CMD, ASM80, HEXCOM, GENTAB |
 | `ccpmdos.img` | No | DOS MASM, LIB, LINK, LINKCMD, LINKEXE, EXE2BIN and Microsoft BASIC COM |
@@ -146,7 +148,7 @@ The full HELP is on the main disk; WINDOW and WMENU are on the tools disk.
 Window layouts: `CARDDECK.SUB`, `CLEAR.SUB`, `GLASS.SUB` and `WORDPROC.SUB`.
 The [source-built boot track](boot/README.md) reproduces all 4,096 bytes of the original.
 
-## Tools
+## Commands
 
 Format: [cpm86-kernel](../cpm86-kernel/README.md). **3.1** = rebuildable sources; SYSDISK: byte-identical CMD plus TMP built-in.
 

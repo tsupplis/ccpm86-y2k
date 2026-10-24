@@ -5,7 +5,7 @@ CPMCP = cpmcp -f $(FORMAT)
 
 .PHONY: all test check check-media check-qemu clean
 .DELETE_ON_ERROR:
-IMAGES = ccpm86.img ccpmtools.img ccpmdev.img ccpmmaint.img ccpmnative.img ccpmdos.img
+IMAGES = ccpm86.img ccpmtools.img ccpmext.img ccpmdev.img ccpmmaint.img ccpmnative.img ccpmdos.img
 all: $(IMAGES)
 
 SYSTEM_COMMANDS = ../commands/chset/chset.cmd ../commands/date/date.cmd \
@@ -27,8 +27,12 @@ WINDOW_SAMPLES = ../base/carddeck.sub ../base/clear.sub \
 
 TOOLS_COMMANDS = ../commands/asm86/asm86.cmd ../commands/ddt86/ddt86.cmd \
     ../commands/gencmd/gencmd.cmd ../commands/genccpm/genccpm.cmd \
-    ../commands/tod/tod.cmd ../commands/dredix/dredix.cmd \
+    ../commands/tod/tod.cmd \
     $(WINDOW_COMMANDS) $(WINDOW_SAMPLES)
+
+# Extension disk: console redirection and DREDIX.
+EXT_COMMANDS = ../commands/putget/put.cmd ../commands/putget/get.cmd \
+    ../commands/putget/redir.cmd ../commands/dredix/dredix.cmd
 
 MAINT_COMMANDS = ../commands/dskmaint/dskmaint.cmd ../commands/dskmaint/dform.cmd \
     ../commands/disk/dcopy.cmd ../commands/disk/dcomp.cmd \
@@ -66,6 +70,15 @@ ccpm86.img: ccpm86base.img startup.0 ../kernel/sysgen/ccpm.sys $(SYSTEM_COMMANDS
 ccpmtools.img: ccpm86base.img $(TOOLS_COMMANDS) ../commands/pip/pip4.cmd Makefile
 	$(TWIST) untwist ccpm86base.img $@.logical.tmp
 	$(CPMCP) $@.logical.tmp $(TOOLS_COMMANDS) 0:
+	$(CPMCP) $@.logical.tmp ../commands/pip/pip4.cmd 0:PIP.CMD
+	cpmls -F -f $(FORMAT) $@.logical.tmp '0:*.*'
+	$(TWIST) twist $@.logical.tmp $@.tmp
+	mv $@.tmp $@
+	$(RM) $@.logical.tmp
+
+ccpmext.img: ccpm86base.img $(EXT_COMMANDS) ../commands/pip/pip4.cmd Makefile
+	$(TWIST) untwist ccpm86base.img $@.logical.tmp
+	$(CPMCP) $@.logical.tmp $(EXT_COMMANDS) 0:
 	$(CPMCP) $@.logical.tmp ../commands/pip/pip4.cmd 0:PIP.CMD
 	cpmls -F -f $(FORMAT) $@.logical.tmp '0:*.*'
 	$(TWIST) twist $@.logical.tmp $@.tmp
@@ -120,6 +133,7 @@ check-media: all
 	    case $$image in \
 	      ccpm86.img) sources='../kernel/sysgen/ccpm.sys startup.0 $(SYSTEM_COMMANDS) $(BASE_SYSTEM_COMMANDS)' ;; \
 	      ccpmtools.img) sources='$(TOOLS_COMMANDS)' ;; \
+	      ccpmext.img) sources='$(EXT_COMMANDS)' ;; \
 	      ccpmdev.img) sources='$(DEV_COMMANDS)' ;; \
 	      ccpmdos.img) sources='$(DOS_COMMANDS)' ;; \
 	      ccpmnative.img) sources='../kernel/sysgen/ccpm-native.sys startup.0 $(SYSTEM_COMMANDS) $(BASE_SYSTEM_COMMANDS)' ;; \

@@ -1,0 +1,906 @@
+; =============================================================================
+; PUTGET.LIB - Unified Engine for CP/M-86 I/O Redirection (PUT, GET, REDIR)
+;
+; Data segment layout (see putget.dat): each tool declares
+;     dseg / org 100h / <its messages> / include putget.dat
+; org 100h keeps the base page (command tail at DS:0080h) intact.
+; =============================================================================
+
+; -----------------------------------------------------------------------------
+; Environment Setup:
+;   - Verify Concurrent CP/M-86 (BDOS 12, same test as SUBMIT)
+;   - Save SYSDAT segment
+;   - Boost priority 1 above parent (preventing console race with TMP)
+;   - Record active virtual console ID
+; Output: CF = 0 if OK, CF = 1 if unsupported OS. ES = DS on return.
+; -----------------------------------------------------------------------------
+init_environment:
+    mov     cl, f_version
+    int     bdos
+    and     bh, 0fdh                    ; strip network bit
+    cmp     bh, 11h                     ; MP/M-86
+    je      init_env_ver_ok
+    cmp     bh, 14h                     ; Concurrent CP/M-86
+    je      init_env_ver_ok
+    stc
+    ret
+
+init_env_ver_ok:
+    ; Obtain running PD address in BX and SYSDAT segment in ES
+    mov     cl, f_getpdadr
+    int     bdos
+    mov     cs:sysdat_seg, es
+
+    ; Boost priority to 1 better than parent (as in SUBMIT)
+    mov     bx, es:p_parent[bx]
+    cmp     bx, 0
+    jne     init_have_parent
+    mov     dx, 197                     ; Default: better than TMP (200)
+    jmp     init_do_setprior
+
+init_have_parent:
+    xor     dx, dx
+    mov     dl, es:p_prior[bx]
+    dec     dx
+    cmp     dx, 64
+    jae     init_do_setprior
+    mov     dx, 64                      ; Don't compete with system processes
+
+init_do_setprior:
+    mov     cl, f_setprior
+    int     bdos
+
+    ; Record our virtual console number
+    mov     cl, f_getdefcon
+    int     bdos
+    mov     cs:my_console, al
+
+    push    ds
+    pop     es                          ; ES = DS again
+    clc
+    ret
+
+; -----------------------------------------------------------------------------
+; Parse a file name into an FCB with BDOS 152
+; Input : SI -> 0-terminated string, DI -> 36-byte FCB
+; Output: SI -> char following the name (0 if end of string), CF = 1 on error
+; -----------------------------------------------------------------------------
+parse_filename:
+    mov     parse_param_str, si
+    mov     parse_param_fcb, di
+    push    es
+    push    ds
+    pop     es
+    cld
+    mov     cx, 36
+    xor     al, al
+    rep     stosb                       ; clear FCB
+    pop     es
+    mov     dx, offset parse_param_block
+    mov     cl, f_parse_fn
+    int     bdos
+    mov     si, bx
+    cmp     bx, 0ffffh
+    je      parse_fn_err
+    or      bx, bx
+    jnz     parse_fn_ok
+    mov     si, offset zero_byte        ; BX = 0: end of string
+parse_fn_ok:
+    clc
+    ret
+parse_fn_err:
+    stc
+    ret
+
+; -----------------------------------------------------------------------------
+; DMA helpers. Our buffers live in our data segment, but the hook runs in the
+; context of the child process, whose DMA address/segment must be preserved.
+; dma_enter: DX = offset of our buffer, DS = our data segment
+; -----------------------------------------------------------------------------
+dma_enter:
+    push    dx
+    mov     cl, f_dma_get
+    int     bdos                        ; ES:BX = caller DMA
+    mov     cs:saved_dma_off, bx
+    mov     cs:saved_dma_seg, es
+    mov     dx, ds
+    mov     cl, f_dma_seg
+    int     bdos
+    pop     dx
+    mov     cl, f_set_dma
+    int     bdos
+    ret
+
+dma_leave:
+    mov     dx, cs:saved_dma_seg
+    mov     cl, f_dma_seg
+    int     bdos
+    mov     dx, cs:saved_dma_off
+    mov     cl, f_set_dma
+    int     bdos
+    ret
+
+; -----------------------------------------------------------------------------
+; Setup Input Redirection Stream
+; Output: CF = 0 on success, CF = 1 on file open error
+; -----------------------------------------------------------------------------
+setup_input_file:
+    mov     dx, offset source_fcb
+    mov     cl, f_open
+    int     bdos
+    cmp     al, 0ffh
+    jne     in_file_opened
+    stc
+    ret
+
+in_file_opened:
+    mov     cs:in_sector_index, 128     ; Force initial sector read
+    mov     cs:eof_reached, 0
+    mov     cs:in_file_open, 1
+    mov     cs:redir_in_active, 1
+    clc
+    ret
+
+; -----------------------------------------------------------------------------
+; Close Input File
+; -----------------------------------------------------------------------------
+close_input_file:
+    cmp     cs:in_file_open, 0
+    je      close_in_done
+    mov     dx, offset source_fcb
+    mov     cl, f_close
+    int     bdos
+close_in_done:
+    ret
+
+; -----------------------------------------------------------------------------
+; Setup Output Redirection Stream (records are written with random writes;
+; the record number is kept in target_fcb r0/r1)
+; Output: CF = 0 on success, CF = 1 on file creation/open error
+; -----------------------------------------------------------------------------
+setup_output_file:
+    mov     dx, offset out_sector_buffer
+    mov     cl, f_set_dma
+    int     bdos
+
+    cmp     cs:flag_append, 0
+    jne     out_setup_append
+
+    ; --- Overwrite Mode ---
+    mov     dx, offset target_fcb
+    mov     cl, f_delete
+    int     bdos
+
+    mov     dx, offset target_fcb
+    mov     cl, f_make
+    int     bdos
+    cmp     al, 0ffh
+    jne     out_file_ready
+    stc
+    ret
+
+out_setup_append:
+    ; --- Append Mode ---
+    mov     dx, offset target_fcb
+    mov     cl, f_open
+    int     bdos
+    cmp     al, 0ffh
+    jne     out_seek_eof
+
+    ; File does not exist yet: create it
+    mov     dx, offset target_fcb
+    mov     cl, f_make
+    int     bdos
+    cmp     al, 0ffh
+    jne     out_file_ready
+    stc
+    ret
+
+out_seek_eof:
+    mov     dx, offset target_fcb
+    mov     cl, f_file_size
+    int     bdos
+
+    mov     ax, word ptr target_fcb+33  ; r0, r1 = number of records
+    or      ax, ax
+    jz      out_file_ready
+
+    dec     ax
+    mov     word ptr target_fcb+33, ax
+    mov     byte ptr target_fcb+35, 0
+    mov     dx, offset target_fcb
+    mov     cl, f_read_rand
+    int     bdos
+    or      al, al
+    jnz     out_file_ready
+
+    ; Scan last record for Ctrl-Z
+    mov     si, offset out_sector_buffer
+    xor     cx, cx
+out_scan_eof:
+    cmp     cx, 128
+    jae     out_eof_found
+    cmp     byte ptr [si], 1ah
+    je      out_eof_found
+    inc     si
+    inc     cx
+    jmp     out_scan_eof
+
+out_eof_found:
+    cmp     cx, 128
+    jb      out_store_index
+    inc     word ptr target_fcb+33      ; last record is full: start next one
+    xor     cx, cx
+out_store_index:
+    mov     cs:out_sector_index, cl
+
+out_file_ready:
+    mov     cs:redir_out_active, 1
+    clc
+    ret
+
+; -----------------------------------------------------------------------------
+; Flush Partial Output Sector and Close Output File
+; -----------------------------------------------------------------------------
+flush_and_close_output:
+    cmp     cs:redir_out_active, 0
+    je      flush_out_done
+
+    xor     cx, cx
+    mov     cl, cs:out_sector_index
+    or      cl, cl
+    jz      close_out_fcb
+
+    mov     si, offset out_sector_buffer
+    add     si, cx
+pad_out_loop:
+    cmp     cx, 128
+    jae     pad_out_done
+    mov     byte ptr [si], 1ah
+    inc     si
+    inc     cx
+    jmp     pad_out_loop
+
+pad_out_done:
+    call    write_out_sector
+
+close_out_fcb:
+    mov     dx, offset target_fcb
+    mov     cl, f_close
+    int     bdos
+
+flush_out_done:
+    ret
+
+; -----------------------------------------------------------------------------
+; Execute Child Command and Wait for Child Process Hierarchy
+; Output: CF = 0 on success, CF = 1 on CLI execution failure
+; -----------------------------------------------------------------------------
+execute_child_and_wait:
+    call    hook_int_e0
+
+    ; Execute Child Command via BDOS 150 (p_cli)
+    mov     dx, offset clicb
+    mov     cl, f_cli
+    int     bdos
+    or      bx, bx
+    jnz     exec_cli_err
+
+    ; Wait for Child & Subchildren to exit by attaching console (BDOS 146)
+    mov     cl, f_conattach
+    int     bdos
+
+    call    unhook_int_e0
+    clc
+    ret
+
+exec_cli_err:
+    call    unhook_int_e0
+    stc
+    ret
+
+; -----------------------------------------------------------------------------
+; Echo a character to the screen through the real BDOS (hook bypassed)
+; Input: AL = character
+; -----------------------------------------------------------------------------
+echo_screen_char:
+    push    ax
+    push    bx
+    push    cx
+    push    dx
+    push    si
+    push    di
+    push    ds
+    push    es
+
+    mov     dl, al
+    mov     cl, f_conout
+    mov     cs:in_interceptor, 1
+    int     bdos
+    mov     cs:in_interceptor, 0
+
+    pop     es
+    pop     ds
+    pop     di
+    pop     si
+    pop     dx
+    pop     cx
+    pop     bx
+    pop     ax
+    ret
+
+; -----------------------------------------------------------------------------
+; Vector Management: Hook / Unhook INT E0h
+; -----------------------------------------------------------------------------
+hook_int_e0:
+    push    es
+    xor     ax, ax
+    mov     es, ax
+    mov     bx, int_e0_vec
+    cli
+    mov     ax, es:[bx]
+    mov     cs:old_int_e0, ax
+    mov     ax, es:2[bx]
+    mov     cs:old_int_e0 + 2, ax
+
+    mov     ax, offset int_e0_hook
+    mov     es:[bx], ax
+    mov     ax, cs
+    mov     es:2[bx], ax
+    sti
+    pop     es
+    ret
+
+unhook_int_e0:
+    push    es
+    xor     ax, ax
+    mov     es, ax
+    mov     bx, int_e0_vec
+    cli
+    mov     ax, cs:old_int_e0
+    mov     es:[bx], ax
+    mov     ax, cs:old_int_e0 + 2
+    mov     es:2[bx], ax
+    sti
+    pop     es
+    ret
+
+; =============================================================================
+; INT E0h Interception Hook (resides in CSEG)
+; =============================================================================
+int_e0_hook:
+    cmp     cs:in_interceptor, 0
+    jne     pass_kernel
+
+    push    es
+    push    si
+    push    bx
+
+    mov     bx, cs:sysdat_seg
+    mov     es, bx
+    mov     bx, sys_active_pd
+    mov     si, es:[bx]
+
+    ; Check console assignment of the running process
+    mov     bl, es:p_cns[si]
+    cmp     bl, cs:my_console
+
+    pop     bx
+    pop     si
+    pop     es
+    je      is_my_console
+
+pass_kernel:
+    jmpf    cs:dword ptr old_int_e0
+
+is_my_console:
+    ; Inspect BDOS function number in CL
+    cmp     cl, f_conin
+    jne     chk_conout
+    cmp     cs:redir_in_active, 0
+    je      pass_kernel
+    jmp     trap_conin
+
+chk_conout:
+    cmp     cl, f_conout
+    jne     chk_rawcon
+    cmp     cs:redir_out_active, 0
+    je      pass_kernel
+    jmp     trap_conout
+
+chk_rawcon:
+    cmp     cl, f_rawcon
+    jne     chk_prtstr
+    cmp     dl, 0ffh
+    je      chk_rawcon_in
+    ; Raw output
+    cmp     cs:redir_out_active, 0
+    je      pass_kernel
+    jmp     trap_conout
+
+chk_rawcon_in:
+    cmp     cs:redir_in_active, 0
+    je      pass_kernel
+    jmp     trap_conin
+
+chk_prtstr:
+    cmp     cl, f_prtstr
+    jne     chk_readbuf
+    cmp     cs:redir_out_active, 0
+    je      pass_kernel
+    jmp     trap_prtstr
+
+chk_readbuf:
+    cmp     cl, f_readbuf
+    jne     chk_constat
+    cmp     cs:redir_in_active, 0
+    je      pass_kernel
+    jmp     trap_readbuf
+
+chk_constat:
+    cmp     cl, f_constat
+    jne     pass_kernel
+    cmp     cs:redir_in_active, 0
+    je      pass_kernel
+    jmp     trap_constat
+
+; =============================================================================
+; Trap BDOS Function 2: Console Output
+; =============================================================================
+trap_conout:
+    push    ax
+    push    bx
+    push    cx
+    push    dx
+    push    si
+    push    di
+    push    ds
+    push    es
+
+    mov     ax, cs:my_dseg
+    mov     ds, ax
+    mov     es, ax
+
+    mov     al, dl                      ; AL = character to write
+    call    capture_char
+
+    pop     es
+    pop     ds
+    pop     di
+    pop     si
+    pop     dx
+    pop     cx
+    pop     bx
+    pop     ax
+    iret
+
+; =============================================================================
+; Trap BDOS Function 9: Print String
+; =============================================================================
+trap_prtstr:
+    push    ax
+    push    bx
+    push    cx
+    push    dx
+    push    si
+    push    di
+    push    ds
+    push    es
+
+    mov     cx, ds
+    mov     es, cx                      ; ES:SI -> child string
+    mov     si, dx
+    mov     ax, cs:my_dseg
+    mov     ds, ax
+
+prtstr_loop:
+    mov     al, es:[si]
+    inc     si
+    cmp     al, '$'                     ; CP/M string terminator
+    je      prtstr_done
+    call    capture_char
+    jmp     prtstr_loop
+
+prtstr_done:
+    pop     es
+    pop     ds
+    pop     di
+    pop     si
+    pop     dx
+    pop     cx
+    pop     bx
+    pop     ax
+    iret
+
+; =============================================================================
+; Trap BDOS Function 1: Console Input
+; =============================================================================
+trap_conin:
+    push    bx
+    push    cx
+    push    dx
+    push    si
+    push    di
+    push    ds
+    push    es
+
+    mov     ax, cs:my_dseg
+    mov     ds, ax
+    mov     es, ax
+
+    call    get_next_char
+    jc      conin_done                  ; EOF: AL = 1Ah
+
+    ; Echo if requested
+    cmp     cs:flag_echo_in, 0
+    je      conin_done
+    call    echo_screen_char
+
+conin_done:
+    pop     es
+    pop     ds
+    pop     di
+    pop     si
+    pop     dx
+    pop     cx
+    pop     bx
+    iret
+
+; =============================================================================
+; Trap BDOS Function 11: Get Console Status
+; =============================================================================
+trap_constat:
+    push    bx
+    push    cx
+    push    dx
+    push    si
+    push    di
+    push    ds
+    push    es
+
+    cmp     cs:eof_reached, 0
+    jne     constat_eof
+    mov     al, 0ffh
+    jmp     constat_done
+
+constat_eof:
+    xor     al, al
+
+constat_done:
+    pop     es
+    pop     ds
+    pop     di
+    pop     si
+    pop     dx
+    pop     cx
+    pop     bx
+    iret
+
+; =============================================================================
+; Trap BDOS Function 10: Read Console Buffer
+; =============================================================================
+trap_readbuf:
+    push    ax
+    push    bx
+    push    cx
+    push    dx
+    push    si
+    push    di
+    push    ds
+    push    es
+
+    mov     cx, ds
+    mov     es, cx                      ; ES:DI -> caller buffer
+    mov     di, dx
+    mov     ch, es:[di]                 ; CH = Max length
+    xor     cl, cl                      ; CL = Actual character count
+    inc     di
+    inc     di                          ; ES:DI -> data start
+
+    mov     ax, cs:my_dseg
+    mov     ds, ax                      ; DS -> our data segment
+
+readbuf_loop:
+    cmp     cl, ch
+    jae     readbuf_eol                 ; Max length reached
+
+    call    get_next_char
+    jc      readbuf_eol                 ; EOF reached
+
+    cmp     al, 13                      ; Carriage Return
+    je      readbuf_cr
+    cmp     al, 10                      ; Line Feed
+    je      readbuf_loop                ; Ignore standalone LF
+    cmp     al, 1ah                     ; Ctrl-Z
+    je      readbuf_eol
+
+    mov     es:[di], al
+    inc     di
+    inc     cl
+
+    cmp     cs:flag_echo_in, 0
+    je      readbuf_loop
+    call    echo_screen_char
+    jmp     readbuf_loop
+
+readbuf_cr:
+    cmp     cs:flag_echo_in, 0
+    je      readbuf_eol
+    mov     al, 13
+    call    echo_screen_char
+    mov     al, 10
+    call    echo_screen_char
+
+readbuf_eol:
+    mov     di, dx
+    mov     es:1[di], cl
+
+    pop     es
+    pop     ds
+    pop     di
+    pop     si
+    pop     dx
+    pop     cx
+    pop     bx
+    pop     ax
+    iret
+
+; =============================================================================
+; Read next 128-byte record of the input file
+; Output: CF = 0 on success, CF = 1 on EOF/error.  DS must be our segment.
+; =============================================================================
+read_in_sector:
+    push    bx
+    push    cx
+    push    dx
+    push    si
+    push    di
+    push    ds
+    push    es
+
+    mov     ax, cs:my_dseg
+    mov     ds, ax
+    mov     es, ax
+
+    mov     cs:in_interceptor, 1
+
+    mov     dx, offset in_sector_buffer
+    call    dma_enter
+
+    mov     dx, offset source_fcb
+    mov     cl, f_read_seq
+    int     bdos
+    push    ax
+    call    dma_leave
+    pop     ax
+
+    mov     cs:in_interceptor, 0
+
+    pop     es
+    pop     ds
+    pop     di
+    pop     si
+    pop     dx
+    pop     cx
+    pop     bx
+
+    or      al, al
+    jnz     read_in_fail
+    clc
+    ret
+read_in_fail:
+    stc
+    ret
+
+; =============================================================================
+; Fetch Next Character from Input File (preserves BX, CX; DS = our segment)
+; Output: AL = character, CF = 0 on success, CF = 1 on EOF
+; =============================================================================
+get_next_char:
+    cmp     cs:eof_reached, 0
+    jne     char_is_eof
+
+    cmp     cs:in_sector_index, 128
+    jb      have_in_char
+
+    call    read_in_sector
+    jc      char_is_eof
+    mov     cs:in_sector_index, 0
+
+have_in_char:
+    push    bx
+    push    cx
+    mov     bx, offset in_sector_buffer
+    xor     ch, ch
+    mov     cl, cs:in_sector_index
+    add     bx, cx
+    inc     cs:in_sector_index
+    mov     al, [bx]
+    pop     cx
+    pop     bx
+
+    cmp     al, 1ah
+    je      char_is_eof
+
+    clc
+    ret
+
+char_is_eof:
+    mov     cs:eof_reached, 1
+    mov     cs:redir_in_active, 0       ; revert to keyboard afterwards
+    mov     al, 1ah
+    stc
+    ret
+
+; =============================================================================
+; Capture and Buffer Output Character (DS = our segment)
+; Input: AL = character
+; =============================================================================
+capture_char:
+    push    ax
+
+    cmp     cs:flag_echo_out, 0
+    je      buffer_out_char
+
+    call    echo_screen_char
+
+buffer_out_char:
+    mov     bx, offset out_sector_buffer
+    xor     ch, ch
+    mov     cl, cs:out_sector_index
+    add     bx, cx
+    mov     [bx], al
+    inc     cs:out_sector_index
+
+    cmp     cs:out_sector_index, 128
+    jb      capture_out_done
+
+    call    write_out_sector
+
+capture_out_done:
+    pop     ax
+    ret
+
+; =============================================================================
+; Write 128-byte Output Buffer to Disk (random write, then next record)
+; =============================================================================
+write_out_sector:
+    push    ax
+    push    bx
+    push    cx
+    push    dx
+    push    si
+    push    di
+    push    ds
+    push    es
+
+    mov     ax, cs:my_dseg
+    mov     ds, ax
+    mov     es, ax
+
+    mov     cs:in_interceptor, 1
+
+    mov     dx, offset out_sector_buffer
+    call    dma_enter
+
+    mov     dx, offset target_fcb
+    mov     cl, f_write_rand
+    int     bdos
+    call    dma_leave
+
+    inc     word ptr target_fcb+33
+    mov     cs:out_sector_index, 0
+    mov     cs:in_interceptor, 0
+
+    pop     es
+    pop     ds
+    pop     di
+    pop     si
+    pop     dx
+    pop     cx
+    pop     bx
+    pop     ax
+    ret
+
+; =============================================================================
+; Shared Command Line Parser Helper: Extracts [...] and Child Command Tail
+; Output: SI -> bracket_buf, CF = 0 on success, CF = 1 on error
+; =============================================================================
+extract_bracket_and_cmd:
+    push    ds
+    pop     es                          ; stosb writes to our data segment
+    cld
+    mov     bx, 0080h
+    xor     cx, cx
+    mov     cl, [bx]                    ; Tail length
+    or      cl, cl
+    jnz     have_cmd_tail
+    stc
+    ret
+
+have_cmd_tail:
+    mov     si, 0081h
+
+p_skip_lead:
+    lodsb
+    cmp     al, ' '
+    je      p_skip_lead
+    cmp     al, 9
+    je      p_skip_lead
+    cmp     al, '['
+    je      p_found_bracket
+    stc
+    ret
+
+p_found_bracket:
+    mov     di, offset bracket_buf
+p_copy_bracket:
+    lodsb
+    or      al, al
+    jz      p_bracket_err
+    cmp     al, 13
+    je      p_bracket_err
+    cmp     al, ']'
+    je      p_bracket_closed
+    stosb
+    jmp     p_copy_bracket
+
+p_bracket_err:
+    stc
+    ret
+
+p_bracket_closed:
+    xor     al, al
+    stosb
+
+p_skip_cmd_spaces:
+    lodsb
+    cmp     al, ' '
+    je      p_skip_cmd_spaces
+    cmp     al, 9
+    je      p_skip_cmd_spaces
+    or      al, al
+    jz      p_bracket_err
+    cmp     al, 13
+    je      p_bracket_err
+
+    dec     si
+
+    mov     di, offset clicb_cmd
+p_copy_cmd_loop:
+    lodsb
+    or      al, al
+    jz      p_cmd_copied
+    cmp     al, 13
+    je      p_cmd_copied
+    stosb
+    jmp     p_copy_cmd_loop
+
+p_cmd_copied:
+    mov     byte ptr [di], 0
+    mov     clicb_net, 0
+
+    mov     si, offset bracket_buf
+    clc
+    ret
+
+; =============================================================================
+; Shared CSEG Variables
+; =============================================================================
+my_dseg             dw 0
+my_console          db 0
+in_interceptor      db 0
+redir_in_active     db 0
+redir_out_active    db 0
+in_file_open        db 0
+flag_append         db 0
+flag_echo_in        db 0
+flag_echo_out       db 0
+eof_reached         db 0
+in_sector_index     db 128
+out_sector_index    db 0
+
+sysdat_seg          dw 0
+old_int_e0          dw 0, 0
+saved_dma_off       dw 0
+saved_dma_seg       dw 0

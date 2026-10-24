@@ -684,6 +684,6 @@ if __name__ == '__main__':
     count = data[0x4a]
     assert data[flags:flags + count * 3] == b'\xff' * (count * 3), \
         'GENCCPM generated an invalid RTM flag table'
-    check(MEDIA / 'ccpm86.img', MEDIA / 'ccpmtools.img')
+    check(MEDIA / 'ccpm86.img', MEDIA / 'ccpmext.img')
     check(MEDIA / 'ccpmtools.img', MEDIA / 'ccpm86.img')
     check(MEDIA / 'ccpmmaint.img', MEDIA / 'ccpm86.img')

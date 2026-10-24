@@ -1,0 +1,23 @@
+; =============================================================================
+; PUTGET.DAT - Shared DSEG buffers (included at the end of each tool's DSEG,
+; after its messages, so the data segment is defined only once)
+; =============================================================================
+
+zero_byte           db 0
+bracket_buf         rb 80
+parse_param_block:
+parse_param_str     dw 0
+parse_param_fcb     dw 0
+
+source_fcb          rb 36
+target_fcb          rb 36
+
+in_sector_buffer    rb 128
+out_sector_buffer   rb 128
+
+clicb:
+clicb_net           db 0
+clicb_cmd           rb 128
+
+stack_space         rb 512
+stack_top           equ offset $

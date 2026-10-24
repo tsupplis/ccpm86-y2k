@@ -1,0 +1,135 @@
+title 'GET - Concurrent CP/M-86 Console Input Redirection'
+;
+; Syntax: GET [infile{,flags}] command_line
+; Flags:
+;   E  = Echo input to screen
+;   EI = Echo input to screen
+;
+
+    include putget.def
+
+cseg
+org 0
+
+start:
+    cli
+    mov     ax, ds
+    mov     ss, ax
+    mov     sp, offset stack_top
+    sti
+    mov     cs:my_dseg, ds
+
+    call    init_environment
+    jnc     env_ok
+    mov     dx, offset msg_require_ccpm
+    jmp     fatal_error
+
+env_ok:
+    call    parse_get_cmdline
+    jnc     setup_stream
+    mov     dx, offset msg_syntax
+    jmp     fatal_error
+
+setup_stream:
+    call    setup_input_file
+    jnc     run_child
+    mov     dx, offset msg_open_err
+    jmp     fatal_error
+
+run_child:
+    call    execute_child_and_wait
+    jnc     run_done
+    mov     dx, offset msg_cli_err
+    call    print_error_str
+
+run_done:
+    call    close_input_file
+    mov     cl, f_exit
+    int     bdos
+
+fatal_error:
+    call    print_error_str
+    mov     cl, f_exit
+    int     bdos
+
+print_error_str:
+    mov     cl, f_prtstr
+    int     bdos
+    ret
+
+; =============================================================================
+; GET Parser
+; =============================================================================
+parse_get_cmdline:
+    call    extract_bracket_and_cmd     ; SI -> bracket_buf
+    jc      p_err
+
+p_skip_sp:
+    lodsb
+    cmp     al, ' '
+    je      p_skip_sp
+    cmp     al, 9
+    je      p_skip_sp
+    or      al, al
+    jz      p_err
+    dec     si
+
+    ; Parse infile into source_fcb via BDOS 152
+    mov     di, offset source_fcb
+    call    parse_filename
+    jc      p_err
+
+p_flags_loop:
+    lodsb
+    or      al, al
+    jz      p_ok
+    cmp     al, ','
+    je      p_flags_loop
+    cmp     al, ' '
+    je      p_flags_loop
+    cmp     al, 9
+    je      p_flags_loop
+
+    cmp     al, 'e'
+    je      chk_flg_e
+    cmp     al, 'E'
+    je      chk_flg_e
+    jmp     p_flags_loop
+
+chk_flg_e:
+    mov     cs:flag_echo_in, 1
+    cmp     byte ptr [si], 'i'
+    je      skip_flg_i
+    cmp     byte ptr [si], 'I'
+    je      skip_flg_i
+    jmp     p_flags_loop
+skip_flg_i:
+    inc     si
+    jmp     p_flags_loop
+
+p_ok:
+    clc
+    ret
+p_err:
+    stc
+    ret
+
+; =============================================================================
+; Shared Engine (CSEG & DSEG)
+; =============================================================================
+    include putget.lib
+
+; =============================================================================
+; Tool-Specific Messages
+; =============================================================================
+dseg
+org 100h
+
+msg_require_ccpm    db 'GET requires Concurrent CP/M-86 3.1',13,10,'$'
+msg_syntax          db 'Syntax: GET [infile{,E}{,EI}] command_line',13,10,'$'
+msg_open_err        db 'GET: Unable to open input file',13,10,'$'
+msg_cli_err         db 'GET: CLI command execution failed',13,10,'$'
+
+    include putget.dat
+
+end
