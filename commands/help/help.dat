@@ -1096,8 +1096,9 @@
 
     GET feeds the console input of a program from a text file instead
     of the keyboard.  The infile is read in 128-byte records until a
-    CTRL-Z or the end of the file, after which the program reads the
-    keyboard again.  The program and any programs it starts on this
+    CTRL-Z or the end of the file.  The line read at that point is
+    empty, which ends programs such as PIP; any later input comes from
+    the keyboard.  The program and any programs it starts on this
     virtual console receive the characters; other consoles are not
     affected.
 

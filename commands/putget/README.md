@@ -21,7 +21,7 @@ A>RDR [KEYS.IN,PIP.LOG] PIP
 * **Works for native `.CMD` programs.** Verified in QEMU: overwrite, append, `E`/`EO`, multi-record capture, GET feeding PIP, RDR with an input file and an output log.
 * **DOS programs (`.COM`, `.EXE`) cannot be redirected.** They are launched by PC-MODE (`PCTMP`), not by `p_cli`, and `PCTMP` serves their `INT 21h` console calls itself. It reaches the kernel through a private copy of the `INT E0h` vector saved at its initialisation (`shared_bdos_vector`), so the hook installed here never sees them. `p_cli` also rejects explicit `.COM`/`.EXE` (`e_badftype`). Tested: `PUT [x] prog.exe` and `prog.com` fail with "CLI command execution failed".
 * **Shell built-ins are not redirected** (`DIR`, `TYPE`, `CLS` and the PCTMP built-ins `USER`, `PRINTER`, `DOSMEM`, `DOS8087`, `DOSUSPND`, `REM`, `SYS`, `PAUSE`). Use `SDIR.CMD`, `TYPE.CMD`, etc.
-* **RSPs** (such as `DIR`) are not guaranteed to be captured. This has not been retested after the latest fixes.
+* **RSPs** (such as `DIR`) are not captured. Checked in QEMU: `PUT [D.TXT] DIR B:*.CMD` showed the listing on the screen and left `D.TXT` empty. The cause has not been investigated.
 * **Only the caller's virtual console is affected.** The hook filters on the console number of the running process; it does not track descendants by `p_parent`. Any process on that console is captured while the tool runs.
 
 ## How it works
@@ -42,7 +42,7 @@ Trapped calls, only when the running process's console is ours:
 Details:
 
 * Output is written with random writes (BDOS 34) and a record counter. Screen echo calls BDOS 2 with `in_interceptor` set, so the hook does not capture its own echo.
-* Input is read in 128-byte records. At `1Ah` or end of file the input reverts to the keyboard.
+* Input is read in 128-byte records. At `1Ah` or end of file, `trap_readbuf` returns an empty line, which ends programs that quit on an empty line (PIP does). Any later input call goes to the keyboard. An input file should therefore contain everything the program needs, including its exit. Checked in QEMU: `GET [K.IN] PIP` with one copy line in `K.IN` ran the copy, then PIP exited at the end of the file.
 * `p_cns` is at PD offset `20h` (see `kernel/con/pd.def`).
 
 ## Files
